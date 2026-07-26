@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
@@ -39,7 +39,71 @@ const dataset = {
   object_state: 'active',
 };
 
+function mountItem(page: Page, mountId: number) {
+  const layout = (page.viewportSize()?.width ?? 1280) < 768 ? 'card' : 'row';
+  return page.getByTestId(`vps.storage.mounts.${layout}.${mountId}`);
+}
+
+function mountItemControl(page: Page, mountId: number, control: 'dataset' | 'delete') {
+  const layout = (page.viewportSize()?.width ?? 1280) < 768 ? 'card' : 'row';
+  return page.getByTestId(`vps.storage.mounts.${layout}.${mountId}.${control}`);
+}
+
 test.describe('@smoke VPS storage tab mounts', () => {
+  test('creates a user subdataset from the VPS storage entrypoint', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const childDataset = {
+      ...dataset,
+      id: 11,
+      name: 'storage-child',
+      full_name: 'tank/data/storage-child',
+      parent: { id: 10 },
+      used: 0,
+      referenced: 0,
+      snapshots_count: 0,
+      mount_count: 0,
+      export_count: 0,
+    };
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'user', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET datasets/10': () => dataset,
+        'GET datasets/11': () => childDataset,
+        'GET ip_addresses': () => ({ ip_addresses: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [], _meta: { total_count: 0 } }),
+        'GET vpses/123/mounts': () => ({ mounts: [] }),
+        'POST datasets': () => ({ dataset: childDataset }),
+      },
+    });
+
+    await page.goto('/app/vps/123/storage');
+
+    await page.getByTestId('vps.storage.root_dataset.create_subdataset').click();
+
+    const createModal = page.getByTestId('dataset.manage.create.modal');
+    await expect(createModal).toBeVisible();
+    await expect(page).toHaveURL(/\/app\/datasets\/10$/);
+    await createModal.getByTestId('dataset.manage.create.name').fill('storage-child');
+
+    const createRequest = page.waitForRequest(
+      (request) => request.method() === 'POST' && request.url().includes('/api/v7.0/datasets')
+    );
+    await createModal.getByTestId('dataset.manage.create.submit').click();
+
+    expect((await createRequest).postDataJSON()).toEqual({
+      dataset: {
+        name: 'storage-child',
+        dataset: 10,
+        automount: true,
+      },
+    });
+    await expect(page).toHaveURL(/\/app\/datasets\/11$/);
+    await expect(page.getByTestId('dataset.header')).toContainText('tank/data/storage-child');
+  });
+
   test('@workflow-matrix creates mount by finding dataset and posting', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
@@ -115,10 +179,10 @@ test.describe('@smoke VPS storage tab mounts', () => {
     await expect(page.getByTestId('vps.storage.root_dataset.create_snapshot')).toHaveCount(0);
     await expect(page.getByTestId('vps.storage.root_dataset.restore')).toHaveCount(0);
     await expect(page.getByTestId('vps.storage.root_dataset.backup')).toHaveCount(0);
-    await expect(page.getByTestId('vps.storage.mounts.table')).toBeVisible();
-    await expect(page.getByTestId('vps.storage.mounts.row.1.dataset')).toHaveAttribute('href', '/app/datasets/9');
-    await expect(page.getByTestId('vps.storage.mounts.row.1')).toContainText('mounted');
-    await expect(page.getByTestId('vps.storage.mounts.row.1')).toContainText('2026');
+    await expect(mountItem(page, 1)).toBeVisible();
+    await expect(mountItemControl(page, 1, 'dataset')).toHaveAttribute('href', '/app/datasets/9');
+    await expect(mountItem(page, 1)).toContainText('mounted');
+    await expect(mountItem(page, 1)).toContainText('2026');
     await expect(page.getByText('Master enabled')).toHaveCount(0);
 
     await page.getByTestId('vps.storage.mounts.add').click();
@@ -153,7 +217,7 @@ test.describe('@smoke VPS storage tab mounts', () => {
     await expect(page.getByTestId('modal.action_progress')).toBeVisible();
     await expect(page.getByTestId('modal.action_progress')).toContainText('#703');
     await page.getByTestId('modal.action_progress.continue').click();
-    await expect(page.getByTestId('vps.storage.mounts.row.2')).toBeVisible();
+    await expect(mountItem(page, 2)).toBeVisible();
   });
 
   test('deletes mount via confirm dialog', async ({ page }) => {
@@ -189,9 +253,9 @@ test.describe('@smoke VPS storage tab mounts', () => {
 
     await page.goto('/app/vps/123/storage');
 
-    await expect(page.getByTestId('vps.storage.mounts.row.1')).toBeVisible();
+    await expect(mountItem(page, 1)).toBeVisible();
 
-    await page.getByTestId('vps.storage.mounts.row.1.delete').click();
+    await mountItemControl(page, 1, 'delete').click();
     await expect(page.getByTestId('vps.storage.mounts.delete_confirm')).toBeVisible();
     await expect(page.getByTestId('vps.storage.mounts.delete_confirm.confirm')).toBeEnabled();
 
@@ -241,7 +305,7 @@ test.describe('@smoke VPS storage tab mounts', () => {
     await expect(page.getByTestId('vps.storage.root_dataset.open')).toHaveAttribute('href', '/admin/datasets/10');
     await expect(page.getByTestId('vps.storage.root_dataset.system_context')).toContainText('3 snapshots');
     await expect(page.getByTestId('vps.storage.mounts.table')).toContainText('Master');
-    await expect(page.getByTestId('vps.storage.mounts.row.1')).toContainText('No');
+    await expect(mountItem(page, 1)).toContainText('No');
 
     await page.getByTestId('vps.storage.mounts.add').click();
     await expect(page.getByTestId('vps.storage.mounts.create.master_enabled')).toBeVisible();
@@ -285,7 +349,7 @@ test.describe('@smoke VPS storage tab mounts', () => {
     await expect(page.getByTestId('vps.storage.root_dataset.empty')).toBeVisible();
     await expect(page.getByTestId('vps.storage.root_dataset.empty')).toContainText('No root dataset reference');
     await expect(page.getByTestId('vps.storage.root_dataset.open')).toHaveCount(0);
-    await expect(page.getByTestId('vps.storage.mounts.row.1')).toBeVisible();
-    await expect(page.getByTestId('vps.storage.mounts.row.1.dataset')).toHaveAttribute('href', '/app/datasets/9');
+    await expect(mountItem(page, 1)).toBeVisible();
+    await expect(mountItemControl(page, 1, 'dataset')).toHaveAttribute('href', '/app/datasets/9');
   });
 });

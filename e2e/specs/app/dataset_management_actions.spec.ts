@@ -1,6 +1,30 @@
 import { expect, test } from '@playwright/test';
 
-import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import { bootstrapVpsAdminWindow, failEnvelope, installHaveApiMock } from '../../fixtures';
+
+function ownedDataset(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 10,
+    full_name: 'tank/vps/ds10',
+    name: 'ds10',
+    user: { id: 2, login: 'member' },
+    used: 2048,
+    avail: 10240,
+    quota: 0,
+    refquota: 10240,
+    recordsize: 131072,
+    compression: true,
+    atime: false,
+    relatime: false,
+    sync: 'standard',
+    snapshots_count: 2,
+    mount_count: 0,
+    export_count: 0,
+    object_state: 'active',
+    vps: { id: 300, hostname: 'alpha.example' },
+    ...overrides,
+  };
+}
 
 test.describe('Dataset management actions', () => {
   test('creates, edits, and deletes a dataset from the overview', async ({ page }) => {
@@ -224,8 +248,226 @@ test.describe('Dataset management actions', () => {
     await expect(page).toHaveURL(/\/app\/datasets$/);
   });
 
-  test('denies dataset mutations without ownership', async ({ page }) => {
+  test('sends only safe user-editable fields when a normal user updates a dataset', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    let updateCalls = 0;
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'member', level: 1 },
+      handlers: {
+        'GET datasets/10': () => ownedDataset(),
+        'GET transaction_chains': () => ({ transaction_chains: [], _meta: { total_count: 0 } }),
+        'PUT datasets/10': () => {
+          updateCalls += 1;
+          return { status: true, response: null };
+        },
+      },
+    });
+
+    await page.goto('/app/datasets/10');
+    await expect(page.getByTestId('dataset.manage')).toBeVisible();
+    await expect(page.getByTestId('dataset.manage.sharenfs')).toHaveCount(0);
+    await expect(page.getByTestId('dataset.manage.admin_lock_type')).toHaveCount(0);
+    await expect(page.getByTestId('dataset.manage.admin_override')).toHaveCount(0);
+
+    await page.getByTestId('dataset.manage.quota').fill('20');
+    await page.getByTestId('dataset.manage.refquota').fill('12');
+    await page.getByTestId('dataset.manage.compression').uncheck();
+    await page.getByTestId('dataset.manage.advanced_properties.summary').click();
+    await page.getByTestId('dataset.manage.recordsize').fill('64');
+    await page.getByTestId('dataset.manage.sync').selectOption('disabled');
+    await page.getByTestId('dataset.manage.atime').check();
+    await page.getByTestId('dataset.manage.relatime').check();
+
+    const updateRequest = page.waitForRequest((request) =>
+      request.method() === 'PUT' && request.url().includes('/api/v7.0/datasets/10')
+    );
+    await page.getByTestId('dataset.manage.edit.submit').click();
+
+    expect((await updateRequest).postDataJSON()).toEqual({
+      dataset: {
+        quota: 20480,
+        refquota: 12288,
+        compression: false,
+        atime: true,
+        relatime: true,
+        recordsize: 65536,
+        sync: 'disabled',
+      },
+    });
+    expect(updateCalls).toBe(1);
+  });
+
+  test('sends advanced user fields without admin-only properties when creating a subdataset', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const child = ownedDataset({
+      id: 12,
+      full_name: 'tank/vps/ds10/archive',
+      name: 'archive',
+      parent: { id: 10 },
+    });
+    let createCalls = 0;
+
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'member', level: 1 },
+      handlers: {
+        'GET datasets/10': () => ownedDataset(),
+        'GET datasets/12': () => child,
+        'GET transaction_chains': () => ({ transaction_chains: [], _meta: { total_count: 0 } }),
+        'POST datasets': () => {
+          createCalls += 1;
+          return { dataset: child };
+        },
+      },
+    });
+
+    await page.goto('/app/datasets/10');
+    await page.getByTestId('dataset.manage.create.open').click();
+    const createModal = page.getByTestId('dataset.manage.create.modal');
+    await expect(createModal).toBeVisible();
+
+    await createModal.getByTestId('dataset.manage.create.name').fill('archive');
+    await createModal.getByTestId('dataset.manage.create.automount').uncheck();
+    await createModal.getByTestId('dataset.manage.create.quota').fill('20');
+    await createModal.getByTestId('dataset.manage.create.refquota').fill('12');
+    await createModal.getByTestId('dataset.manage.create.advanced_properties.summary').click();
+    await createModal.getByTestId('dataset.manage.create.compression').uncheck();
+    await createModal.getByTestId('dataset.manage.create.atime').check();
+    await createModal.getByTestId('dataset.manage.create.relatime').check();
+    await createModal.getByTestId('dataset.manage.create.recordsize').fill('64');
+    await createModal.getByTestId('dataset.manage.create.sync').selectOption('disabled');
+    await expect(createModal.getByTestId('dataset.manage.create.sharenfs')).toHaveCount(0);
+    await expect(createModal.getByTestId('dataset.manage.create.admin_lock_type')).toHaveCount(0);
+    await expect(createModal.getByTestId('dataset.manage.create.admin_override')).toHaveCount(0);
+
+    const createRequest = page.waitForRequest((request) =>
+      request.method() === 'POST' && request.url().includes('/api/v7.0/datasets')
+    );
+    await createModal.getByTestId('dataset.manage.create.submit').click();
+
+    expect((await createRequest).postDataJSON()).toEqual({
+      dataset: {
+        name: 'archive',
+        dataset: 10,
+        automount: false,
+        quota: 20480,
+        refquota: 12288,
+        compression: false,
+        atime: true,
+        relatime: true,
+        recordsize: 65536,
+        sync: 'disabled',
+      },
+    });
+    expect(createCalls).toBe(1);
+    await expect(page).toHaveURL(/\/app\/datasets\/12$/);
+  });
+
+  test('keeps a failed user create open and allows a successful retry', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const child = ownedDataset({
+      id: 11,
+      full_name: 'tank/vps/ds10/retry-data',
+      name: 'retry-data',
+      parent: { id: 10 },
+    });
+    let createCalls = 0;
+
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'member', level: 1 },
+      handlers: {
+        'GET datasets/10': () => ownedDataset(),
+        'GET datasets/11': () => child,
+        'GET transaction_chains': () => ({ transaction_chains: [], _meta: { total_count: 0 } }),
+        'POST datasets': () => {
+          createCalls += 1;
+          return createCalls === 1
+            ? failEnvelope('Temporary dataset create failure')
+            : { dataset: child };
+        },
+      },
+    });
+
+    await page.goto('/app/datasets/10');
+    await page.getByTestId('dataset.manage.create.open').click();
+    const createModal = page.getByTestId('dataset.manage.create.modal');
+    const submit = createModal.getByTestId('dataset.manage.create.submit');
+    await createModal.getByTestId('dataset.manage.create.name').fill('retry-data');
+
+    await submit.click();
+    await expect(createModal).toBeVisible();
+    await expect(createModal.getByText('Temporary dataset create failure', { exact: true })).toBeVisible();
+    await expect(createModal.getByTestId('dataset.manage.create.name')).toHaveValue('retry-data');
+    await expect(submit).toBeEnabled();
+    expect(createCalls).toBe(1);
+
+    await submit.click();
+    await expect(page).toHaveURL(/\/app\/datasets\/11$/);
+    expect(createCalls).toBe(2);
+  });
+
+  test('active transaction chain disables user create and delete without a mutation request', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    let createCalls = 0;
+    let deleteCalls = 0;
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'member', level: 1 },
+      handlers: {
+        'GET datasets/11': () => ownedDataset({
+          id: 11,
+          full_name: 'tank/vps/ds10/appdata',
+          name: 'appdata',
+          parent: { id: 10 },
+        }),
+        'GET transaction_chains': ({ searchParams }) => {
+          const className = searchParams.get('transaction_chain[class_name]');
+          const rowId = searchParams.get('transaction_chain[row_id]');
+          if (className === 'Dataset' && rowId === '11') {
+            return {
+              transaction_chains: [
+                {
+                  id: 700,
+                  state: 'running',
+                  label: 'dataset-busy',
+                  created_at: '2026-07-23T12:00:00.000Z',
+                },
+              ],
+            };
+          }
+          return { transaction_chains: [] };
+        },
+        'POST datasets': () => {
+          createCalls += 1;
+          return { dataset: ownedDataset({ id: 12, parent: { id: 11 } }) };
+        },
+        'DELETE datasets/11': () => {
+          deleteCalls += 1;
+          return { status: true, response: null };
+        },
+      },
+    });
+
+    await page.goto('/app/datasets/11');
+    const createButton = page.getByTestId('dataset.manage.create.open');
+    const deleteButton = page.getByTestId('dataset.manage.delete.open');
+    await expect(createButton).toBeDisabled();
+    await expect(deleteButton).toBeDisabled();
+
+    await createButton.evaluate((button: HTMLButtonElement) => button.click());
+    await deleteButton.evaluate((button: HTMLButtonElement) => button.click());
+    await expect(page.getByTestId('dataset.manage.create.modal')).toHaveCount(0);
+    await expect(page.getByTestId('dataset.manage.delete.confirm')).toBeHidden();
+    expect(createCalls).toBe(0);
+    expect(deleteCalls).toBe(0);
+  });
+
+  test('rejects a direct create deep-link for a foreign dataset without issuing POST', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    let createCalls = 0;
 
     const foreignDataset = {
       id: 21,
@@ -241,17 +483,24 @@ test.describe('Dataset management actions', () => {
       handlers: {
         'GET datasets/21': () => foreignDataset,
         'GET transaction_chains': () => ({ transaction_chains: [], _meta: { total_count: 0 } }),
+        'POST datasets': () => {
+          createCalls += 1;
+          return { dataset: foreignDataset };
+        },
       },
     });
 
-    await page.goto('/app/datasets/21');
+    await page.goto('/app/datasets/21?create=subdataset');
     await expect(page.getByTestId('dataset.manage')).toBeVisible();
+    await expect(page.getByTestId('dataset.manage.create.modal')).toHaveCount(0);
     await expect(page.getByTestId('dataset.manage.create.open')).toHaveCount(0);
     await expect(page.getByTestId('dataset.manage.delete.open')).toHaveCount(0);
     await expect(page.getByTestId('dataset.manage.edit.submit')).toBeDisabled();
     await expect(page.getByTestId('dataset.manage.sharenfs')).toHaveCount(0);
     await expect(page.getByTestId('dataset.manage.admin_lock_type')).toHaveCount(0);
     await expect(page.getByTestId('dataset.manage.admin_override')).toHaveCount(0);
+    await expect(page).toHaveURL(/\/app\/datasets\/21$/);
+    expect(createCalls).toBe(0);
   });
 
   test('hides admin-only dataset controls for admins in my view', async ({ page }) => {
