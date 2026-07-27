@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 
 import { useAppMode } from "../../app/appMode";
 import { useAuth } from "../../app/auth";
-import { getRuntimeConfig } from "../../app/config";
 import { useI18n } from "../../app/i18n";
 import { useObjectScope } from "../../app/objectScope";
 import { PageContainer } from "../../components/layout/PageContainer";
@@ -33,17 +32,11 @@ function thirtyDaysAgoIso(): string {
   return d.toISOString();
 }
 
-function legacyWebuiUrl(baseUrl: string | undefined, query: string): string | undefined {
-  if (!baseUrl) return undefined;
-  return `${baseUrl}/?${query}`;
-}
-
 export function DashboardPage() {
   const auth = useAuth();
   const { basePath, mode } = useAppMode();
   const scope = useObjectScope();
   const { t } = useI18n();
-  const cfg = useMemo(() => getRuntimeConfig(), []);
   const recentSince = useMemo(() => thirtyDaysAgoIso(), []);
   const tierBRefetchMs = useTierBIntervalMs();
   const tierSlowRefetchMs = useTierSlowIntervalMs();
@@ -110,16 +103,33 @@ export function DashboardPage() {
 
   const securityQ = useQuery({
     queryKey: ["dashboard", "security_advisories", "recent", recentSince],
-    queryFn: async () =>
-      (
-        await fetchSecurityAdvisoriesWithCves({
+    queryFn: async () => {
+      const [published, retracted] = await Promise.all([
+        fetchSecurityAdvisoriesWithCves({
           limit: 5,
           state: "published",
           recentSince,
           order: "newest",
           includes: "created_by,published_by",
+        }),
+        fetchSecurityAdvisoriesWithCves({
+          limit: 5,
+          state: "retracted",
+          recentSince,
+          order: "newest",
+          includes: "created_by,published_by",
+        }),
+      ]);
+
+      const byId = new Map([...published.data, ...retracted.data].map((advisory) => [advisory.id, advisory]));
+      return [...byId.values()]
+        .sort((left, right) => {
+          const leftAt = left.retracted_at ?? left.published_at ?? left.updated_at ?? left.created_at ?? "";
+          const rightAt = right.retracted_at ?? right.published_at ?? right.updated_at ?? right.created_at ?? "";
+          return rightAt.localeCompare(leftAt) || right.id - left.id;
         })
-      ).data,
+        .slice(0, 5);
+    },
     refetchInterval: tierSlowRefetchMs,
   });
 
@@ -166,8 +176,14 @@ export function DashboardPage() {
   const outagesListPath = mode === "admin" ? `${basePath}/outages` : "/outages";
   const outageDetailPath = (id: number) => (mode === "admin" ? `${basePath}/outages/${id}` : `/outages/${id}`);
   const newsPath = mode === "admin" ? `${basePath}/content/news` : "/news";
-  const legacySecurityBase = cfg.webuiUrl;
-  const legacySecurityListUrl = legacyWebuiUrl(legacySecurityBase, "page=security_advisory&action=list");
+  const canManageSecurityAdvisories = mode === "admin" && auth.role === "admin";
+  const securityListPath = canManageSecurityAdvisories
+    ? `${basePath}/security-advisories`
+    : "/security-advisories";
+  const securityDetailPath = (id: number) =>
+    canManageSecurityAdvisories
+      ? `${basePath}/security-advisories/${id}`
+      : `/security-advisories/${id}`;
 
   const statusAlert = DashboardOperationalSummary({
     t,
@@ -243,8 +259,8 @@ export function DashboardPage() {
             isLoading: securityQ.isLoading,
             isError: securityQ.isError,
             advisories: securityQ.data ?? [],
-            legacyListUrl: legacySecurityListUrl,
-            legacyBaseUrl: legacySecurityBase,
+            listPath: securityListPath,
+            detailPath: securityDetailPath,
           }}
           cluster={{
             isLoading: nodesQ.isLoading,

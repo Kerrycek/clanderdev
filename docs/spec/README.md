@@ -1,31 +1,18 @@
-# Spec fragments / derived docs
+# Focused specifications and derived references
 
-This directory is **not** the canonical product/UI spec.
+This directory contains maintained implementation and testing appendices as
+well as historical compatibility stubs. It is not a single monolithic product
+specification.
 
-## Canonical source of truth
+Start with:
 
-The active, normative specification lives in:
+- [`../PROJECT_GUIDE.md`](../PROJECT_GUIDE.md) for the project overview;
+- [`../CANONICAL_DOCS.md`](../CANONICAL_DOCS.md) for the authority map;
+- the current source and runtime HaveAPI description for implemented behavior
+  and authorization.
 
-- `../../../UI_REDESIGN.md`
-
-That file owns:
-- product / UX requirements
-- implementation gap tracking
-- rollout / test gates
-- execution order
-
-## What this directory is now
-
-Files here fall into two buckets only:
-
-1. **Supporting derived docs**
-   - implementation notes or focused appendices that do not contradict `UI_REDESIGN.md`
-
-2. **Historical / quarantined stubs**
-   - paths intentionally kept only to avoid broken links
-   - content removed because it contradicted the canon (especially obsolete mode-model assumptions or stale readiness/planning state)
-
-## Rule
-
-If any file in this directory disagrees with `../../../UI_REDESIGN.md`, the redesign spec wins.
-Do not introduce new requirements here.
+Maintained documents in this directory must state one focused contract and
+stay aligned with the code. Dated audits and historical stubs are not product
+requirements. If a document conflicts with HaveAPI authorization, repository
+workflow rules or reviewed product behavior, those authorities win and this
+document must be corrected.

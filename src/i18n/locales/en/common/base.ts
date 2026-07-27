@@ -203,4 +203,8 @@ export const enCommon_base = {
   'api.security_advisory.state.published': 'Published',
   'api.security_advisory.state.retracted': 'Retracted',
   'api.security_advisory.state.mitigated': 'Mitigated',
+  'api.security_advisory.node_state.unknown': 'Unknown',
+  'api.security_advisory.node_state.not_affected': 'Not affected',
+  'api.security_advisory.node_state.vulnerable': 'Vulnerable',
+  'api.security_advisory.node_state.mitigated': 'Mitigated',
 } as const;

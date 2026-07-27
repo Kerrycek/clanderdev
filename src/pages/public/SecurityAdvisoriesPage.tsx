@@ -1,27 +1,33 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 
 import {
   advisoryCveLabels,
-  fetchSecurityAdvisoriesWithCves,
+  fetchAllSecurityAdvisories,
+  fetchSecurityAdvisoryCves,
   type SecurityAdvisory,
+  type SecurityAdvisoryCve,
 } from '../../lib/api/securityAdvisories';
+import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
+import { KeysetPagination } from '../../components/ui/KeysetPagination';
 import { Spinner } from '../../components/ui/Spinner';
 import { formatDateTime } from '../../lib/time';
 import { pickTranslation } from '../../lib/translations';
 import { securityAdvisoryStateLabel } from '../../lib/apiValues';
 
-const PUBLIC_SECURITY_ADVISORIES_LIMIT = 100;
+const PUBLIC_SECURITY_ADVISORIES_API_PAGE_SIZE = 100;
+const PUBLIC_SECURITY_ADVISORIES_PAGE_SIZE = 20;
 
-function countLabel(value: unknown) {
-  return typeof value === 'number' ? String(value) : '—';
+function hasInlineCves(advisory: SecurityAdvisory): boolean {
+  return Array.isArray(advisory.security_advisory_cves) || Array.isArray(advisory.cves);
 }
 
-function SecurityAdvisoryRow(props: { advisory: SecurityAdvisory }) {
+function SecurityAdvisoryRow(props: { advisory: SecurityAdvisory; showPersonalImpact: boolean }) {
   const i18n = useI18n();
   const advisory = props.advisory;
   const cves = advisoryCveLabels(advisory);
@@ -33,9 +39,26 @@ function SecurityAdvisoryRow(props: { advisory: SecurityAdvisory }) {
   return (
     <Card>
       <CardHeader
-        title={title}
+        title={
+          <Link className="hover:text-accent hover:underline" to={`/security-advisories/${advisory.id}`}>
+            {title}
+          </Link>
+        }
         subtitle={`${i18n.t('public.security_advisories.published')}: ${formatDateTime(advisory.published_at)}`}
-        actions={<Badge variant={state === 'published' ? 'ok' : 'neutral'}>{state ? securityAdvisoryStateLabel(i18n.t, state) : '—'}</Badge>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {props.showPersonalImpact && typeof advisory.affected === 'boolean' ? (
+              <Badge variant={advisory.affected ? 'danger' : 'neutral'}>
+                {i18n.t(advisory.affected
+                  ? 'dashboard.section.security.affects_me'
+                  : 'dashboard.section.security.not_affected')}
+              </Badge>
+            ) : null}
+            <Badge variant={state === 'published' ? 'ok' : state === 'retracted' ? 'warn' : 'neutral'}>
+              {state ? securityAdvisoryStateLabel(i18n.t, state) : '—'}
+            </Badge>
+          </div>
+        }
       />
       <CardBody>
         <div className="space-y-3">
@@ -52,20 +75,12 @@ function SecurityAdvisoryRow(props: { advisory: SecurityAdvisory }) {
           {summary ? <p className="text-sm text-fg">{summary}</p> : null}
           {description && description !== summary ? <p className="text-sm text-muted">{description}</p> : null}
 
-          <dl className="grid gap-2 text-xs text-muted sm:grid-cols-3">
-            <div>
-              <dt className="font-medium text-fg">{i18n.t('public.security_advisories.affected_users')}</dt>
-              <dd>{countLabel(advisory.affected_user_count)}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-fg">{i18n.t('public.security_advisories.affected_vps')}</dt>
-              <dd>{countLabel(advisory.affected_vps_count)}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-fg">{i18n.t('public.security_advisories.affected_nodes')}</dt>
-              <dd>{countLabel(advisory.affected_node_count)}</dd>
-            </div>
-          </dl>
+          <Link
+            className="inline-flex text-sm font-medium text-accent hover:underline"
+            to={`/security-advisories/${advisory.id}`}
+          >
+            {i18n.t('public.security_advisories.open_detail')} →
+          </Link>
         </div>
       </CardBody>
     </Card>
@@ -74,17 +89,87 @@ function SecurityAdvisoryRow(props: { advisory: SecurityAdvisory }) {
 
 export function SecurityAdvisoriesPage() {
   const i18n = useI18n();
+  const auth = useAuth();
+  const [page, setPage] = useState(1);
+  const showPersonalImpact = auth.status === 'authenticated';
   const advisoriesQ = useQuery({
-    queryKey: ['public', 'security_advisories', { limit: PUBLIC_SECURITY_ADVISORIES_LIMIT }],
-    queryFn: async () =>
-      (
-        await fetchSecurityAdvisoriesWithCves({
-          limit: PUBLIC_SECURITY_ADVISORIES_LIMIT,
+    queryKey: ['public', 'security_advisories', { states: ['published', 'retracted'] }],
+    queryFn: async () => {
+      const [published, retracted] = await Promise.all([
+        fetchAllSecurityAdvisories({
+          limit: PUBLIC_SECURITY_ADVISORIES_API_PAGE_SIZE,
           state: 'published',
           order: 'newest',
-        })
-      ).data,
+        }),
+        fetchAllSecurityAdvisories({
+          limit: PUBLIC_SECURITY_ADVISORIES_API_PAGE_SIZE,
+          state: 'retracted',
+          order: 'newest',
+        }),
+      ]);
+
+      const publicRows = new Map<number, SecurityAdvisory>();
+      for (const advisory of [...published.data, ...retracted.data]) {
+        if (advisory.state !== 'published' && advisory.state !== 'retracted') continue;
+        publicRows.set(advisory.id, advisory);
+      }
+
+      return [...publicRows.values()].sort((a, b) => {
+        const at = new Date(a.published_at ?? a.updated_at ?? a.created_at ?? 0).getTime();
+        const bt = new Date(b.published_at ?? b.updated_at ?? b.created_at ?? 0).getTime();
+        if (at !== bt) return bt - at;
+        return b.id - a.id;
+      });
+    },
   });
+
+  const pageCount = Math.max(
+    1,
+    Math.ceil((advisoriesQ.data?.length ?? 0) / PUBLIC_SECURITY_ADVISORIES_PAGE_SIZE),
+  );
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  const visibleAdvisories = useMemo(() => {
+    const start = (page - 1) * PUBLIC_SECURITY_ADVISORIES_PAGE_SIZE;
+    return (advisoriesQ.data ?? []).slice(start, start + PUBLIC_SECURITY_ADVISORIES_PAGE_SIZE);
+  }, [advisoriesQ.data, page]);
+
+  const visibleAdvisoryIds = useMemo(
+    () => visibleAdvisories.map((advisory) => advisory.id),
+    [visibleAdvisories],
+  );
+  const visibleCvesQ = useQuery({
+    queryKey: ['public', 'security_advisory_cves', visibleAdvisoryIds],
+    enabled: visibleAdvisories.length > 0,
+    queryFn: async () => {
+      const rows = await Promise.all(visibleAdvisories.map(async (advisory) => {
+        if (hasInlineCves(advisory)) {
+          return [advisory.id, advisory.security_advisory_cves ?? advisory.cves ?? []] as const;
+        }
+
+        try {
+          const result = await fetchSecurityAdvisoryCves({
+            securityAdvisoryId: advisory.id,
+            limit: PUBLIC_SECURITY_ADVISORIES_API_PAGE_SIZE,
+          });
+          return [advisory.id, result.data] as const;
+        } catch {
+          const noCves: Array<SecurityAdvisoryCve | string> = [];
+          return [advisory.id, noCves] as const;
+        }
+      }));
+
+      return new Map<number, Array<SecurityAdvisoryCve | string>>(rows);
+    },
+  });
+
+  const renderedAdvisories = useMemo(() => visibleAdvisories.map((advisory) => {
+    if (hasInlineCves(advisory)) return advisory;
+    return { ...advisory, cves: visibleCvesQ.data?.get(advisory.id) ?? [] };
+  }), [visibleAdvisories, visibleCvesQ.data]);
 
   return (
     <div className="space-y-6" data-testid="public.security_advisories.page">
@@ -103,9 +188,24 @@ export function SecurityAdvisoriesPage() {
         </Alert>
       ) : (
         <div className="space-y-4">
-          {advisoriesQ.data?.map((advisory) => (
-            <SecurityAdvisoryRow key={advisory.id} advisory={advisory} />
+          {renderedAdvisories.map((advisory) => (
+            <SecurityAdvisoryRow
+              key={advisory.id}
+              advisory={advisory}
+              showPersonalImpact={showPersonalImpact}
+            />
           ))}
+          <KeysetPagination
+            page={page}
+            pageCount={pageCount}
+            totalPagesKnown
+            canPrev={page > 1}
+            canNext={page < pageCount}
+            onPrev={() => setPage((current) => Math.max(1, current - 1))}
+            onNext={() => setPage((current) => Math.min(pageCount, current + 1))}
+            onGoToPage={setPage}
+            testId="public.security_advisories.pagination"
+          />
         </div>
       )}
     </div>

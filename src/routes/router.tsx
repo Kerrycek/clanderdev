@@ -20,6 +20,10 @@ const SecurityAdvisoriesPage = lazyRoute(
   () => import('../pages/public/SecurityAdvisoriesPage'),
   'SecurityAdvisoriesPage',
 );
+const SecurityAdvisoryDetailPage = lazyRoute(
+  () => import('../pages/public/SecurityAdvisoryDetailPage'),
+  'SecurityAdvisoryDetailPage',
+);
 const RegistrationCorrectionPage = lazyRoute(() => import('../pages/public/RegistrationCorrectionPage'), 'RegistrationCorrectionPage');
 const DashboardPage = lazyRoute(() => import('../pages/app/DashboardPage'), 'DashboardPage');
 const VpsListPage = lazyRoute(() => import('../pages/app/VpsListPage'), 'VpsListPage');
@@ -91,6 +95,18 @@ const PaymentsPage = lazyRoute(() => import('../pages/app/payments/PaymentsPage'
 const DesignSandboxPage = lazyRoute(() => import('../pages/app/DesignSandboxPage'), 'DesignSandboxPage');
 const AdminInfoPage = lazyRoute(() => import('../pages/app/admin/AdminInfoPage'), 'AdminInfoPage');
 const AdminOutagesPage = lazyRoute(() => import('../pages/app/admin/AdminOutagesPage'), 'AdminOutagesPage');
+const AdminSecurityAdvisoriesPage = lazyRoute(
+  () => import('../pages/app/admin/security/AdminSecurityAdvisoriesPage'),
+  'AdminSecurityAdvisoriesPage',
+);
+const AdminSecurityAdvisoryDetailPage = lazyRoute(
+  () => import('../pages/app/admin/security/AdminSecurityAdvisoryDetailPage'),
+  'AdminSecurityAdvisoryDetailPage',
+);
+const SecurityAdvisoryAdminGate = lazyRoute(
+  () => import('../pages/app/admin/security/SecurityAdvisoryAdminGate'),
+  'SecurityAdvisoryAdminGate',
+);
 const NodesPage = lazyRoute(() => import('../pages/app/admin/NodesPage'), 'NodesPage');
 const NodeDetailPage = lazyRoute(() => import('../pages/app/admin/NodeDetailPage'), 'NodeDetailPage');
 const MigrationPlansPage = lazyRoute(() => import('../pages/app/admin/MigrationPlansPage'), 'MigrationPlansPage');
@@ -188,6 +204,7 @@ export const router = createBrowserRouter([
             { path: 'outages/:outageId', element: <OutageDetailPage /> },
             { path: 'news', element: <NewsPage /> },
             { path: 'security-advisories', element: <SecurityAdvisoriesPage /> },
+            { path: 'security-advisories/:advisoryId', element: <SecurityAdvisoryDetailPage /> },
             { path: 'requests/registrations/:requestId/:token', element: <RegistrationCorrectionPage /> },
             { path: '*', element: <NotFoundPage /> },
             // The old webui has a useful index page. We keep public status pages accessible.
@@ -318,6 +335,13 @@ export const router = createBrowserRouter([
             { index: true, element: <DashboardPage /> },
             { path: 'outages', element: <AdminOutagesPage /> },
             { path: 'outages/:outageId', element: <AdminOutagesPage /> },
+            {
+              element: <SecurityAdvisoryAdminGate />,
+              children: [
+                { path: 'security-advisories', element: <AdminSecurityAdvisoriesPage /> },
+                { path: 'security-advisories/:advisoryId', element: <AdminSecurityAdvisoryDetailPage /> },
+              ],
+            },
             { path: 'nodes', element: <NodesPage /> },
             { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
             { path: 'migration-plans', element: <MigrationPlansPage /> },

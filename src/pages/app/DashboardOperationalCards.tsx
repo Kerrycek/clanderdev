@@ -63,10 +63,6 @@ function formatNumber(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat().format(value);
 }
-function legacyWebuiUrl(baseUrl: string | undefined, query: string): string | undefined {
-  if (!baseUrl) return undefined;
-  return `${baseUrl}/?${query}`;
-}
 function isNodeInMaintenance(n: PublicNodeStatus): boolean {
   return isMaintenanceLocked(n.maintenance_lock);
 }
@@ -220,29 +216,22 @@ function advisoryStateBadge(
   if (s === "draft") return { variant: "neutral", label: securityAdvisoryStateLabel(t, s) };
   return { variant: "neutral", label: s ? securityAdvisoryStateLabel(t, s) : t("state.unknown") };
 }
-function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; legacyHref?: string }) {
+function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; detailPath: (id: number) => string }) {
   const i18n = useI18n();
   const advisory = props.advisory;
   const cves = advisoryCveLabels(advisory);
   const summary = pickTranslation(advisory, "summary", i18n.preferredLanguageCodes);
   const stateBadge = advisoryStateBadge(advisory.state, i18n.t);
   const title = advisory.name || i18n.t("dashboard.section.security.fallback_title", { id: advisory.id });
-  const detailHref = props.legacyHref
-    ? legacyWebuiUrl(props.legacyHref, `page=security_advisory&action=show&id=${advisory.id}`)
-    : undefined;
   const affectedUserCount = typeof advisory.affected_user_count === "number" ? advisory.affected_user_count : null;
   const affectedVpsCount = typeof advisory.affected_vps_count === "number" ? advisory.affected_vps_count : null;
   const affectedNodeCount = typeof advisory.affected_node_count === "number" ? advisory.affected_node_count : null;
   return (
     <div className="space-y-1.5 bg-surface-2 px-3 py-2.5" data-testid="app.dashboard.security.item">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {detailHref ? (
-          <a href={detailHref} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-            {title}
-          </a>
-        ) : (
-          <span className="font-medium">{title}</span>
-        )}
+        <Link to={props.detailPath(advisory.id)} className="font-medium hover:underline">
+          {title}
+        </Link>
         <Badge variant={stateBadge.variant}>{stateBadge.label}</Badge>
         {advisory.affected === true ? (
           <Badge variant="danger">{i18n.t("dashboard.section.security.affects_me")}</Badge>
@@ -281,7 +270,7 @@ function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; legacyHref?: 
     </div>
   );
 }
-export function SecurityAdvisoriesCard(props: { isLoading: boolean; isError: boolean; advisories: SecurityAdvisory[]; legacyListUrl?: string; legacyBaseUrl?: string; collapsed?: boolean; density?: DashboardDensity; itemLimit?: number; onToggleCollapsed?: () => void; }) {
+export function SecurityAdvisoriesCard(props: { isLoading: boolean; isError: boolean; advisories: SecurityAdvisory[]; listPath: string; detailPath: (id: number) => string; collapsed?: boolean; density?: DashboardDensity; itemLimit?: number; onToggleCollapsed?: () => void; }) {
   const { t } = useI18n();
   const collapsed = props.collapsed === true;
   const compact = props.density === "compact";
@@ -304,11 +293,9 @@ export function SecurityAdvisoriesCard(props: { isLoading: boolean; isError: boo
                 {collapsed ? t("dashboard.preferences.widget.expand") : t("dashboard.preferences.widget.collapse")}
               </Button>
             ) : null}
-            {props.legacyListUrl ? (
-              <Button as="a" href={props.legacyListUrl} target="_blank" rel="noreferrer" variant="secondary" size="sm">
-                {t("dashboard.section.security.open_legacy")}
-              </Button>
-            ) : null}
+            <LinkButton to={props.listPath} variant="secondary" size="sm">
+              {t("common.open")}
+            </LinkButton>
           </>
         }
       />
@@ -326,7 +313,7 @@ export function SecurityAdvisoriesCard(props: { isLoading: boolean; isError: boo
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {props.advisories.slice(0, itemLimit).map((advisory) => (
-              <SecurityAdvisoryItem key={advisory.id} advisory={advisory} legacyHref={props.legacyBaseUrl} />
+              <SecurityAdvisoryItem key={advisory.id} advisory={advisory} detailPath={props.detailPath} />
             ))}
           </div>
         )}

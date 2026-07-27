@@ -1,7 +1,21 @@
 import type { ResourceRef } from './appTypes';
 import { expectArray, haveApiCall } from './haveapi';
 
+export * from './securityAdvisoryRelations';
+
 export type SecurityAdvisoryState = 'draft' | 'published' | 'retracted' | string;
+
+type LocalizedPayload<Field extends string, Value = string> = Partial<Record<`${string}_${Field}`, Value>>;
+
+export type SecurityAdvisoryPayload = {
+  name?: string | null;
+  published_at?: string | null;
+} & LocalizedPayload<'summary' | 'description' | 'response'>;
+
+export interface SecurityAdvisoryPublishPayload {
+  send_mail?: boolean;
+  published_at?: string | null;
+}
 
 export interface SecurityAdvisoryCve {
   id: number;
@@ -11,6 +25,30 @@ export interface SecurityAdvisoryCve {
   url?: string;
   [k: string]: unknown;
 }
+
+export interface SecurityAdvisoryUpdate {
+  id: number;
+  security_advisory?: ResourceRef | number;
+  security_advisory_id?: number;
+  state?: SecurityAdvisoryState | null;
+  reported_by?: ResourceRef | number | null;
+  reported_by_id?: number | null;
+  reporter_name?: string | null;
+  name?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+  [k: string]: unknown;
+}
+
+export type SecurityAdvisoryUpdateTextPayload = LocalizedPayload<'summary'> &
+  LocalizedPayload<'message', string | null>;
+
+export type SecurityAdvisoryUpdateCreatePayload = {
+  security_advisory: number;
+  state?: SecurityAdvisoryState | null;
+  published_at?: string | null;
+  send_mail?: boolean;
+} & SecurityAdvisoryUpdateTextPayload;
 
 export interface SecurityAdvisory {
   id: number;
@@ -37,6 +75,7 @@ export interface SecurityAdvisory {
 export interface SecurityAdvisoryFilters {
   limit?: number;
   fromId?: number;
+  count?: boolean;
   state?: string;
   affected?: boolean;
   cve?: string;
@@ -47,6 +86,32 @@ export interface SecurityAdvisoryFilters {
   since?: string;
   order?: 'newest' | 'oldest';
   includes?: string;
+}
+
+export interface SecurityAdvisoryAllFilters extends SecurityAdvisoryFilters {
+  /** Safety guard for unexpectedly repeating or unbounded API pages. */
+  maxPages?: number;
+}
+
+export interface SecurityAdvisoryCveFilters {
+  securityAdvisoryId?: number;
+  cve?: string;
+  limit?: number;
+  fromId?: number;
+  includes?: string;
+}
+
+export interface SecurityAdvisoryUpdateFilters {
+  securityAdvisoryId?: number;
+  since?: string;
+  limit?: number;
+  fromId?: number;
+  includes?: string;
+}
+
+export interface SecurityAdvisoryUpdateAllFilters extends SecurityAdvisoryUpdateFilters {
+  /** Safety guard for unexpectedly repeating or unbounded API pages. */
+  maxPages?: number;
 }
 
 function securityAdvisoryParams(opts?: SecurityAdvisoryFilters): Record<string, unknown> {
@@ -66,30 +131,314 @@ function securityAdvisoryParams(opts?: SecurityAdvisoryFilters): Record<string, 
 }
 
 export async function fetchSecurityAdvisories(opts?: SecurityAdvisoryFilters) {
+  const meta: Record<string, unknown> = {};
+  if (opts?.includes) meta['includes'] = opts.includes;
+  if (opts?.count) meta['count'] = true;
   const res = await haveApiCall<SecurityAdvisory[]>({
     method: 'GET',
     path: '/security_advisories',
     namespace: 'security_advisory',
     params: securityAdvisoryParams(opts),
-    meta: opts?.includes ? { includes: opts.includes } : undefined,
+    meta: Object.keys(meta).length > 0 ? meta : undefined,
   });
 
   return { ...res, data: expectArray<SecurityAdvisory>(res.data, 'security_advisories#index') };
 }
 
-export async function fetchSecurityAdvisoryCves(opts?: { securityAdvisoryId?: number; cve?: string }) {
+const SECURITY_ADVISORY_PAGE_LIMIT = 100;
+const SECURITY_ADVISORY_MAX_PAGES = 100;
+
+function numericSecurityAdvisoryId(advisory: SecurityAdvisory | undefined): number | undefined {
+  const id = advisory?.id;
+  return typeof id === 'number' && Number.isFinite(id) ? id : undefined;
+}
+
+/**
+ * Fetch every advisory cursor page while preserving the index filters and
+ * order. HaveAPI may repeat the cursor row on the following page, so rows are
+ * de-duplicated by ID. A full page that cannot advance is an error: returning
+ * it would silently truncate the public archive.
+ */
+export async function fetchAllSecurityAdvisories(opts: SecurityAdvisoryAllFilters = {}) {
+  const pageLimit = Number.isInteger(opts.limit) && Number(opts.limit) > 0
+    ? Number(opts.limit)
+    : SECURITY_ADVISORY_PAGE_LIMIT;
+  const maxPages = Number.isInteger(opts.maxPages) && Number(opts.maxPages) > 0
+    ? Number(opts.maxPages)
+    : SECURITY_ADVISORY_MAX_PAGES;
+  const { maxPages: _maxPages, ...filters } = opts;
+
+  const data: SecurityAdvisory[] = [];
+  const seenIds = new Set<number>();
+  const seenCursors = new Set<number>();
+  let cursor = filters.fromId;
+  if (typeof cursor === 'number' && Number.isFinite(cursor)) seenCursors.add(cursor);
+
+  let firstResult: Awaited<ReturnType<typeof fetchSecurityAdvisories>> | null = null;
+
+  for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+    const page = await fetchSecurityAdvisories({
+      ...filters,
+      limit: pageLimit,
+      fromId: cursor,
+    });
+    firstResult ??= page;
+
+    for (const advisory of page.data) {
+      const id = numericSecurityAdvisoryId(advisory);
+      if (id !== undefined) {
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+      }
+      data.push(advisory);
+    }
+
+    if (page.data.length < pageLimit) return { ...firstResult, data };
+
+    let nextCursor: number | undefined;
+    for (let index = page.data.length - 1; index >= 0; index -= 1) {
+      nextCursor = numericSecurityAdvisoryId(page.data[index]);
+      if (nextCursor !== undefined) break;
+    }
+
+    if (nextCursor === undefined || seenCursors.has(nextCursor)) {
+      throw new Error('Security advisory pagination stalled before the archive was complete');
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+
+  throw new Error('Security advisory pagination exceeded its safety limit');
+}
+
+export async function fetchSecurityAdvisory(
+  securityAdvisoryId: number,
+  opts?: { includes?: string; signal?: AbortSignal }
+) {
+  return haveApiCall<SecurityAdvisory>({
+    method: 'GET',
+    path: `/security_advisories/${securityAdvisoryId}`,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
+    signal: opts?.signal,
+  });
+}
+
+export async function createSecurityAdvisory(params: SecurityAdvisoryPayload) {
+  return haveApiCall<SecurityAdvisory>({
+    method: 'POST',
+    path: '/security_advisories',
+    namespace: 'security_advisory',
+    params: { ...params },
+  });
+}
+
+export async function updateSecurityAdvisory(securityAdvisoryId: number, params: SecurityAdvisoryPayload) {
+  return haveApiCall<SecurityAdvisory>({
+    method: 'PUT',
+    path: `/security_advisories/${securityAdvisoryId}`,
+    namespace: 'security_advisory',
+    params: { ...params },
+  });
+}
+
+export async function publishSecurityAdvisory(
+  securityAdvisoryId: number,
+  params: SecurityAdvisoryPublishPayload = {}
+) {
+  return haveApiCall<SecurityAdvisory>({
+    method: 'POST',
+    path: `/security_advisories/${securityAdvisoryId}/publish`,
+    namespace: 'security_advisory',
+    params: { ...params },
+  });
+}
+
+export async function rebuildSecurityAdvisoryAffectedVps(securityAdvisoryId: number) {
+  return haveApiCall<null>({
+    method: 'POST',
+    path: `/security_advisories/${securityAdvisoryId}/rebuild_affected_vps`,
+  });
+}
+
+export async function fetchSecurityAdvisoryCves(opts?: SecurityAdvisoryCveFilters) {
   const params: Record<string, unknown> = {};
   if (opts?.securityAdvisoryId !== undefined) params['security_advisory'] = opts.securityAdvisoryId;
   if (opts?.cve) params['cve'] = opts.cve;
+  if (opts?.limit !== undefined) params['limit'] = opts.limit;
+  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
 
   const res = await haveApiCall<SecurityAdvisoryCve[]>({
     method: 'GET',
     path: '/security_advisory_cves',
     namespace: 'security_advisory_cve',
     params,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
   });
 
   return { ...res, data: expectArray<SecurityAdvisoryCve>(res.data, 'security_advisory_cves#index') };
+}
+
+export async function fetchSecurityAdvisoryCve(
+  securityAdvisoryCveId: number,
+  opts?: { includes?: string; signal?: AbortSignal }
+) {
+  return haveApiCall<SecurityAdvisoryCve>({
+    method: 'GET',
+    path: `/security_advisory_cves/${securityAdvisoryCveId}`,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
+    signal: opts?.signal,
+  });
+}
+
+export async function createSecurityAdvisoryCve(params: { security_advisory: number; cve_id: string }) {
+  return haveApiCall<SecurityAdvisoryCve>({
+    method: 'POST',
+    path: '/security_advisory_cves',
+    namespace: 'security_advisory_cve',
+    params: { ...params },
+  });
+}
+
+export async function updateSecurityAdvisoryCve(
+  securityAdvisoryCveId: number,
+  params: Partial<{ security_advisory: number; cve_id: string }>
+) {
+  return haveApiCall<SecurityAdvisoryCve>({
+    method: 'PUT',
+    path: `/security_advisory_cves/${securityAdvisoryCveId}`,
+    namespace: 'security_advisory_cve',
+    params: { ...params },
+  });
+}
+
+export async function deleteSecurityAdvisoryCve(securityAdvisoryCveId: number) {
+  return haveApiCall<null>({
+    method: 'DELETE',
+    path: `/security_advisory_cves/${securityAdvisoryCveId}`,
+  });
+}
+
+export async function fetchSecurityAdvisoryUpdates(opts?: SecurityAdvisoryUpdateFilters) {
+  const params: Record<string, unknown> = {};
+  if (opts?.securityAdvisoryId !== undefined) params['security_advisory'] = opts.securityAdvisoryId;
+  if (opts?.since) params['since'] = opts.since;
+  if (opts?.limit !== undefined) params['limit'] = opts.limit;
+  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
+
+  const res = await haveApiCall<SecurityAdvisoryUpdate[]>({
+    method: 'GET',
+    path: '/security_advisory_updates',
+    namespace: 'security_advisory_update',
+    params,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
+  });
+
+  return { ...res, data: expectArray<SecurityAdvisoryUpdate>(res.data, 'security_advisory_updates#index') };
+}
+
+const SECURITY_ADVISORY_UPDATE_PAGE_LIMIT = 100;
+const SECURITY_ADVISORY_UPDATE_MAX_PAGES = 100;
+
+function numericSecurityAdvisoryUpdateId(update: SecurityAdvisoryUpdate | undefined): number | undefined {
+  const id = update?.id;
+  return typeof id === 'number' && Number.isFinite(id) ? id : undefined;
+}
+
+/**
+ * Fetch every cursor page while retaining the filters and includes used for
+ * the first request. The API may include the cursor row again on the next
+ * page, so results are de-duplicated by their numeric ID.
+ */
+export async function fetchAllSecurityAdvisoryUpdates(opts: SecurityAdvisoryUpdateAllFilters = {}) {
+  const pageLimit = Number.isInteger(opts.limit) && Number(opts.limit) > 0
+    ? Number(opts.limit)
+    : SECURITY_ADVISORY_UPDATE_PAGE_LIMIT;
+  const maxPages = Number.isInteger(opts.maxPages) && Number(opts.maxPages) > 0
+    ? Number(opts.maxPages)
+    : SECURITY_ADVISORY_UPDATE_MAX_PAGES;
+  const { maxPages: _maxPages, ...filters } = opts;
+
+  const data: SecurityAdvisoryUpdate[] = [];
+  const seenIds = new Set<number>();
+  const seenCursors = new Set<number>();
+  let cursor = filters.fromId;
+  if (typeof cursor === 'number' && Number.isFinite(cursor)) seenCursors.add(cursor);
+
+  let firstResult: Awaited<ReturnType<typeof fetchSecurityAdvisoryUpdates>> | null = null;
+
+  for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
+    const page = await fetchSecurityAdvisoryUpdates({
+      ...filters,
+      limit: pageLimit,
+      fromId: cursor,
+    });
+    firstResult ??= page;
+
+    for (const update of page.data) {
+      const id = numericSecurityAdvisoryUpdateId(update);
+      if (id !== undefined) {
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+      }
+      data.push(update);
+    }
+
+    if (page.data.length < pageLimit) return { ...firstResult, data };
+
+    let nextCursor: number | undefined;
+    for (let index = page.data.length - 1; index >= 0; index -= 1) {
+      nextCursor = numericSecurityAdvisoryUpdateId(page.data[index]);
+      if (nextCursor !== undefined) break;
+    }
+
+    if (nextCursor === undefined || seenCursors.has(nextCursor)) {
+      throw new Error('Security advisory update pagination stalled before the history was complete');
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+
+  throw new Error('Security advisory update pagination exceeded its safety limit');
+}
+
+export async function fetchSecurityAdvisoryUpdate(
+  securityAdvisoryUpdateId: number,
+  opts?: { includes?: string; signal?: AbortSignal }
+) {
+  return haveApiCall<SecurityAdvisoryUpdate>({
+    method: 'GET',
+    path: `/security_advisory_updates/${securityAdvisoryUpdateId}`,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
+    signal: opts?.signal,
+  });
+}
+
+export async function createSecurityAdvisoryUpdate(params: SecurityAdvisoryUpdateCreatePayload) {
+  return haveApiCall<SecurityAdvisoryUpdate>({
+    method: 'POST',
+    path: '/security_advisory_updates',
+    namespace: 'security_advisory_update',
+    params: { ...params },
+  });
+}
+
+export async function updateSecurityAdvisoryUpdate(
+  securityAdvisoryUpdateId: number,
+  params: SecurityAdvisoryUpdateTextPayload
+) {
+  return haveApiCall<SecurityAdvisoryUpdate>({
+    method: 'PUT',
+    path: `/security_advisory_updates/${securityAdvisoryUpdateId}`,
+    namespace: 'security_advisory_update',
+    params: { ...params },
+  });
+}
+
+export async function deleteSecurityAdvisoryUpdate(securityAdvisoryUpdateId: number) {
+  return haveApiCall<null>({
+    method: 'DELETE',
+    path: `/security_advisory_updates/${securityAdvisoryUpdateId}`,
+  });
 }
 
 export async function fetchSecurityAdvisoriesWithCves(opts?: SecurityAdvisoryFilters) {

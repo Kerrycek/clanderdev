@@ -203,4 +203,8 @@ export const csCommon_base = {
   'api.security_advisory.state.published': 'Zveřejněno',
   'api.security_advisory.state.retracted': 'Staženo',
   'api.security_advisory.state.mitigated': 'Ošetřeno',
+  'api.security_advisory.node_state.unknown': 'Neznámý',
+  'api.security_advisory.node_state.not_affected': 'Není dotčen',
+  'api.security_advisory.node_state.vulnerable': 'Zranitelný',
+  'api.security_advisory.node_state.mitigated': 'Ošetřený',
 } as const;

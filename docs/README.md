@@ -1,28 +1,35 @@
 # Documentation
 
-## Canonical source of truth
+Start with [PROJECT_GUIDE.md](PROJECT_GUIDE.md). It is the canonical,
+maintained overview of the repository: architecture, authorization model,
+source layout, development, testing, localization and deployment boundaries.
 
-The only authoritative product / UX / implementation specification is:
+[CANONICAL_DOCS.md](CANONICAL_DOCS.md) records which documents are current,
+derived or historical. When documents disagree, use the authority stated in
+that map and verify behavior against the source and HaveAPI schema.
 
-- `../../UI_REDESIGN.md`
+## Directory map
 
-That file owns requirements, gap tracking, rollout gates, and execution order.
+| Path | Purpose |
+| --- | --- |
+| `PROJECT_GUIDE.md` | Maintained engineering and operations overview |
+| `haveapi/` | Distilled HaveAPI behavior, authorization and resource mapping |
+| `spec/` | Focused implementation/testing appendices and historical stubs |
+| `audits/` | Point-in-time reviews; findings can become stale |
+| `discovery/` | Generated inventories and legacy/API discovery material |
+| `clankerdev/` | Import history and deployment notes for clankerdev |
+| `rc/` | Release-candidate process |
+| `chat/` | Historical planning material; not normative |
 
-See `CANONICAL_DOCS.md` for the current canon / derived / historical split within this docs tree.
+Environment-specific deployment instructions live in the repository-level
+`deploy/` directory rather than here.
 
-## What remains here
+## Maintenance rules
 
-This `docs/` tree is now one of:
-
-1. **supporting derived documentation**
-   - helpful when it does not contradict the redesign spec
-
-2. **historical / quarantined stubs**
-   - kept only so old links do not break
-   - intentionally stripped of normative content when they contradicted the canon
-
-## Rules
-
-- Do **not** introduce new requirements anywhere under `docs/`.
-- If a topic needs a current spec, update `../../UI_REDESIGN.md` first.
-- If a historical path must stay for link compatibility, keep it as a quarantine stub only.
+- Keep `PROJECT_GUIDE.md` concise and link to detailed documents.
+- Update the guide when architecture, supported environments, role boundaries,
+  primary commands or CI gates change.
+- Do not turn dated audits or discovery output into product requirements.
+- Mark historical material clearly instead of silently treating it as current.
+- Validate factual behavior against current source and the runtime HaveAPI
+  description; frontend documentation does not override backend authorization.

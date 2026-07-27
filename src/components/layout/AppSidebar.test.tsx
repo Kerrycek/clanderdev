@@ -10,7 +10,12 @@ function fakeT(key: string) {
 describe('buildSidebarNavItems', () => {
   it('does not expose action states as a primary navigation item', () => {
     for (const appMode of ['user', 'admin'] as const) {
-      const items = buildSidebarNavItems({ basePath: appMode === 'user' ? '/app' : '/admin', appMode, t: fakeT });
+      const items = buildSidebarNavItems({
+        basePath: appMode === 'user' ? '/app' : '/admin',
+        appMode,
+        role: appMode === 'admin' ? 'admin' : 'user',
+        t: fakeT,
+      });
 
       expect(items.map((item) => item.id)).not.toContain('action-states');
       expect(items.map((item) => item.to)).not.toContain(`${appMode === 'user' ? '/app' : '/admin'}/action-states`);
@@ -21,10 +26,23 @@ describe('buildSidebarNavItems', () => {
     const t = (key: keyof typeof csCommon_navigation) => csCommon_navigation[key] ?? key;
 
     for (const appMode of ['user', 'admin'] as const) {
-      const items = buildSidebarNavItems({ basePath: appMode === 'user' ? '/app' : '/admin', appMode, t });
+      const items = buildSidebarNavItems({
+        basePath: appMode === 'user' ? '/app' : '/admin',
+        appMode,
+        role: appMode === 'admin' ? 'admin' : 'user',
+        t,
+      });
 
       expect(items.map((item) => item.label)).not.toContain('Stavy akcí');
     }
+  });
+
+  it('shows security advisory management only to administrators', () => {
+    const adminItems = buildSidebarNavItems({ basePath: '/admin', appMode: 'admin', role: 'admin', t: fakeT });
+    const supportItems = buildSidebarNavItems({ basePath: '/admin', appMode: 'admin', role: 'support', t: fakeT });
+
+    expect(adminItems.map((item) => item.id)).toContain('security-advisories');
+    expect(supportItems.map((item) => item.id)).not.toContain('security-advisories');
   });
 
   it('defensively removes action states from externally supplied navigation', () => {

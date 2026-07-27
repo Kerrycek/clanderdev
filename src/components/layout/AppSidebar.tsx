@@ -19,6 +19,7 @@ import {
   Settings,
   Share2,
   Shield,
+  ShieldAlert,
   User,
   Users,
   Wifi,
@@ -27,6 +28,7 @@ import {
 import { Button } from '../ui/Button';
 import { Drawer } from '../ui/Drawer';
 import { clsx } from '../ui/clsx';
+import type { UserRole } from '../../lib/roles';
 
 export interface NavItem {
   id: string;
@@ -42,9 +44,10 @@ export function primarySidebarNavItems(items: NavItem[]): NavItem[] {
 export function buildSidebarNavItems(opts: {
   basePath: string;
   appMode: 'user' | 'admin';
+  role: UserRole;
   t: (key: any) => string;
 }): NavItem[] {
-  const { basePath, appMode, t } = opts;
+  const { basePath, appMode, role, t } = opts;
 
   const items: NavItem[] = [
     { id: 'dashboard', to: basePath, label: t('nav.dashboard'), icon: <LayoutDashboard size={18} /> },
@@ -67,6 +70,14 @@ export function buildSidebarNavItems(opts: {
   }
 
   if (appMode === 'admin') {
+    if (role === 'admin') {
+      items.push({
+        id: 'security-advisories',
+        to: `${basePath}/security-advisories`,
+        label: t('nav.security_advisories'),
+        icon: <ShieldAlert size={18} />,
+      });
+    }
     items.push({ id: 'audit', to: `${basePath}/audit`, label: t('nav.audit'), icon: <ClipboardList size={18} /> });
     items.push({ id: 'users', to: `${basePath}/users`, label: t('nav.users'), icon: <Users size={18} /> });
     items.push({
