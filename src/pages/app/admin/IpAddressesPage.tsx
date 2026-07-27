@@ -35,9 +35,12 @@ import {
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
 import {
+  collectSuggestedIpCandidates,
+  isPrioritySuggestedIpLocation,
   sampleSuggestedIps,
   selectSuggestedIpLocations,
   SUGGESTED_IP_QUERY_LIMIT,
+  SUGGESTED_PRIORITY_LOCATION_MAX_PAGES,
 } from './ipAddresses/suggestedFreeIps';
 
 export function IpAddressesPage() {
@@ -231,16 +234,26 @@ export function IpAddressesPage() {
       const pages = await Promise.all(
         suggestedLocations.flatMap((suggestedLocation) => ([4, 6] as const).map(async (version) => ({
           locationId: suggestedLocation.id,
-          data: (
-            await fetchIpAddresses({
-              limit: SUGGESTED_IP_QUERY_LIMIT,
-              location: suggestedLocation.id,
-              version,
-              assignedToInterface: false,
-              purpose: 'vps',
-              includes: 'network__primary_location__environment,network_interface,vps,user,charged_environment',
-            })
-          ).data,
+          data: await collectSuggestedIpCandidates({
+            version,
+            locationId: suggestedLocation.id,
+            maxPages: isPrioritySuggestedIpLocation(suggestedLocation)
+              ? SUGGESTED_PRIORITY_LOCATION_MAX_PAGES
+              : 1,
+            fetchPage: async (fromId) => (
+              await fetchIpAddresses({
+                limit: SUGGESTED_IP_QUERY_LIMIT,
+                fromId,
+                location: suggestedLocation.id,
+                version,
+                user: null,
+                assignedToInterface: false,
+                order: 'asc',
+                purpose: 'vps',
+                includes: 'network__primary_location__environment,network_interface,vps,user,charged_environment',
+              })
+            ).data,
+          }),
         })))
       );
 
@@ -250,7 +263,10 @@ export function IpAddressesPage() {
       });
 
       const seen = new Set<number>();
-      return suggestedLocations.flatMap((suggestedLocation) => sampleSuggestedIps(byLocation.get(suggestedLocation.id) ?? [])
+      return suggestedLocations.flatMap((suggestedLocation) => sampleSuggestedIps(
+        byLocation.get(suggestedLocation.id) ?? [],
+        suggestedLocation.id
+      )
         .filter((ip) => {
           if (seen.has(ip.id)) return false;
           seen.add(ip.id);
