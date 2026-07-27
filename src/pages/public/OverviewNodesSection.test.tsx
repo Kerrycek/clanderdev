@@ -52,15 +52,26 @@ describe('OverviewNodesSection', () => {
       />,
     );
 
-    expect(screen.getAllByTestId('public.nodes.location_header.Praha')).toHaveLength(2);
-    expect(screen.getAllByTestId('public.nodes.location_header.Brno')).toHaveLength(2);
-    expect(screen.getAllByText('Up: 1 · Down: 0 · Total: 1')).not.toHaveLength(0);
-    expect(screen.getAllByText('Up: 0 · Down: 1 · Total: 1')).not.toHaveLength(0);
+    const praguePanels = screen.getAllByTestId('public.nodes.location.Praha');
+    const brnoPanels = screen.getAllByTestId('public.nodes.location.Brno');
 
-    const pragueHeaderRow = container.querySelector('[data-testid="public.nodes.table.Praha"] tr');
-    const brnoHeaderRow = container.querySelector('[data-testid="public.nodes.table.Brno"] tr');
+    expect(praguePanels).toHaveLength(2);
+    expect(brnoPanels).toHaveLength(2);
+    expect(screen.getAllByText('Up: 1 · Down: 0 · Total: 1')).toHaveLength(2);
+    expect(screen.getAllByText('Up: 0 · Down: 1 · Total: 1')).toHaveLength(2);
 
-    expect(pragueHeaderRow).toHaveClass('border-t-4', 'border-accent/60', 'bg-accent/10');
-    expect(brnoHeaderRow).toHaveClass('border-t-4', 'border-accent/60', 'bg-accent/10');
+    for (const panel of [...praguePanels, ...brnoPanels]) {
+      expect(panel).toHaveAttribute('data-cluster-location-layout', 'panel');
+      expect(panel).toHaveClass('rounded-lg', 'border-info-border', 'bg-surface', 'shadow-card');
+    }
+
+    expect(container.querySelector('[data-testid="public.nodes.location.Praha"] summary')).toHaveClass(
+      'border-l-4',
+      'border-info',
+      'bg-info-bg',
+    );
+    expect(container.querySelector('[data-testid="public.nodes.table.Praha"]')).toHaveTextContent('Praha-node');
+    expect(container.querySelector('[data-testid="public.nodes.table.Praha"]')).not.toHaveTextContent('Brno-node');
+    expect(container.querySelector('[data-testid="public.nodes.table.Brno"]')).toHaveTextContent('Brno-node');
   });
 });

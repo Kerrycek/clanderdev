@@ -1,4 +1,5 @@
 import type { Outage, PublicClusterStats, PublicNodeStatus } from '../../lib/api/public';
+import { compareClusterLocationLabels } from '../../lib/clusterLocations';
 import { categorizeOutage, sortOutagesNewestFirst } from '../../lib/outage';
 import type { BadgeVariant } from '../../lib/taskStatus';
 
@@ -44,7 +45,7 @@ export function groupPublicNodesByLocation(nodes: readonly PublicNodeStatus[], u
     groups.set(location, group);
   }
 
-  return Array.from(groups.values()).sort((a, b) => b.total - a.total || a.location.localeCompare(b.location));
+  return Array.from(groups.values()).sort((a, b) => compareClusterLocationLabels(a.location, b.location));
 }
 
 export function summarizePublicNodes(groups: readonly PublicNodeLocationGroup[]): PublicNodeSummary {

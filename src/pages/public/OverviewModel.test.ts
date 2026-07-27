@@ -29,6 +29,21 @@ describe('OverviewModel', () => {
     expect(summarizePublicNodes(groups)).toEqual({ ok: 3, down: 1, total: 4 });
   });
 
+  test('uses the same canonical location order as the authenticated dashboard', () => {
+    const groups = groupPublicNodesByLocation(
+      [
+        { name: 'brq1', status: true, location: { label: 'Brno' } },
+        { name: 'brq2', status: true, location: { label: 'Brno' } },
+        { name: 'brq3', status: true, location: { label: 'Brno' } },
+        { name: 'pg1', status: true, location: { label: 'Playground' } },
+        { name: 'prg1', status: true, location: { label: 'Praha' } },
+      ],
+      'Unknown',
+    );
+
+    expect(groups.map((group) => group.location)).toEqual(['Praha', 'Brno', 'Playground']);
+  });
+
   test('categorizes outages newest first', () => {
     const groups = categorizePublicOutages(
       [

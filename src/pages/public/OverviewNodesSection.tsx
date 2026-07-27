@@ -1,11 +1,11 @@
 import React from 'react';
 
 import { useI18n } from '../../app/i18n';
+import { ClusterLocationPanel } from '../../components/cluster/ClusterLocationPanel';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Spinner } from '../../components/ui/Spinner';
-import { StackedBar } from '../../components/ui/StackedBar';
 import { Table } from '../../components/ui/Table';
 import type { PublicNodeLocationGroup, PublicNodeSummary } from './OverviewModel';
 
@@ -58,43 +58,33 @@ function NodeStorageBadge(props: { node: PublicNodeLocationGroup['nodes'][number
   );
 }
 
-function NodeGroupHeader(props: { group: PublicNodeLocationGroup }) {
+function NodeLocationPanel(props: {
+  group: PublicNodeLocationGroup;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
   const i18n = useI18n();
+  const testId = `public.nodes.location.${props.group.location}`;
 
   return (
-    <div className="flex items-center justify-between gap-3" data-testid={`public.nodes.location_header.${props.group.location}`}>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="h-8 w-1 rounded-full bg-accent" aria-hidden="true" />
-        <div className="min-w-0">
-          <div className="truncate text-base font-semibold text-fg">{props.group.location}</div>
-          <div className="mt-0.5 text-xs text-muted md:hidden">
-            {i18n.t('public.overview.nodes.location_summary', {
-              ok: props.group.ok,
-              down: props.group.down,
-              total: props.group.total,
-            })}
-          </div>
-        </div>
-      </div>
-      <div className="hidden items-center gap-3 md:flex">
-        <div className="w-24">
-          <StackedBar
-            ariaLabel={i18n.t('public.overview.nodes.location_bar_aria', { location: props.group.location })}
-            segments={[
-              { value: props.group.ok, variant: 'ok', title: i18n.t('state.up') },
-              { value: props.group.down, variant: 'danger', title: i18n.t('state.down') },
-            ]}
-          />
-        </div>
-        <Badge variant={props.group.down > 0 ? 'warn' : 'ok'} className="whitespace-nowrap">
-          {i18n.t('public.overview.nodes.location_summary', {
-            ok: props.group.ok,
-            down: props.group.down,
-            total: props.group.total,
-          })}
-        </Badge>
-      </div>
-    </div>
+    <ClusterLocationPanel
+      location={props.group.location}
+      summary={i18n.t('public.overview.nodes.location_summary', {
+        ok: props.group.ok,
+        down: props.group.down,
+        total: props.group.total,
+      })}
+      summaryVariant={props.group.down > 0 ? 'warn' : 'ok'}
+      segments={[
+        { value: props.group.ok, variant: 'ok', title: i18n.t('state.up') },
+        { value: props.group.down, variant: 'danger', title: i18n.t('state.down') },
+      ]}
+      barAriaLabel={i18n.t('public.overview.nodes.location_bar_aria', { location: props.group.location })}
+      defaultOpen={props.defaultOpen}
+      testId={testId}
+    >
+      {props.children}
+    </ClusterLocationPanel>
   );
 }
 
@@ -102,37 +92,40 @@ function NodeMobileCards(props: { group: PublicNodeLocationGroup; open: boolean 
   const i18n = useI18n();
 
   return (
-    <details className="overflow-hidden rounded-lg border border-accent/30 bg-accent/10 md:hidden" open={props.open}>
-      <summary className="cursor-pointer select-none px-3 py-3"><NodeGroupHeader group={props.group} /></summary>
-      <div className="space-y-2 p-3 pt-0">
-        {props.group.nodes.map((node) => (
-          <div key={node.name} className="rounded-md border border-border bg-surface-2 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">{node.name}</div>
-              <NodeStatusBadge up={node.status} />
+    <div className="md:hidden">
+      <NodeLocationPanel group={props.group} defaultOpen={props.open}>
+        <div className="space-y-2 p-3">
+          {props.group.nodes.map((node) => (
+            <div key={node.name} className="rounded-md border border-border bg-surface-2 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">{node.name}</div>
+                <NodeStatusBadge up={node.status} />
+              </div>
+              <div className="mt-2 text-xs text-muted">
+                {i18n.t('public.overview.nodes.storage')}: <NodeStorageBadge node={node} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted">
+                <div>
+                  {i18n.t('public.overview.nodes.vps')}: {typeof node.vps_count === 'number' ? node.vps_count : '—'}
+                </div>
+                <div>{i18n.t('public.overview.nodes.cpu_used')}: {cpuUsedLabel(node)}</div>
+                <div>{i18n.t('public.overview.nodes.kernel')}: {node.kernel ? String(node.kernel) : '—'}</div>
+                <div>{i18n.t('public.overview.nodes.cgroups')}: {cgroupVersionLabel(node['cgroup_version'])}</div>
+              </div>
             </div>
-            <div className="mt-2 text-xs text-muted">
-              {i18n.t('public.overview.nodes.storage')}: <NodeStorageBadge node={node} />
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted">
-              <div>{i18n.t('public.overview.nodes.vps')}: {typeof node.vps_count === 'number' ? node.vps_count : '—'}</div>
-              <div>{i18n.t('public.overview.nodes.cpu_used')}: {cpuUsedLabel(node)}</div>
-              <div>{i18n.t('public.overview.nodes.kernel')}: {node.kernel ? String(node.kernel) : '—'}</div>
-              <div>{i18n.t('public.overview.nodes.cgroups')}: {cgroupVersionLabel(node['cgroup_version'])}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </details>
+          ))}
+        </div>
+      </NodeLocationPanel>
+    </div>
   );
 }
 
-function NodeDesktopTable(props: { groups: PublicNodeLocationGroup[] }) {
+function NodeDesktopTable(props: { group: PublicNodeLocationGroup }) {
   const i18n = useI18n();
 
   return (
-    <div className="hidden overflow-auto rounded-lg border border-border md:block">
-      <Table className="table-fixed" minWidth="md" testId="public.nodes.table">
+    <div className="hidden overflow-auto md:block">
+      <Table className="table-fixed" minWidth="md" testId={`public.nodes.table.${props.group.location}`}>
         <colgroup>
           <col style={{ width: '18%' }} />
           <col style={{ width: '16%' }} />
@@ -153,28 +146,21 @@ function NodeDesktopTable(props: { groups: PublicNodeLocationGroup[] }) {
             <th className="px-3 py-2 text-center font-medium">{i18n.t('public.overview.nodes.table.cgroups')}</th>
           </tr>
         </thead>
-        {props.groups.map((group) => (
-          <tbody key={group.location} data-testid={`public.nodes.table.${group.location}`}>
-            <tr className="border-t-4 border-accent/60 bg-accent/10">
-              <td colSpan={7} className="px-3 py-4">
-                <NodeGroupHeader group={group} />
+        <tbody>
+          {props.group.nodes.map((node) => (
+            <tr key={node.name} className="border-t border-border" data-row-variant={node.status ? undefined : 'danger'}>
+              <td className="px-3 py-2 font-medium">{node.name}</td>
+              <td className="px-3 py-2 text-center"><NodeStatusBadge up={node.status} /></td>
+              <td className="px-3 py-2 text-center"><NodeStorageBadge node={node} /></td>
+              <td className="px-3 py-2 text-center text-muted">
+                {typeof node.vps_count === 'number' ? node.vps_count : '—'}
               </td>
+              <td className="px-3 py-2 text-center text-muted">{cpuUsedLabel(node)}</td>
+              <td className="px-3 py-2 text-center text-muted">{node.kernel ? String(node.kernel) : '—'}</td>
+              <td className="px-3 py-2 text-center text-muted">{cgroupVersionLabel(node['cgroup_version'])}</td>
             </tr>
-            {group.nodes.map((node) => (
-              <tr key={node.name} className="border-t border-border" data-row-variant={node.status ? undefined : 'danger'}>
-                <td className="px-3 py-2 font-medium">{node.name}</td>
-                <td className="px-3 py-2 text-center"><NodeStatusBadge up={node.status} /></td>
-                <td className="px-3 py-2 text-center"><NodeStorageBadge node={node} /></td>
-                <td className="px-3 py-2 text-center text-muted">
-                  {typeof node.vps_count === 'number' ? node.vps_count : '—'}
-                </td>
-                <td className="px-3 py-2 text-center text-muted">{cpuUsedLabel(node)}</td>
-                <td className="px-3 py-2 text-center text-muted">{node.kernel ? String(node.kernel) : '—'}</td>
-                <td className="px-3 py-2 text-center text-muted">{cgroupVersionLabel(node['cgroup_version'])}</td>
-              </tr>
-            ))}
-          </tbody>
-        ))}
+          ))}
+        </tbody>
       </Table>
     </div>
   );
@@ -207,7 +193,13 @@ export function OverviewNodesSection(props: {
                   return <NodeMobileCards key={group.location} group={group} open={openMobile} />;
                 })}
               </div>
-              <NodeDesktopTable groups={props.groups} />
+              <div className="hidden space-y-4 md:block">
+                {props.groups.map((group) => (
+                  <NodeLocationPanel key={group.location} group={group}>
+                    <NodeDesktopTable group={group} />
+                  </NodeLocationPanel>
+                ))}
+              </div>
             </div>
           )}
         </CardBody>
