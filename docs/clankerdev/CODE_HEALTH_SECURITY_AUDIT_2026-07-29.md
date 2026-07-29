@@ -32,6 +32,8 @@ below.
   connections, images, fonts, objects and framing.
 - CI recalculates the inline-script hash and rejects stale or unsafe CSP
   declarations.
+- Every GitHub Actions workflow declares the least-privilege
+  `contents: read` permission instead of inheriting the repository default.
 - Rich news and payment content uses one allowlist sanitizer. Event handlers,
   active elements, dangerous protocols and unsafe URL normalization tricks are
   covered by an adversarial XSS corpus.
@@ -124,6 +126,12 @@ allowed because the current UI sets dynamic style properties.
 Plan and test the React Router 8.3+ migration separately. It should include
 route compatibility tests, deep-link reloads, OAuth redirects and the full
 desktop/mobile Playwright matrices.
+
+### Priority 3 — pin GitHub Actions by immutable digest
+
+The workflows use maintained major-version tags for GitHub-owned actions.
+Pinning each action to a reviewed commit SHA, with Dependabot keeping those
+digests current, would further reduce supply-chain risk.
 
 ### Verification limits
 

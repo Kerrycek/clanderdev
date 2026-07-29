@@ -6,6 +6,9 @@ on:
     - cron: '20 3 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: playwright-nightly-${{ github.ref }}
   cancel-in-progress: true
