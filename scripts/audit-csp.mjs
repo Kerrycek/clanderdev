@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { validateScriptSource } from './csp-policy.mjs';
 
 const INDEX_PATH = 'index.html';
 const NGINX_PATHS = [
@@ -34,11 +35,8 @@ if (inlineScripts.length !== 1) {
     }
 
     for (const policy of policies) {
-      if (!policy.includes(`script-src 'self' '${hash}'`)) {
-        fail(`${path} has a CSP header without the current inline-script hash`);
-      }
-      if (policy.includes("script-src 'self' 'unsafe-inline'")) {
-        fail(`${path} allows unsafe inline scripts`);
+      for (const error of validateScriptSource(policy, hash)) {
+        fail(`${path} ${error}`);
       }
     }
   }
