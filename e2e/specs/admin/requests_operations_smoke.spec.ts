@@ -63,6 +63,9 @@ test('@workflow-matrix @smoke admin requests: detail actions, inline expansion, 
   await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.approve')).toBeVisible();
 
   await expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.approve').click();
+  await expect(page.getByTestId('admin.requests.expanded.registration.123.resolve.modal')).toBeVisible();
+  await expect.poll(() => resolveBodies.length).toBe(0);
+  await page.getByTestId('admin.requests.expanded.registration.123.resolve.submit').click();
   await expect.poll(() => resolveBodies.length).toBe(1);
   expect(resolveBodies[0]).toEqual({
     registration: {
@@ -110,6 +113,8 @@ test('@workflow-matrix @smoke admin requests: rejected action error is visible',
   await page.goto('/admin/requests/registration/124');
   await expect(page.getByTestId('admin.requests.resolve.action.approve')).toBeVisible();
   await page.getByTestId('admin.requests.resolve.action.approve').click();
+  await expect(page.getByTestId('admin.requests.resolve.modal')).toBeVisible();
+  await page.getByTestId('admin.requests.resolve.submit').click();
   await expect(page.getByRole('alert')).toContainText('Cannot approve this request');
 });
 

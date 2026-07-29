@@ -69,6 +69,18 @@ describe("DatasetDownloadModel", () => {
     ).toBe("https://legacy.example/?page=backup&action=download_link&id=10");
   });
 
+  it("rejects executable and protocol-relative download links", () => {
+    expect(
+      snapshotDownloadHref({ id: 10, download_url: "javascript:alert(1)" }),
+    ).toBeUndefined();
+    expect(
+      snapshotDownloadHref({ id: 10, download_url: "data:text/html,unsafe" }),
+    ).toBeUndefined();
+    expect(
+      snapshotDownloadHref({ id: 10, download_url: "//attacker.example/file" }),
+    ).toBeUndefined();
+  });
+
   it("classifies download readiness, expiration and retry payloads", () => {
     const now = "2026-06-20T12:00:00Z";
 

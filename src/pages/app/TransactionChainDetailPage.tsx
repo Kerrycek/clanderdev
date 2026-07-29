@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-
 import { fetchTransactionChain, fetchTransactions, type Transaction, type TransactionChain } from '../../lib/api/transactions';
 import { useAppMode } from '../../app/appMode';
 import { useI18n } from '../../app/i18n';
@@ -14,7 +13,8 @@ import { useTierAIntervalMs } from '../../lib/refreshTiers';
 import { formatDateTime } from '../../lib/format';
 import { formatErrorMessage } from '../../lib/errors';
 import { resourceId, refLabel } from '../../lib/resources';
-import { durationSec, safeJson, transactionErrorText } from '../../lib/txFormat';
+import { safeContentUrl } from '../../lib/safeUrl';
+import { durationSec, safeJson } from '../../lib/txFormat';
 import { dotVariantFromRowVariant, tableVariantFromBadgeVariant } from '../../lib/variantMap';
 
 import { Badge } from '../../components/ui/Badge';
@@ -551,7 +551,7 @@ function ChainConcerns(props: { basePath: string; concerns: unknown; t: (k: any,
         const label = (c as any).label ? String((c as any).label) : '';
 
         const hasObject = Boolean((c as any).object);
-        const directHref = hasObject ? String((c as any).object) : '';
+        const directHref = hasObject ? safeContentUrl(String((c as any).object)) : null;
 
         // For common objects we can link to native pages.
         const internalHref = (() => {

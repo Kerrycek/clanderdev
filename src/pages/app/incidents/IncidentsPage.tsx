@@ -11,8 +11,8 @@ import { FilterBar } from '../../../components/layout/FilterBar';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 import { searchUsers } from '../../../lib/api/users';
-import { fetchIncidentReports, type IncidentReport } from '../../../lib/api/incidents';
-import { fetchMailboxes, type Mailbox } from '../../../lib/api/mailer';
+import { fetchIncidentReports } from '../../../lib/api/incidents';
+import { fetchMailboxes } from '../../../lib/api/mailer';
 import { compactText, formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import {
@@ -41,79 +41,16 @@ import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { VpsLookupInput } from '../../../components/ui/VpsLookupInput';
 import { dotVariantFromRowVariant } from '../../../lib/variantMap';
-
-function safeNumber(value: string): number | undefined {
-  const t = value.trim();
-  if (!t) return undefined;
-  const n = Number(t);
-  if (!Number.isFinite(n)) return undefined;
-  const i = Math.floor(n);
-  if (i <= 0) return undefined;
-  return i;
-}
-
-type SmartKey = 'id' | 'q' | 'vps' | 'user' | 'filed_by' | 'ip' | 'assignment' | 'codename' | 'mailbox';
-
-function canonicalKey(raw: string): SmartKey | null {
-  const k = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (!k) return null;
-
-  if (['id', '#', 'incident', 'report'].includes(k)) return 'id';
-  if (['q', 'query', 'search', 'text'].includes(k)) return 'q';
-  if (['vps', 'vm', 'host'].includes(k)) return 'vps';
-  if (['user', 'owner', 'login'].includes(k)) return 'user';
-  if (['filed_by', 'filed', 'reporter'].includes(k)) return 'filed_by';
-  if (['ip', 'ip_addr', 'addr'].includes(k)) return 'ip';
-  if (['assignment', 'ip_assignment', 'ip_address_assignment', 'assign', 'ipa'].includes(k)) return 'assignment';
-  if (['codename', 'code'].includes(k)) return 'codename';
-  if (['mailbox', 'mb'].includes(k)) return 'mailbox';
-
-  return null;
-}
-
-function looksLikeIpish(raw: string): boolean {
-  const s = raw.trim();
-  if (!s) return false;
-  // IPv4-ish with optional /prefix
-  if (/^(\d{1,3}\.){1,3}\d{0,3}(\/\d{1,3})?$/.test(s)) return true;
-  // IPv6-ish (very forgiving) with optional /prefix
-  if (/^[0-9a-fA-F:]+(\/\d{1,3})?$/.test(s) && s.includes(':')) return true;
-  return false;
-}
-
-function vpsActionVariant(action?: string): 'neutral' | 'warn' | 'danger' {
-  if (!action) return 'neutral';
-  if (action === 'stop') return 'danger';
-  if (action === 'suspend' || action === 'disable_network') return 'warn';
-  return 'neutral';
-}
-
-function vpsActionLabelKey(action?: string): string {
-  if (!action) return 'incidents.action.none';
-  if (action === 'none') return 'incidents.action.none';
-  if (action === 'stop') return 'incidents.action.stop';
-  if (action === 'suspend') return 'incidents.action.suspend';
-  if (action === 'disable_network') return 'incidents.action.disable_network';
-  return 'incidents.action.unknown';
-}
-
-function incidentRowVariant(r: IncidentReport): 'neutral' | 'warn' | 'danger' {
-  const a = String(r.vps_action ?? 'none');
-  if (a === 'stop') return 'danger';
-  if (a !== 'none') return 'warn';
-  return 'neutral';
-}
-
-function mailboxLabel(m: Mailbox): string {
-  const label = m.label ? String(m.label) : '';
-  const user = m.user ? String(m.user) : '';
-  const server = m.server ? String(m.server) : '';
-  if (label) return label;
-  if (user && server) return `${user}@${server}`;
-  return `#${m.id}`;
-}
+import {
+  canonicalKey,
+  incidentRowVariant,
+  looksLikeIpish,
+  mailboxLabel,
+  resolveMailboxId,
+  safeNumber,
+  vpsActionLabelKey,
+  vpsActionVariant,
+} from './incidentListSemantics';
 
 export function IncidentsPage() {
   const { basePath, mode } = useAppMode();
@@ -123,6 +60,7 @@ export function IncidentsPage() {
   const toasts = useToasts();
 
   const [sp, setSp] = useSearchParams();
+  const searchParamsKey = sp.toString();
 
   const [q, setQ] = useState(() => sp.get('q') ?? '');
   const [vps, setVps] = useState(() => sp.get('vps') ?? '');
@@ -142,16 +80,16 @@ export function IncidentsPage() {
 
   // Sync from URL on navigation.
   useEffect(() => {
-    setQ(sp.get('q') ?? '');
-    setVps(sp.get('vps') ?? '');
-    setUser(sp.get('user') ?? '');
-    setFiledBy(sp.get('filed_by') ?? '');
-    setIp(sp.get('ip_addr') ?? '');
-    setAssignment(sp.get('ip_address_assignment') ?? '');
-    setCodename(sp.get('codename') ?? '');
-    setMailbox(sp.get('mailbox') ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp.toString()]);
+    const current = new URLSearchParams(searchParamsKey);
+    setQ(current.get('q') ?? '');
+    setVps(current.get('vps') ?? '');
+    setUser(current.get('user') ?? '');
+    setFiledBy(current.get('filed_by') ?? '');
+    setIp(current.get('ip_addr') ?? '');
+    setAssignment(current.get('ip_address_assignment') ?? '');
+    setCodename(current.get('codename') ?? '');
+    setMailbox(current.get('mailbox') ?? '');
+  }, [searchParamsKey]);
 
   useEffect(() => {
     if (smartNeedle === '?') setHelpOpen(true);
@@ -296,8 +234,7 @@ export function IncidentsPage() {
   const shareUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return window.location.href;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp.toString()]);
+  }, [searchParamsKey]);
 
   const clearFilters = () => {
     setQ('');
@@ -314,27 +251,6 @@ export function IncidentsPage() {
 
   const openIncident = (id: number) => {
     navigate(`${basePath}/incidents/${id}`);
-  };
-
-  const resolveMailboxId = (
-    value: string
-  ): { id: number } | { err: 'none' | 'ambiguous' } => {
-    const needle = value.trim().toLowerCase();
-    if (!needle) return { err: 'none' };
-    const list = mailboxesQ.data ?? [];
-
-    const exact = list.filter((m) => {
-      const label = mailboxLabel(m).trim().toLowerCase();
-      return label === needle || String(m.id) === needle;
-    });
-    const [firstExact] = exact;
-    if (firstExact) return { id: Number(firstExact.id) };
-
-    const partial = list.filter((m) => mailboxLabel(m).trim().toLowerCase().includes(needle));
-    const [firstPartial] = partial;
-    if (firstPartial) return { id: Number(firstPartial.id) };
-    if (partial.length > 1) return { err: 'ambiguous' };
-    return { err: 'none' };
   };
 
   async function applySmartText(raw: string) {
@@ -503,7 +419,7 @@ export function IncidentsPage() {
           continue;
         }
 
-        const resolved = resolveMailboxId(value);
+        const resolved = resolveMailboxId(mailboxesQ.data ?? [], value);
         if ('id' in resolved) {
           nextMailbox = String(resolved.id);
         } else if (resolved.err === 'ambiguous') {

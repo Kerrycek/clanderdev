@@ -5,7 +5,8 @@ This is a **minimal backend-for-frontend** service used only for OAuth2:
 - Starts OAuth login (`/oauth/login`)
 - Handles OAuth callback & exchanges code for tokens (`/oauth/callback`)
 - Stores access/refresh tokens in a server-side session (keeps `client_secret` secret)
-- Exposes `/config.js` for the SPA to read runtime config and the current access token
+- Exposes public runtime config from `/config.js`
+- Exposes the current access token only as same-origin JSON from `/session.json`
 
 It **does not proxy** HaveAPI calls. The SPA still calls `https://api.vpsfree.cz` directly.
 
@@ -13,7 +14,8 @@ It **does not proxy** HaveAPI calls. The SPA still calls `https://api.vpsfree.cz
 
 The OAuth2 token exchange for this deployment uses the **authorization code** grant with a
 **client secret**. A static SPA cannot safely keep a secret, so we do the code→token exchange
-server-side and expose only the **access token** to the browser.
+server-side. The browser reads the **access token** from a non-executable,
+same-origin JSON response; it is never embedded in `config.js`.
 
 ## HaveAPI auth header (important)
 

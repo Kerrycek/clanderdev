@@ -12,10 +12,7 @@ import { getMetaActionStateId } from '../../lib/api/haveapi';
 import { fetchUserStateLogs, fetchVpsStateLogs } from '../../lib/api/lifetimes';
 import {
   adminDateTimeInputToIso,
-  dateToAdminDateTimeInput,
   isoToAdminDateTimeInput,
-  isoToLocalInput,
-  localInputToIso,
 } from '../../lib/datetimeLocal';
 import { formatErrorMessage } from '../../lib/errors';
 import { formatDateTime } from '../../lib/format';
@@ -32,48 +29,14 @@ import { Select } from '../ui/Select';
 import { Spinner } from '../ui/Spinner';
 import { TableCard } from '../ui/TableCard';
 import { Textarea } from '../ui/Textarea';
-
-type LifetimeKind = 'vps' | 'user';
-
-function stateHelpKey(state: string): string | null {
-  const st = state.trim();
-  if (st === 'active') return 'lifetimes.help.active';
-  if (st === 'suspended') return 'lifetimes.help.suspended';
-  if (st === 'soft_delete') return 'lifetimes.help.soft_delete';
-  if (st === 'hard_delete') return 'lifetimes.help.hard_delete';
-  if (st === 'deleted') return 'lifetimes.help.deleted';
-  return null;
-}
-
-type SnoozePreset = '1w' | '2w' | 'custom' | 'dont';
-
-function snoozeIso(preset: SnoozePreset, customLocal: string): { iso: string | null; valid: boolean } {
-  const now = Date.now();
-
-  if (preset === '1w') return { iso: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-  if (preset === '2w') return { iso: new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-  if (preset === 'dont') return { iso: new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-
-  // custom
-  if (!customLocal.trim()) return { iso: null, valid: false };
-  const parsed = localInputToIso(customLocal);
-  if (!parsed.valid || !parsed.iso) return { iso: null, valid: false };
-  return { iso: parsed.iso, valid: true };
-}
-
-function normalizeStateLogValue<T>(v: any, ...keys: string[]): T | undefined {
-  for (const k of keys) {
-    if (v && Object.prototype.hasOwnProperty.call(v, k)) return v[k] as T;
-  }
-  return undefined;
-}
-
-function softDeleteExpirationInput(): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  d.setSeconds(0, 0);
-  return dateToAdminDateTimeInput(d);
-}
+import {
+  type LifetimeKind,
+  normalizeStateLogValue,
+  type SnoozePreset,
+  snoozeIso,
+  softDeleteExpirationInput,
+  stateHelpKey,
+} from './lifecycleSemantics';
 
 export function LifecyclePanel(props: {
   kind: LifetimeKind;
@@ -520,7 +483,7 @@ export function LifecyclePanel(props: {
                     // If expiration is cleared, also clear remind-after in the form.
                     if (!e.target.value.trim()) setAdminRemindLocal('');
                   }}
-                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  placeholder={t('common.datetime.placeholder')}
                   testId="lifetimes.admin.expiration"
                 />
                 <Button
@@ -542,7 +505,7 @@ export function LifecyclePanel(props: {
                   value={adminRemindLocal}
                   onChange={(e) => setAdminRemindLocal(e.target.value)}
                   disabled={!adminExpirationLocal.trim()}
-                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  placeholder={t('common.datetime.placeholder')}
                   testId="lifetimes.admin.remind_after"
                 />
                 <Button

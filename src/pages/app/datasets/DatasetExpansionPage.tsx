@@ -37,63 +37,15 @@ import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { hasActiveChains, objectStateBadge } from '../../../lib/taskStatus';
 
 import { useDatasetContext } from './DatasetContext';
-
-type CreateMode = 'create' | 'register';
-
-type NewFormState = {
-  mode: CreateMode;
-  addedSpaceGiB: string;
-  originalRefquotaGiB: string;
-  enableNotifications: boolean;
-  enableShrink: boolean;
-  stopVps: boolean;
-  maxOverDays: string;
-};
-
-type EditFormState = {
-  enableNotifications: boolean;
-  enableShrink: boolean;
-  stopVps: boolean;
-  maxOverDays: string;
-};
-
-function defaultNewForm(mode: CreateMode): NewFormState {
-  return {
-    mode,
-    addedSpaceGiB: '20',
-    originalRefquotaGiB: '',
-    enableNotifications: true,
-    enableShrink: true,
-    stopVps: true,
-    maxOverDays: '30',
-  };
-}
-
-function editFormFromExpansion(exp: DatasetExpansion): EditFormState {
-  return {
-    enableNotifications: exp.enable_notifications !== false,
-    enableShrink: exp.enable_shrink !== false,
-    stopVps: exp.stop_vps !== false,
-    maxOverDays:
-      typeof exp.max_over_refquota_seconds === 'number' && Number.isFinite(exp.max_over_refquota_seconds)
-        ? String(Math.round(exp.max_over_refquota_seconds / 86_400))
-        : '',
-  };
-}
-
-function parseGiBToMiB(raw: string): number | null {
-  const n = Number(String(raw).trim());
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * 1024);
-}
-
-function parseDaysToSeconds(raw: string): number | undefined | null {
-  const s = String(raw).trim();
-  if (!s) return undefined;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * 86_400);
-}
+import {
+  datasetExpansionEditForm,
+  defaultDatasetExpansionForm,
+  parseExpansionDays,
+  parseExpansionGiB,
+  type DatasetExpansionCreateMode,
+  type DatasetExpansionEditFormState,
+  type DatasetExpansionNewFormState,
+} from './DatasetExpansionFormModel';
 
 function expansionStateBadge(exp: DatasetExpansion, t: (k: string) => string) {
   const st = String(exp.state ?? '').trim().toLowerCase();
@@ -113,10 +65,10 @@ export function DatasetExpansionPage() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const expansionId = typeof (dataset as any).dataset_expansion?.id === 'number' ? Number((dataset as any).dataset_expansion.id) : null;
-  const [newOpen, setNewOpen] = useState<CreateMode | null>(null);
-  const [newForm, setNewForm] = useState<NewFormState>(defaultNewForm('create'));
+  const [newOpen, setNewOpen] = useState<DatasetExpansionCreateMode | null>(null);
+  const [newForm, setNewForm] = useState<DatasetExpansionNewFormState>(defaultDatasetExpansionForm('create'));
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  const [editForm, setEditForm] = useState<DatasetExpansionEditFormState | null>(null);
   const [addSpaceOpen, setAddSpaceOpen] = useState(false);
   const [addSpaceGiB, setAddSpaceGiB] = useState('10');
 
@@ -158,14 +110,14 @@ export function DatasetExpansionPage() {
   }
 
   const createM = useMutation({
-    mutationFn: async (form: NewFormState) => {
+    mutationFn: async (form: DatasetExpansionNewFormState) => {
       await preflightDatasetNotBusy();
-      const added = parseGiBToMiB(form.addedSpaceGiB);
-      const maxSeconds = parseDaysToSeconds(form.maxOverDays);
+      const added = parseExpansionGiB(form.addedSpaceGiB);
+      const maxSeconds = parseExpansionDays(form.maxOverDays);
       if (added === null) throw new Error(t('dataset.expansion.validation.added_space'));
       if (maxSeconds === null) throw new Error(t('dataset.expansion.validation.max_days'));
       if (form.mode === 'register') {
-        const original = parseGiBToMiB(form.originalRefquotaGiB);
+        const original = parseExpansionGiB(form.originalRefquotaGiB);
         if (original === null) throw new Error(t('dataset.expansion.validation.original_refquota'));
         return registerExpandedDataset({
           dataset: dataset.id,
@@ -199,7 +151,7 @@ export function DatasetExpansionPage() {
       await qc.invalidateQueries({ queryKey: ['datasets', 'show', dataset.id] });
       await qc.invalidateQueries({ queryKey: ['dataset_expansions'] });
       setNewOpen(null);
-      setNewForm(defaultNewForm('create'));
+      setNewForm(defaultDatasetExpansionForm('create'));
       refetch();
       refetchChains();
       pushToast({ variant: 'ok', title: t('dataset.expansion.create.success') });
@@ -212,10 +164,10 @@ export function DatasetExpansionPage() {
   });
 
   const updateM = useMutation({
-    mutationFn: async (form: EditFormState) => {
+    mutationFn: async (form: DatasetExpansionEditFormState) => {
       await preflightDatasetNotBusy();
       if (expansionId === null) throw new Error(t('dataset.expansion.internal_missing_id'));
-      const maxSeconds = parseDaysToSeconds(form.maxOverDays);
+      const maxSeconds = parseExpansionDays(form.maxOverDays);
       if (maxSeconds === null) throw new Error(t('dataset.expansion.validation.max_days'));
       return updateDatasetExpansion(expansionId, {
         enable_notifications: form.enableNotifications,
@@ -242,7 +194,7 @@ export function DatasetExpansionPage() {
     mutationFn: async () => {
       await preflightDatasetNotBusy();
       if (expansionId === null) throw new Error(t('dataset.expansion.internal_missing_id'));
-      const added = parseGiBToMiB(addSpaceGiB);
+      const added = parseExpansionGiB(addSpaceGiB);
       if (added === null) throw new Error(t('dataset.expansion.validation.added_space'));
       return addDatasetExpansionSpace(expansionId, { added_space: added });
     },
@@ -320,7 +272,7 @@ export function DatasetExpansionPage() {
                       testId="dataset.expansion.edit.open"
                       variant="secondary"
                       onClick={() => {
-                        setEditForm(editFormFromExpansion(currentExpansion));
+                        setEditForm(datasetExpansionEditForm(currentExpansion));
                         setEditOpen(true);
                       }}
                       disabled={busy}
@@ -465,7 +417,7 @@ export function DatasetExpansionPage() {
                   testId="dataset.expansion.register.open"
                   variant="secondary"
                   onClick={() => {
-                    setNewForm(defaultNewForm('register'));
+                    setNewForm(defaultDatasetExpansionForm('register'));
                     setNewOpen('register');
                   }}
                   disabled={busy}

@@ -1,3 +1,4 @@
+// Profile locale chunk: resources
 export const csProfile_resources = {
   "profile.resources.title": "Prostředky",
   "profile.resources.subtitle": "Aktuální přidělená kapacita a zbývající prostředky.",

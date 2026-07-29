@@ -67,7 +67,7 @@ function renderPage() {
               relatime: false,
               recordsize: 128 * 1024,
               sync: 'standard',
-            } as any,
+            },
             refetch: vi.fn(),
             section: 'datasets',
             listPath: '/datasets',

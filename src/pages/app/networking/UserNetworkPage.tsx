@@ -20,7 +20,7 @@ import { TableCard } from '../../../components/ui/TableCard';
 import type { ResourceRef } from '../../../lib/api/appTypes';
 import { fetchIpAddresses, fetchIpAddressesForVps, type IpAddress } from '../../../lib/api/ipAddresses';
 import type { NetworkInterface } from '../../../lib/api/networkInterfaces';
-import { fetchVpsList, type Vps } from '../../../lib/api/vps';
+import { fetchVpsList } from '../../../lib/api/vps';
 import { AssignIpAddressModal } from './AssignIpAddressModal';
 import {
   assignableIpKind,
@@ -38,6 +38,38 @@ type KindFilter = 'all' | AssignableIpKind;
 interface ScopedIpAddress {
   ip: IpAddress;
   vpsId: number | null;
+}
+
+const IP_LOOKUP_CONCURRENCY = 6;
+
+async function fetchAssignedIpAddresses(vpsIds: number[]): Promise<ScopedIpAddress[]> {
+  const responses: Array<{ vpsId: number; ips: IpAddress[] }> = [];
+
+  for (let offset = 0; offset < vpsIds.length; offset += IP_LOOKUP_CONCURRENCY) {
+    const batch = vpsIds.slice(offset, offset + IP_LOOKUP_CONCURRENCY);
+    responses.push(
+      ...(await Promise.all(
+        batch.map(async (vpsId) => ({
+          vpsId,
+          ips: (
+            await fetchIpAddressesForVps(vpsId, {
+              limit: 250,
+              includes: 'network__primary_location__environment,network_interface__vps,user',
+            })
+          ).data,
+        })),
+      )),
+    );
+  }
+
+  const seen = new Set<number>();
+  return responses.flatMap(({ vpsId, ips }) =>
+    ips.flatMap((ip) => {
+      if (seen.has(ip.id)) return [];
+      seen.add(ip.id);
+      return [{ ip, vpsId: ipVpsId(ip) ?? vpsId }];
+    }),
+  );
 }
 
 function interfaceId(ip: IpAddress): number | null {
@@ -101,26 +133,7 @@ export function UserNetworkPage() {
     queryKey: ['ip_address', 'user-network', 'assigned', { userId, scopedUserId, vpsIds }],
     queryFn: async (): Promise<ScopedIpAddress[]> => {
       if (vpsIds.length === 0) return [];
-
-      const responses = await Promise.all(
-        vpsIds.map(async (vpsId) => ({
-          vpsId,
-          ips: (
-            await fetchIpAddressesForVps(vpsId, {
-              limit: 250,
-              includes: 'network__primary_location__environment,network_interface__vps,user',
-            })
-          ).data,
-        }))
-      );
-      const seen = new Set<number>();
-      return responses.flatMap(({ vpsId, ips }) =>
-        ips.flatMap((ip) => {
-          if (seen.has(ip.id)) return [];
-          seen.add(ip.id);
-          return [{ ip, vpsId: ipVpsId(ip) ?? vpsId }];
-        })
-      );
+      return fetchAssignedIpAddresses(vpsIds);
     },
     enabled: vpsesQ.isSuccess,
     staleTime: 5_000,

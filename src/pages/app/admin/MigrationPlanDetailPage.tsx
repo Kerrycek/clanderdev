@@ -42,8 +42,6 @@ import { Spinner } from '../../../components/ui/Spinner';
 import { ChipLink, MiniLink } from '../../../components/ui/ChipLink';
 
 
-const PLAN_STATES = ['staged', 'running', 'cancelling', 'failing', 'cancelled', 'done', 'error'] as const;
-
 function planBadge(
   t: (key: any) => string,
   state: unknown

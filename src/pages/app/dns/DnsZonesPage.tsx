@@ -48,68 +48,16 @@ import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { toneSurfaceClass } from '../../../components/ui/tone';
-
-function zoneName(z: DnsZone): string {
-  if (typeof z.name === 'string' && z.name) return z.name;
-  return `#${z.id}`;
-}
-
-function canonicalDnsZoneName(value: string): string {
-  const name = value.trim();
-  if (!name) return '';
-  return name.endsWith('.') ? name : `${name}.`;
-}
-
-function isValidDnsZoneEmail(value: string): boolean {
-  return /^[^@\s]+@[^\s]+$/.test(value.trim());
-}
-
-function normalizeRole(value: string): 'forward_role' | 'reverse_role' | undefined {
-  const v = value.trim().toLowerCase();
-  if (!v) return undefined;
-  if (v === 'forward' || v === 'forward_role') return 'forward_role';
-  if (v === 'reverse' || v === 'reverse_role') return 'reverse_role';
-  return undefined;
-}
-
-function normalizeSource(value: string): 'internal_source' | 'external_source' | undefined {
-  const v = value.trim().toLowerCase();
-  if (!v) return undefined;
-  if (v === 'internal' || v === 'internal_source') return 'internal_source';
-  if (v === 'external' || v === 'external_source') return 'external_source';
-  return undefined;
-}
-
-function roleLabel(t: (key: string) => string, role: string): string {
-  if (role === 'forward_role') return t('dns.zones.role.forward');
-  if (role === 'reverse_role') return t('dns.zones.role.reverse');
-  return role.replace(/[_-]+/g, ' ');
-}
-
-function sourceLabel(source: string): string {
-  if (source === 'internal_source') return 'internal';
-  if (source === 'external_source') return 'external';
-  return source;
-}
-
-function canonicalKey(
-  raw: string
-): 'q' | 'user' | 'enabled' | 'dnssec' | 'role' | 'source' | 'id' | null {
-  const k = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (!k) return null;
-
-  if (k === 'q' || k === 'query' || k === 'search') return 'q';
-  if (k === 'user' || k === 'owner') return 'user';
-  if (k === 'enabled' || k === 'status') return 'enabled';
-  if (k === 'dnssec' || k === 'dnssec_enabled') return 'dnssec';
-  if (k === 'role') return 'role';
-  if (k === 'source') return 'source';
-  if (k === 'id') return 'id';
-
-  return null;
-}
+import {
+  canonicalDnsZoneName,
+  canonicalKey,
+  isValidDnsZoneEmail,
+  normalizeRole,
+  normalizeSource,
+  roleLabel,
+  sourceLabel,
+  zoneName,
+} from './dnsZoneListSemantics';
 
 export function DnsZonesPage() {
   const { basePath, mode } = useAppMode();

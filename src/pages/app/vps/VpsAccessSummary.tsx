@@ -1,7 +1,6 @@
 import React from 'react';
 
 import { useI18n } from '../../../app/i18n';
-import { Alert } from '../../../components/ui/Alert';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { clsx } from '../../../components/ui/clsx';
 import type { VpsAccessChecklistItem, VpsAccessChecklistState } from './VpsAccessModel';

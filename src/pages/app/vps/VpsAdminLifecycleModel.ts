@@ -10,7 +10,6 @@ import {
   parseRequiredId,
   pickedNodeLabel,
   resourceId,
-  vpsHostname,
 } from './VpsLifecycleModel';
 
 export type TemplateForm = {

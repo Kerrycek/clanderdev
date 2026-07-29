@@ -22,7 +22,7 @@ describe('gateDatasetAction', () => {
   });
 
   it('does not block safe actions when the API omits dataset state', () => {
-    const dataset = { id: 10 } as any;
+    const dataset = { id: 10, name: 'test' };
     expect(gateDatasetAction('snapshot.create', { dataset, role: 'user' }).allowed).toBe(true);
     expect(gateDatasetAction('download.create', { dataset, role: 'user' }).allowed).toBe(true);
   });

@@ -14,8 +14,6 @@ import { fetchDatasets, type Dataset } from '../../../lib/api/datasets';
 import { searchUsers } from '../../../lib/api/users';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
-import { formatMiB } from '../../../lib/format';
-import { usageSeverityFromRatio } from '../../../lib/usage';
 import { objectStateBadge } from '../../../lib/taskStatus';
 import { dotVariantFromBadgeVariant, dotVariantFromRowVariant } from '../../../lib/variantMap';
 import { parsePositiveInt } from '../../../lib/parse';
@@ -40,50 +38,13 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { SmartFilterInput, type SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
 import { SmartInputHelp } from '../../../components/ui/SmartInputHelp';
 import { StatusDot } from '../../../components/ui/StatusDot';
-import { StackedBar } from '../../../components/ui/StackedBar';
 import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { VpsLookupInput } from '../../../components/ui/VpsLookupInput';
 import { toneSurfaceClass } from '../../../components/ui/tone';
 
-import { datasetUsageBreakdown } from './DatasetUsageModel';
-
-function DatasetUsage(props: { used?: number; refquota?: number; avail?: number }) {
-  const { t } = useI18n();
-  const usedRaw = typeof props.used === 'number' && Number.isFinite(props.used) ? props.used : undefined;
-  const quotaRaw =
-    typeof props.refquota === 'number' && Number.isFinite(props.refquota) && props.refquota > 0 ? props.refquota : undefined;
-
-  const usage = useMemo(
-    () => datasetUsageBreakdown(props),
-    [props.avail, props.refquota, props.used]
-  );
-
-  const segs = useMemo(() => {
-    if (usage === null) return [{ value: 1, variant: 'neutral' as const, title: t('datasets.usage.no_data') }];
-
-    const v = usageSeverityFromRatio(usage.ratio);
-    return [
-      { value: usage.used, variant: v, title: t('datasets.usage.used_mib', { mib: usage.used.toFixed(0) }) },
-      {
-        value: usage.free,
-        variant: 'neutral' as const,
-        title: t('datasets.usage.free_mib', { mib: usage.free.toFixed(0) }),
-      },
-    ];
-  }, [t, usage]);
-
-  return (
-    <div className="space-y-1">
-      <StackedBar ariaLabel={t('datasets.usage.aria_label')} segments={segs} />
-      <div className="flex items-center justify-between text-xs text-faint">
-        <span>{usedRaw !== undefined ? formatMiB(usedRaw) : t('common.na')}</span>
-        <span>{quotaRaw !== undefined ? formatMiB(quotaRaw) : '∞'}</span>
-      </div>
-    </div>
-  );
-}
+import { DatasetUsage } from './DatasetUsage';
 
 function datasetLabel(ds: Dataset): string {
   const label = ds.full_name ?? ds.name ?? ds.label;

@@ -24,7 +24,7 @@ import { objectRef } from '../../../../lib/objectRef';
 import type { ObjectRef } from '../../../../lib/objectRef';
 
 import { formatErrorMessage } from '../../../../lib/errors';
-import { formatDate, formatDateTime } from '../../../../lib/format';
+import { formatDate } from '../../../../lib/format';
 import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
 import { getPaidUntilStatus, paidUntilBadgeVariant, paidUntilStatusLabelKey } from '../../../../lib/paymentsBadges';
 import { formatMoneyLike, safeInt } from '../../../../lib/paymentsFormat';

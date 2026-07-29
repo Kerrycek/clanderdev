@@ -1,5 +1,6 @@
 // Common base actions, states, and object labels
 export const csCommon_base = {
+  'common.datetime.placeholder': 'RRRR-MM-DD HH:MM:SS',
   'common.close': 'Zavřít',
   'common.cancel': 'Zrušit',
   'common.all': 'Vše',

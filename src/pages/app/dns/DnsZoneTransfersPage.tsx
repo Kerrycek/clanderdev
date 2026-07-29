@@ -38,9 +38,12 @@ import { isSecondaryDnsZone } from './DnsZoneModel';
 import { preflightDnsZoneNotBusy } from './dnsPreflight';
 
 function peerLabel(transfer: DnsZoneTransfer): string {
-  const host: any = transfer.host_ip_address ?? {};
-  const ip: any = host.ip_address ?? {};
-  return String(ip.ip_addr ?? host.addr ?? `#${host.id ?? transfer.id}`);
+  const host = transfer.host_ip_address;
+  if (!host) return `#${transfer.id}`;
+  const ip = 'ip_address' in host ? host.ip_address : undefined;
+  const ipAddress = ip && typeof ip === 'object' && 'ip_addr' in ip ? ip.ip_addr : undefined;
+  const address = 'addr' in host ? host.addr : undefined;
+  return String(ipAddress ?? address ?? `#${host.id ?? transfer.id}`);
 }
 
 function peerTypeLabel(v: unknown): string {
@@ -51,13 +54,15 @@ function peerTypeLabel(v: unknown): string {
 }
 
 function serverName(row: DnsServerZone): string {
-  const server: any = row.dns_server ?? {};
-  return String(server.name ?? (typeof server.id === 'number' ? `#${server.id}` : '—'));
+  const server = row.dns_server;
+  if (!server) return '—';
+  const name = 'name' in server ? server.name : undefined;
+  return String(name ?? `#${server.id}`);
 }
 
 function transferSnippet(transfer: DnsZoneTransfer): string {
   const host = peerLabel(transfer);
-  const keyName = typeof (transfer as any).dns_tsig_key?.name === 'string' ? String((transfer as any).dns_tsig_key.name) : '';
+  const keyName = transfer.dns_tsig_key?.name ?? '';
   const lines = [
     `server ${host} {`,
     keyName ? `  keys { ${keyName}; };` : '  # no TSIG key configured',
@@ -101,7 +106,7 @@ export function DnsZoneTransfersPage() {
   });
 
   const transfers = listQ.data?.data ?? [];
-  const cursor = useMemo(() => cursorFromDescendingPage(transfers as any), [transfers]);
+  const cursor = useMemo(() => cursorFromDescendingPage(transfers), [transfers]);
   const hasMore = transfers.length >= pagination.limit;
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -123,11 +128,11 @@ export function DnsZoneTransfersPage() {
     },
     onMutate: () => chrome.acquireLocalLock(zoneRef),
     onSuccess: (res) => {
-      const actionStateId = getMetaActionStateId((res as any)?.meta);
+      const actionStateId = getMetaActionStateId(res.meta);
       if (actionStateId !== undefined) {
         chrome.trackActionState(actionStateId, {
           actionLabelKey: 'action.dns.zone_transfer.create.label',
-          objectLabel: String((zone as any).name ?? `Zone #${zone.id}`),
+          objectLabel: String(zone.name ?? `Zone #${zone.id}`),
           object: zoneRef,
         });
       }
@@ -138,8 +143,10 @@ export function DnsZoneTransfersPage() {
       void listQ.refetch();
       refetchChains();
     },
-    onError: (err: any) => {
-      if (err?.code === 'BUSY') chrome.openTasks();
+    onError: (err: unknown) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'BUSY') {
+        chrome.openTasks();
+      }
     },
     onSettled: () => chrome.releaseLocalLock(zoneRef),
   });
@@ -152,11 +159,11 @@ export function DnsZoneTransfersPage() {
     },
     onMutate: () => chrome.acquireLocalLock(zoneRef),
     onSuccess: (res) => {
-      const actionStateId = getMetaActionStateId((res as any)?.meta);
+      const actionStateId = getMetaActionStateId(res.meta);
       if (actionStateId !== undefined) {
         chrome.trackActionState(actionStateId, {
           actionLabelKey: 'action.dns.zone_transfer.delete.label',
-          objectLabel: String((zone as any).name ?? `Zone #${zone.id}`),
+          objectLabel: String(zone.name ?? `Zone #${zone.id}`),
           object: zoneRef,
         });
       }
@@ -164,15 +171,20 @@ export function DnsZoneTransfersPage() {
       void listQ.refetch();
       refetchChains();
     },
-    onError: (err: any) => {
-      if (err?.code === 'BUSY') chrome.openTasks();
+    onError: (err: unknown) => {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'BUSY') {
+        chrome.openTasks();
+      }
     },
     onSettled: () => chrome.releaseLocalLock(zoneRef),
   });
 
   const tsigOptions = [
     { value: '', label: t('common.none') },
-    ...((tsigQ.data ?? []).map((k: any) => ({ value: String(k.id), label: `${String(k.name ?? `#${k.id}`)}${k.user?.login ? ` · ${String(k.user.login)}` : ''}` }))),
+    ...((tsigQ.data ?? []).map((key) => ({
+      value: String(key.id),
+      label: `${String(key.name ?? `#${key.id}`)}${key.user?.login ? ` · ${String(key.user.login)}` : ''}`,
+    }))),
   ];
 
   if (listQ.isLoading) return <LoadingState testId="dns.transfers.loading" label={t('dns.zone.transfers.loading')} />;
@@ -214,8 +226,8 @@ export function DnsZoneTransfersPage() {
                   return (
                     <tr key={transfer.id} className="border-t border-border" data-testid={`dns.transfers.row.${transfer.id}`}>
                       <td className="py-2 pl-4 pr-3 font-medium text-fg">{peerLabel(transfer)}</td>
-                      <td className="py-2 pr-3"><Badge variant="neutral">{peerTypeLabel((transfer as any).peer_type)}</Badge></td>
-                      <td className="py-2 pr-3">{(transfer as any).dns_tsig_key?.name ? <Badge variant="ok">{String((transfer as any).dns_tsig_key.name)}</Badge> : <Badge variant="neutral">{t('common.none')}</Badge>}</td>
+                      <td className="py-2 pr-3"><Badge variant="neutral">{peerTypeLabel(transfer.peer_type)}</Badge></td>
+                      <td className="py-2 pr-3">{transfer.dns_tsig_key?.name ? <Badge variant="ok">{transfer.dns_tsig_key.name}</Badge> : <Badge variant="neutral">{t('common.none')}</Badge>}</td>
                       <td className="py-2 pr-3">{transfer.created_at ? formatDateTime(String(transfer.created_at)) : t('common.na')}</td>
                       <td className="py-2 pr-3">
                         <details>
@@ -272,11 +284,11 @@ export function DnsZoneTransfersPage() {
                   {(serverZonesQ.data ?? []).map((row) => (
                     <tr key={row.id} className="border-t border-border" data-testid={`dns.transfers.status.row.${row.id}`}>
                       <td className="py-2 pl-4 pr-3 font-medium text-fg">{serverName(row)}</td>
-                      <td className="py-2 pr-3">{typeof (row as any).serial === 'number' ? Number((row as any).serial) : t('common.na')}</td>
-                      <td className="py-2 pr-3">{(row as any).loaded_at ? formatDateTime(String((row as any).loaded_at)) : t('common.na')}</td>
-                      <td className="py-2 pr-3">{(row as any).refresh_at ? formatDateTime(String((row as any).refresh_at)) : t('common.na')}</td>
-                      <td className="py-2 pr-3">{(row as any).expires_at ? formatDateTime(String((row as any).expires_at)) : t('common.na')}</td>
-                      <td className="py-2 pr-4">{(row as any).last_check_at ? formatDateTime(String((row as any).last_check_at)) : t('common.na')}</td>
+                      <td className="py-2 pr-3">{typeof row.serial === 'number' ? row.serial : t('common.na')}</td>
+                      <td className="py-2 pr-3">{row.loaded_at ? formatDateTime(row.loaded_at) : t('common.na')}</td>
+                      <td className="py-2 pr-3">{row.refresh_at ? formatDateTime(row.refresh_at) : t('common.na')}</td>
+                      <td className="py-2 pr-3">{row.expires_at ? formatDateTime(row.expires_at) : t('common.na')}</td>
+                      <td className="py-2 pr-4">{row.last_check_at ? formatDateTime(row.last_check_at) : t('common.na')}</td>
                     </tr>
                   ))}
                 </tbody>

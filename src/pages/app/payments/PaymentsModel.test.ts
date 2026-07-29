@@ -70,6 +70,17 @@ describe('PaymentsModel', () => {
     expect(html).not.toContain('style=');
   });
 
+  test('rejects protocol-relative payment links and images', () => {
+    const html = sanitizePaymentInstructionsHtml(`
+      <a href="//attacker.example/track">bad link</a>
+      <img src="//attacker.example/pixel" alt="tracking">
+    `);
+
+    expect(html).toContain('<a>bad link</a>');
+    expect(html).toContain('<img>');
+    expect(html).not.toContain('attacker.example');
+  });
+
   test('localizes legacy payment instructions for Czech UI', () => {
     const html = sanitizePaymentInstructionsHtml(`
       <h3>Payment in CZK</h3>

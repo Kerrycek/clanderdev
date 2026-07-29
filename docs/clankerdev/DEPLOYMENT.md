@@ -8,13 +8,13 @@ This deployment serves WebUI Next at the **origin root**:
 
 - **Static SPA (nginx)** served from `/var/www/clankerdev.vpsfree.cz/current`
 - **OAuth BFF** (`webui-next/bff/server.js`) bound to `127.0.0.1:3001` behind nginx
-  - endpoints: `/config.js`, `/oauth/login`, `/oauth/callback`, `/oauth/logout`
+  - endpoints: `/config.js`, `/session.json`, `/oauth/login`, `/oauth/callback`, `/oauth/logout`
 
 The BFF only handles OAuth. It does **not** proxy HaveAPI.
 
 ## Why BFF exists
 
-The OAuth2 `authorization_code` token exchange for this deployment uses a **client secret**. A static SPA cannot keep secrets, so the BFF exchanges the code for tokens server-side and exposes only an access token to the browser.
+The OAuth2 `authorization_code` token exchange for this deployment uses a **client secret**. A static SPA cannot keep secrets, so the BFF exchanges the code for tokens server-side. Public runtime settings are served by `/config.js`; the current access token is returned only by the non-executable, same-origin `/session.json` endpoint.
 
 ## OAuth client settings
 

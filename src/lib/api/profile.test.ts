@@ -10,7 +10,7 @@ import {
   fetchUserSession,
   fetchUserSessions,
   updateUserSessionLabel,
-} from './profile';
+} from './userDossier';
 
 function makeOkResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -48,7 +48,7 @@ afterEach(() => {
   window.vpsAdmin = undefined;
 });
 
-describe('profile API wrappers', () => {
+describe('user dossier API wrappers', () => {
   it('fetchUserPublicKeys uses /users/:id/public_keys and public_key namespace for query params', async () => {
     setMockRuntime();
     const fetchMock = installOkFetch({

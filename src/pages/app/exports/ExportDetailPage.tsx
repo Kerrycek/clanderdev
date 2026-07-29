@@ -37,7 +37,6 @@ import {
   buildUpdateExportPayload,
   editFormFromExport,
   exportAddress,
-  hostLabel,
   parsePositiveInt,
   sanitizeMountName,
   snippetFstab,

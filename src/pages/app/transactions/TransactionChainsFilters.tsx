@@ -19,7 +19,6 @@ interface TransactionChainsFiltersProps {
   mode: 'app' | 'admin';
   smartInputRef: MutableRefObject<HTMLInputElement | null>;
   smart: string;
-  smartNeedle: string;
   smartErrorsCount: number;
   onSmartChange: (value: string) => void;
   onSmartSubmit: () => void;
@@ -55,7 +54,6 @@ export function TransactionChainsFilters({
   mode,
   smartInputRef,
   smart,
-  smartNeedle,
   smartErrorsCount,
   onSmartChange,
   onSmartSubmit,

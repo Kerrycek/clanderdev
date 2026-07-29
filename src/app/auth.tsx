@@ -81,9 +81,9 @@ export function AuthProvider(props: {
     const currentCfg = getRuntimeConfig();
     clearStoredOAuthToken(currentCfg.oauth2.storage);
 
-    if ((window as any).vpsAdmin) {
-      (window as any).vpsAdmin.accessToken = undefined;
-      (window as any).vpsAdmin.sessionToken = undefined;
+    if (window.vpsAdmin) {
+      window.vpsAdmin.accessToken = undefined;
+      window.vpsAdmin.sessionToken = undefined;
     }
 
     if (!redirectExpiredSessions) {

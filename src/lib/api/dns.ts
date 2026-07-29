@@ -4,7 +4,6 @@ export interface ResourceRef {
   id: number;
   [k: string]: unknown;
 }
-
 export interface DnsZone {
   id: number;
   user?: ResourceRef;
@@ -12,6 +11,8 @@ export interface DnsZone {
   label?: string;
   role?: string;
   source?: string;
+  type?: string;
+  zone_type?: string;
   reverse_network_address?: string;
   reverse_network_prefix?: number;
   dnssec_enabled?: boolean;
@@ -23,7 +24,6 @@ export interface DnsZone {
   updated_at?: string;
   [k: string]: unknown;
 }
-
 export interface DnsRecord {
   id: number;
   user?: ResourceRef;

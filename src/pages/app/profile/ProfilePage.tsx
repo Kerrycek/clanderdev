@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../../app/auth';
 import { getRuntimeConfig } from '../../../app/config';
 import { useI18n } from '../../../app/i18n';
-import { useUiSettings, type UiLanguagePreference, type UiThemePreference } from '../../../app/uiSettings';
+import { useUiSettings } from '../../../app/uiSettings';
 import { useAppMode } from '../../../app/appMode';
 import { useToasts } from '../../../app/toasts';
 
@@ -13,7 +13,8 @@ import { DetailShell } from '../../../components/layout/DetailShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 
 import { ProfileTabs } from './ProfileTabs';
-
+import { ProfilePreferenceRow } from './ProfilePreferenceRow';
+import { browserTimeZone, ProfileSidebarCards } from './ProfileSidebarCards';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
@@ -24,84 +25,16 @@ import { Textarea } from '../../../components/ui/Textarea';
 import { formatDateTime } from '../../../lib/time';
 import { computeOtherModeUrl } from '../../../lib/modeSwitch';
 import { queueScopeAllObjectsWarning } from '../../../lib/pendingToasts';
-import { fetchUser, updateUser, type User } from '../../../lib/api/users';
+import { fetchUser, updateUser } from '../../../lib/api/users';
 import { createChangeRequest } from '../../../lib/api/requests';
 import { formatErrorMessage } from '../../../lib/errors';
-
-function isUiThemePreference(value: string): value is UiThemePreference {
-  return value === 'system' || value === 'light' || value === 'dark';
-}
-
-function isUiLanguagePreference(value: string): value is UiLanguagePreference {
-  return value === 'system' || value === 'en' || value === 'cs';
-}
-
-function PreferenceRow(props: {
-  label: React.ReactNode;
-  description: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="grid gap-3 rounded-md border border-border bg-surface-2 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,16rem)] sm:items-start">
-      <div>
-        <div className="text-sm font-semibold text-fg">{props.label}</div>
-        <div className="mt-1 text-xs leading-5 text-muted">{props.description}</div>
-      </div>
-      <div className="min-w-0">{props.children}</div>
-    </div>
-  );
-}
-
-const FALLBACK_TIME_ZONES = [
-  'Europe/Prague',
-  'Europe/Bratislava',
-  'Europe/Berlin',
-  'Europe/London',
-  'UTC',
-  'America/New_York',
-  'America/Los_Angeles',
-  'Asia/Tokyo',
-];
-
-function supportedTimeZones(): string[] {
-  const intl = Intl as typeof Intl & {
-    supportedValuesOf?: (key: 'timeZone') => string[];
-  };
-
-  if (typeof intl.supportedValuesOf === 'function') {
-    return intl.supportedValuesOf('timeZone');
-  }
-
-  return FALLBACK_TIME_ZONES;
-}
-
-function browserTimeZone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
-  } catch {
-    return null;
-  }
-}
-
-function timeZoneOptions(current?: string | null, server?: string | null, browser?: string | null) {
-  const pinned = ['Europe/Prague', server, browser, current, 'UTC'].filter(
-    (v): v is string => typeof v === 'string' && v.trim() !== ''
-  );
-
-  const seen = new Set<string>();
-  const all = [...pinned, ...supportedTimeZones()].filter((zone) => {
-    if (seen.has(zone)) return false;
-    seen.add(zone);
-    return true;
-  });
-
-  return all.map((zone) => ({ value: zone, label: zone }));
-}
-
-function userString(user: User | null | undefined, key: keyof User): string {
-  const value = user?.[key];
-  return typeof value === 'string' ? value : '';
-}
+import {
+  isUiLanguagePreference,
+  isUiThemePreference,
+  profileSyncModeLabel,
+  profileSyncStatusLabel,
+  userString,
+} from './ProfilePageHelpers';
 
 export function ProfilePage() {
   const auth = useAuth();
@@ -208,19 +141,8 @@ export function ProfilePage() {
     },
   });
 
-  const syncModeLabel =
-    ui.sync.mode === 'server'
-      ? t('profile.prefs.persistence.server')
-      : t('profile.prefs.persistence.local');
-
-  const syncStatusLabel =
-    ui.sync.status === 'loading'
-      ? t('profile.prefs.sync_status.loading')
-      : ui.sync.status === 'saving'
-        ? t('profile.prefs.sync_status.saving')
-        : ui.sync.status === 'error'
-          ? t('profile.prefs.sync_status.error')
-          : t('profile.prefs.sync_status.idle');
+  const syncModeLabel = profileSyncModeLabel(t, ui.sync.mode);
+  const syncStatusLabel = profileSyncStatusLabel(t, ui.sync.status);
 
   const canSwitchScope = auth.canUseAdminUi;
 
@@ -302,106 +224,19 @@ export function ProfilePage() {
         data-testid="profile.summary"
         className="grid gap-4 lg:grid-cols-[minmax(18rem,0.78fr)_minmax(0,1.22fr)] lg:items-start"
       >
-        <div className="space-y-4">
-          <Card testId="profile.user.card">
-            <CardHeader title={t('profile.user.title')} subtitle={t('profile.user.subtitle')} />
-            <CardBody>
-              {auth.user ? (
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-muted">{t('profile.user.login')}</span>
-                    <span className="font-medium text-fg">{auth.user.login}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-muted">{t('profile.user.id')}</span>
-                    <span className="font-medium text-fg tabular-nums">{auth.user.id}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <span className="text-muted">{t('profile.user.role')}</span>
-                    <span className="font-medium text-fg">{String(auth.role || '—')}</span>
-                  </div>
-                  {profileUser?.time_zone ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-muted">{t('profile.personal.time_zone.label')}</span>
-                      <span className="font-medium text-fg">{profileUser.time_zone}</span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="py-6 text-sm text-muted">{t('profile.user.loading')}</div>
-              )}
-            </CardBody>
-          </Card>
-
-          <Card testId="profile.time_zone.card">
-            <CardHeader title={t('profile.personal.time_zone.title')} subtitle={t('profile.personal.time_zone.subtitle')} />
-            <CardBody>
-              <div className="space-y-3">
-                <PreferenceRow
-                  label={t('profile.personal.time_zone.label')}
-                  description={t('profile.personal.time_zone.description')}
-                >
-                  <Select
-                    value={timeZone}
-                    onChange={(e) => setTimeZone(e.target.value)}
-                    options={[
-                      { value: '', label: t('profile.personal.time_zone.server_default') },
-                      ...timeZoneOptions(profileUser?.time_zone, serverTimeZone, detectedBrowserTimeZone),
-                    ]}
-                    disabled={!profileUser || saveTimeZoneM.isPending}
-                    testId="profile.personal.time_zone"
-                  />
-                </PreferenceRow>
-
-                <div className="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-muted">
-                  {t('profile.personal.time_zone.current')}: {' '}
-                  <span className="font-medium text-fg">{profileUser?.time_zone || t('profile.personal.time_zone.server_default')}</span>
-                  {detectedBrowserTimeZone ? (
-                    <>
-                      {' · '}
-                      {t('profile.personal.time_zone.browser')}: {' '}
-                      <span className="font-medium text-fg">{detectedBrowserTimeZone}</span>
-                    </>
-                  ) : null}
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  {detectedBrowserTimeZone ? (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setTimeZone(detectedBrowserTimeZone)}
-                      disabled={saveTimeZoneM.isPending}
-                      testId="profile.personal.time_zone.use_browser"
-                    >
-                      {t('profile.personal.time_zone.use_browser')}
-                    </Button>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    onClick={() => saveTimeZoneM.mutate()}
-                    disabled={!timeZoneDirty || saveTimeZoneM.isPending}
-                    loading={saveTimeZoneM.isPending}
-                    testId="profile.personal.time_zone.save"
-                  >
-                    {t('common.save')}
-                  </Button>
-                </div>
-              </div>
-            </CardBody>
-          </Card>
-
-          <Card testId="profile.tips.card">
-            <CardHeader title={t('profile.tips.title')} subtitle={t('profile.tips.subtitle')} />
-            <CardBody>
-              <ul className="list-disc space-y-1 pl-4 text-sm text-muted">
-                <li>{t('profile.tips.item.0')}</li>
-                <li>{t('profile.tips.item.2')}</li>
-              </ul>
-            </CardBody>
-          </Card>
-        </div>
-
+        <ProfileSidebarCards
+          t={t}
+          authUser={auth.user}
+          authRole={auth.role}
+          profileUser={profileUser}
+          timeZone={timeZone}
+          serverTimeZone={serverTimeZone}
+          browserTimeZone={detectedBrowserTimeZone}
+          timeZoneDirty={timeZoneDirty}
+          savingTimeZone={saveTimeZoneM.isPending}
+          onTimeZoneChange={setTimeZone}
+          onSaveTimeZone={() => saveTimeZoneM.mutate()}
+        />
         <div className="space-y-4">
           <Card testId="profile.personal.card">
             <CardHeader title={t('profile.personal.title')} subtitle={t('profile.personal.subtitle')} />
@@ -485,13 +320,12 @@ export function ProfilePage() {
             </div>
           </CardBody>
         </Card>
-
         <Card testId="profile.prefs.card">
           <CardHeader title={t('profile.prefs.title')} subtitle={t('profile.prefs.subtitle')} />
           <CardBody>
             <div className="space-y-3">
               {canSwitchScope ? (
-                <PreferenceRow
+                <ProfilePreferenceRow
                   label={t('settings.scope.label')}
                   description={
                     appMode.mode === 'admin'
@@ -519,10 +353,10 @@ export function ProfilePage() {
                       {t('settings.scope.all')}
                     </Button>
                   </div>
-                </PreferenceRow>
+                </ProfilePreferenceRow>
               ) : null}
 
-              <PreferenceRow
+              <ProfilePreferenceRow
                 label={t('settings.theme.label')}
                 description={t('profile.prefs.theme.desc')}
               >
@@ -539,9 +373,9 @@ export function ProfilePage() {
                   ]}
                   testId="prefs.theme"
                 />
-              </PreferenceRow>
+              </ProfilePreferenceRow>
 
-              <PreferenceRow
+              <ProfilePreferenceRow
                 label={t('settings.language.label')}
                 description={t('profile.prefs.language.desc')}
               >
@@ -558,7 +392,7 @@ export function ProfilePage() {
                   ]}
                   testId="prefs.language"
                 />
-              </PreferenceRow>
+              </ProfilePreferenceRow>
             </div>
 
             <div className="mt-4 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs" data-testid="profile.prefs.sync">
@@ -658,7 +492,6 @@ export function ProfilePage() {
             </details>
           </CardBody>
         </Card>
-
         </div>
       </div>
     </DetailShell>

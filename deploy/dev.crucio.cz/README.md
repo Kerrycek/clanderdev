@@ -9,7 +9,7 @@
 `dev.crucio.cz` is hosted on the same private test machine as
 `admin.crucio.cz` (`172.16.106.176`). Its nginx vhost mirrors the
 `clankerdev.vpsfree.cz` layout: static assets are served by nginx, while
-`/config.js`, `/oauth/*`, and `/healthz` are served by the WebUI Next BFF on
+`/config.js`, `/session.json`, `/oauth/*`, and `/healthz` are served by the WebUI Next BFF on
 `127.0.0.1:3001`.
 
 Unlike the original production deployment, `dev.crucio.cz` keeps API and OAuth

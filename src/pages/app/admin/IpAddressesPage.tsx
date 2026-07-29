@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
@@ -10,7 +10,7 @@ import { fetchIpAddresses, type IpAddress } from '../../../lib/api/ipAddresses';
 import { fetchLocations, type Location as InfraLocation } from '../../../lib/api/infra';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
-import { parseBoolParam, parseNonNegativeInt, parsePositiveInt } from '../../../lib/parse';
+import { parseNonNegativeInt, parsePositiveInt } from '../../../lib/parse';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../lib/smartFilter';
 
 import { ListShell } from '../../../components/layout/ListShell';
@@ -26,8 +26,6 @@ import { IpAddressesListMobile } from './ipAddresses/IpAddressesListMobile';
 import { IpAddressesListTable } from './ipAddresses/IpAddressesListTable';
 import {
   canonicalKey,
-  IpListOrder,
-  ipId,
   isDefaultHiddenLegacyNetwork,
   looksLikeIpish,
   parseBoolToken,
@@ -39,117 +37,40 @@ import {
   selectSuggestedIpLocations,
   SUGGESTED_IP_QUERY_LIMIT,
 } from './ipAddresses/suggestedFreeIps';
-
+import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
   const toasts = useToasts();
   const navigate = useNavigate();
   const location = useLocation();
-  const [sp, setSp] = useSearchParams();
+  const {
+    searchParams: sp,
+    setSearchParams: setSp,
+    qText,
+    addr,
+    prefixNum,
+    vpsId,
+    userId,
+    networkId,
+    ifaceId,
+    locationId,
+    versionNum,
+    occupancyExplicitlyAny,
+    assignedToInterface,
+    order,
+    setTextParam,
+    setIntParam,
+    setBoolParamInUrl,
+    setAddressFilter,
+    clearUrlFilters,
+    assignedFilterExplicit,
+    filtersActive,
+  } = useIpAddressListParams();
 
   const na = t('common.na');
 
-  const ipDetailBasePath = useMemo(() => {
-    const networkingPrefix = `${basePath}/networking/ip-addresses`;
-    return location.pathname.startsWith(networkingPrefix) ? networkingPrefix : `${basePath}/ip-addresses`;
-  }, [basePath, location.pathname]);
-
-  const qText = useMemo(() => String(sp.get('q') ?? ''), [sp]);
-  const addr = useMemo(() => String(sp.get('addr') ?? ''), [sp]);
-  const prefixNum = useMemo(() => {
-    const parsed = parseNonNegativeInt(sp.get('prefix'));
-    if (parsed === undefined || parsed < 0 || parsed > 128) return undefined;
-    return parsed;
-  }, [sp]);
-  const vpsId = useMemo(() => parsePositiveInt(sp.get('vps')), [sp]);
-  const userId = useMemo(() => parsePositiveInt(sp.get('user')), [sp]);
-  const networkId = useMemo(() => parsePositiveInt(sp.get('network')), [sp]);
-  const ifaceId = useMemo(() => parsePositiveInt(sp.get('network_interface')), [sp]);
-  const locationId = useMemo(() => parsePositiveInt(sp.get('location')), [sp]);
-  const versionNum = useMemo(() => {
-    const value = String(sp.get('version') ?? '').trim();
-    if (value === '4') return 4;
-    if (value === '6') return 6;
-    return undefined;
-  }, [sp]);
-  const occupancyExplicitlyAny = sp.get('occupancy') === 'any';
-  const assignedToInterface = useMemo(() => {
-    const selected = parseBoolParam(sp.get('assigned_to_interface'));
-    return selected ?? (occupancyExplicitlyAny ? undefined : false);
-  }, [occupancyExplicitlyAny, sp]);
-  const order = useMemo<IpListOrder>(() => {
-    const value = String(sp.get('order') ?? '').trim().toLowerCase();
-    if (value === 'asc' || value === 'interface' || value === 'desc') return value;
-    return 'desc';
-  }, [sp]);
-
-  const setTextParam = (key: string, value: string | undefined) => {
-    const trimmed = String(value ?? '').trim();
-    setSp((prev) => {
-      const next = new URLSearchParams(prev);
-      if (trimmed) next.set(key, trimmed);
-      else next.delete(key);
-      return next;
-    });
-  };
-
-  const setIntParam = (key: string, value: number | undefined | null) => {
-    setSp((prev) => {
-      const next = new URLSearchParams(prev);
-      if (typeof value === 'number' && Number.isFinite(value) && value > 0) next.set(key, String(Math.floor(value)));
-      else next.delete(key);
-      return next;
-    });
-  };
-
-  const setBoolParamInUrl = (key: string, value: boolean | undefined) => {
-    setSp((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value === true) {
-        next.set(key, '1');
-        next.delete('occupancy');
-      } else if (value === false) {
-        next.set(key, '0');
-        next.delete('occupancy');
-      } else {
-        next.delete(key);
-        next.set('occupancy', 'any');
-      }
-      return next;
-    });
-  };
-
-  const setAddressFilter = (nextAddr: string, nextPrefix?: string) => {
-    const addrValue = nextAddr.trim();
-    const prefixValue = String(nextPrefix ?? '').trim();
-
-    setSp((prev) => {
-      const next = new URLSearchParams(prev);
-
-      if (addrValue) next.set('addr', addrValue);
-      else next.delete('addr');
-
-      if (prefixValue) next.set('prefix', prefixValue);
-      else next.delete('prefix');
-
-      return next;
-    });
-  };
-
-  const assignedFilterExplicit = sp.has('assigned_to_interface') || occupancyExplicitlyAny;
-  const filtersActive = Boolean(
-    qText.trim() ||
-      addr.trim() ||
-      prefixNum !== undefined ||
-      vpsId !== undefined ||
-      userId !== undefined ||
-      networkId !== undefined ||
-      ifaceId !== undefined ||
-      locationId !== undefined ||
-      versionNum !== undefined ||
-      assignedFilterExplicit
-  );
+  const ipDetailBasePath = resolveIpDetailBasePath(basePath, location.pathname);
 
   const [smart, setSmart] = useState('');
   const [smartErrors, setSmartErrors] = useState<string[]>([]);
@@ -171,22 +92,7 @@ export function IpAddressesPage() {
   const clearFilters = () => {
     setSmart('');
     setSmartErrors([]);
-    setSp((prev) => {
-      const next = new URLSearchParams(prev);
-      next.delete('q');
-      next.delete('addr');
-      next.delete('prefix');
-      next.delete('vps');
-      next.delete('user');
-      next.delete('network');
-      next.delete('network_interface');
-      next.delete('location');
-      next.delete('version');
-      next.delete('assigned_to_interface');
-      next.delete('occupancy');
-      next.delete('order');
-      return next;
-    });
+    clearUrlFilters();
   };
 
   const pagination = useKeysetPagination({
@@ -323,9 +229,7 @@ export function IpAddressesPage() {
   const canNext = pagination.hasForward || (hasMore && pageCursor !== null);
   const canPaginate = !showingSuggestedFreeIps && (pagination.stack.length > 1 || rawPageData.length > 0);
 
-  const openIp = (ipId: number) => {
-    navigate(`${ipDetailBasePath}/${ipId}`);
-  };
+  const openIp = (ipId: number) => navigate(`${ipDetailBasePath}/${ipId}`);
 
   const applySmartText = (raw: string) => {
     const input = String(raw ?? '').trim();
@@ -518,7 +422,6 @@ export function IpAddressesPage() {
 
   const activeFilterChips = useMemo(() => {
     const chips: React.ReactNode[] = [];
-
     if (qText.trim()) {
       chips.push(<FilterChip key="q" label={`q:${qText.trim()}`} onRemove={() => setTextParam('q', undefined)} testId="admin.ip_addresses.chip.q" />);
     }

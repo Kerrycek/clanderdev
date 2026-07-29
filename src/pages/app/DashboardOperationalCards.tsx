@@ -13,14 +13,12 @@ import { Spinner } from "../../components/ui/Spinner";
 import { StatusDot } from "../../components/ui/StatusDot";
 import { Table } from "../../components/ui/Table";
 import type { NewsLog, Outage, PublicNodeStatus } from "../../lib/api/public";
-import { advisoryCveLabels, type SecurityAdvisory } from "../../lib/api/securityAdvisories";
 import { outageBadges } from "../../lib/outageBadges";
 import { compareClusterLocationLabels } from "../../lib/clusterLocations";
 import { type BadgeVariant } from "../../lib/taskStatus";
 import { formatDateTime } from "../../lib/time";
 import { pickLocalizedFieldFrom, pickTranslation } from "../../lib/translations";
 import { dotVariantFromBadgeVariant } from "../../lib/variantMap";
-import { securityAdvisoryStateLabel } from "../../lib/apiValues";
 import { isMaintenanceLocked } from "../../lib/nodeMaintenance";
 type NodeHealth = "up" | "maintenance" | "down" | "unknown";
 interface NodeLocationGroup { ok: number; maintenance: number; down: number; unknown: number; total: number; vps: number; nodes: PublicNodeStatus[]; }
@@ -50,7 +48,8 @@ export function DashboardOutageSummary(props: { outage: Outage; to: string }) {
 }
 export function DashboardNewsItem(props: { news: NewsLog }) {
   const i18n = useI18n();
-  const html = pickLocalizedFieldFrom(props.news as any, ["message", "body", "text"], i18n.preferredLanguageCodes) ?? props.news.message;
+  const newsRecord: Record<string, unknown> = { ...props.news };
+  const html = pickLocalizedFieldFrom(newsRecord, ["message", "body", "text"], i18n.preferredLanguageCodes) ?? props.news.message;
   return (
     <div
       className="grid gap-1 bg-surface-2 px-3 py-2.5 text-sm sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-3"
@@ -64,10 +63,6 @@ export function DashboardNewsItem(props: { news: NewsLog }) {
 function formatNumber(value: unknown): string {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat().format(value);
-}
-function legacyWebuiUrl(baseUrl: string | undefined, query: string): string | undefined {
-  if (!baseUrl) return undefined;
-  return `${baseUrl}/?${query}`;
 }
 function isNodeInMaintenance(n: PublicNodeStatus): boolean {
   return isMaintenanceLocked(n.maintenance_lock);
@@ -262,130 +257,7 @@ export function summarizeNodes(nodes: PublicNodeStatus[], unknownLocationLabel: 
   }
   return { byLocation, summary: { ok, maintenance, down, unknown, total, vps } };
 }
-function advisoryStateBadge(
-  state: unknown,
-  t: (key: string, vars?: Record<string, unknown>) => string,
-): { variant: BadgeVariant; label: string } {
-  const s = String(state ?? "").trim();
-  if (s === "published") return { variant: "ok", label: securityAdvisoryStateLabel(t, s) };
-  if (s === "retracted") return { variant: "warn", label: securityAdvisoryStateLabel(t, s) };
-  if (s === "draft") return { variant: "neutral", label: securityAdvisoryStateLabel(t, s) };
-  return { variant: "neutral", label: s ? securityAdvisoryStateLabel(t, s) : t("state.unknown") };
-}
-function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; legacyHref?: string }) {
-  const i18n = useI18n();
-  const advisory = props.advisory;
-  const cves = advisoryCveLabels(advisory);
-  const summary = pickTranslation(advisory, "summary", i18n.preferredLanguageCodes);
-  const stateBadge = advisoryStateBadge(advisory.state, i18n.t);
-  const title = advisory.name || i18n.t("dashboard.section.security.fallback_title", { id: advisory.id });
-  const detailHref = props.legacyHref
-    ? legacyWebuiUrl(props.legacyHref, `page=security_advisory&action=show&id=${advisory.id}`)
-    : undefined;
-  const affectedUserCount = typeof advisory.affected_user_count === "number" ? advisory.affected_user_count : null;
-  const affectedVpsCount = typeof advisory.affected_vps_count === "number" ? advisory.affected_vps_count : null;
-  const affectedNodeCount = typeof advisory.affected_node_count === "number" ? advisory.affected_node_count : null;
-  return (
-    <div className="space-y-1.5 bg-surface-2 px-3 py-2.5" data-testid="app.dashboard.security.item">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {detailHref ? (
-          <a href={detailHref} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-            {title}
-          </a>
-        ) : (
-          <span className="font-medium">{title}</span>
-        )}
-        <Badge variant={stateBadge.variant}>{stateBadge.label}</Badge>
-        {advisory.affected === true ? (
-          <Badge variant="danger">{i18n.t("dashboard.section.security.affects_me")}</Badge>
-        ) : advisory.affected === false ? (
-          <Badge variant="neutral">{i18n.t("dashboard.section.security.not_affected")}</Badge>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-        <span>
-          {i18n.t("dashboard.section.security.published")}: {formatDateTime(advisory.published_at)}
-        </span>
-        {affectedNodeCount !== null ? (
-          <span>· {i18n.t("dashboard.section.security.affected_nodes", { count: affectedNodeCount })}</span>
-        ) : null}
-        {affectedUserCount !== null || affectedVpsCount !== null ? (
-          <span>
-            · {i18n.t("dashboard.section.security.affected_users_vps", { users: affectedUserCount ?? "—", vps: affectedVpsCount ?? "—" })}
-          </span>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {cves.length > 0 ? (
-          cves.slice(0, 6).map((cve) => (
-            <Badge key={cve} variant="info">
-              {cve}
-            </Badge>
-          ))
-        ) : (
-          <Badge variant="neutral">{i18n.t("dashboard.section.security.no_cves")}</Badge>
-        )}
-        {cves.length > 6 ? (
-          <span className="text-xs text-muted">{i18n.t("common.more_n", { count: cves.length - 6 })}</span>
-        ) : null}
-      </div>
-      {summary ? <div className="text-sm text-muted">{summary}</div> : null}
-    </div>
-  );
-}
-export function SecurityAdvisoriesCard(props: { isLoading: boolean; isError: boolean; advisories: SecurityAdvisory[]; legacyListUrl?: string; legacyBaseUrl?: string; collapsed?: boolean; density?: DashboardDensity; itemLimit?: number; onToggleCollapsed?: () => void; }) {
-  const { t } = useI18n();
-  const collapsed = props.collapsed === true;
-  const compact = props.density === "compact";
-  const itemLimit = props.itemLimit ?? 3;
-  return (
-    <Card testId="app.dashboard.security.card">
-      <CardHeader
-        className="items-center p-3"
-        title={t("dashboard.section.security.title")}
-        subtitle={t("dashboard.section.security.subtitle")}
-        actions={
-          <>
-            {props.onToggleCollapsed ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={props.onToggleCollapsed}
-                testId="app.dashboard.widget.security.collapse"
-              >
-                {collapsed ? t("dashboard.preferences.widget.expand") : t("dashboard.preferences.widget.collapse")}
-              </Button>
-            ) : null}
-            {props.legacyListUrl ? (
-              <Button as="a" href={props.legacyListUrl} target="_blank" rel="noreferrer" variant="secondary" size="sm">
-                {t("dashboard.section.security.open_legacy")}
-              </Button>
-            ) : null}
-          </>
-        }
-      />
-      <CardBody className={compact ? "p-2.5" : "p-3"}>
-        {props.isLoading ? (
-          <Spinner label={t("dashboard.section.security.loading")} />
-        ) : props.isError ? (
-          <Alert title={t("dashboard.section.security.error")} variant="danger" />
-        ) : props.advisories.length === 0 ? (
-          <div className="text-sm text-muted">{t("dashboard.section.security.empty")}</div>
-        ) : collapsed ? (
-          <div className="text-sm text-muted">
-            {t("dashboard.widget.security.collapsed_summary", { count: props.advisories.length })}
-          </div>
-        ) : (
-          <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
-            {props.advisories.slice(0, itemLimit).map((advisory) => (
-              <SecurityAdvisoryItem key={advisory.id} advisory={advisory} legacyHref={props.legacyBaseUrl} />
-            ))}
-          </div>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
+export { SecurityAdvisoriesCard } from "./DashboardSecurityAdvisoriesCard";
 export function ClusterHealthCard(props: { isLoading: boolean; isError: boolean; nodeData: ReturnType<typeof summarizeNodes>; nodeIssueCount: number; collapsed?: boolean; density?: DashboardDensity; onToggleCollapsed?: () => void; }) {
   const { t } = useI18n();
   const { basePath, mode } = useAppMode();

@@ -14,7 +14,7 @@ It deploys a **static SPA at `/`** plus a tiny **OAuth BFF** bound to `127.0.0.1
 - installs and runs the OAuth BFF via systemd (`webui-next-bff`)
 - configures nginx:
   - serves the SPA with history fallback
-  - proxies `/config.js` and `/oauth/*` to the BFF
+  - proxies `/config.js`, `/session.json`, and `/oauth/*` to the BFF
 - obtains Let's Encrypt certificate when DNS is ready and reloads nginx on renew
 
 ## Quick start

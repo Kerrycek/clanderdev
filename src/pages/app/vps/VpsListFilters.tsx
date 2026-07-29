@@ -5,7 +5,6 @@ import { FilterBar } from '../../../components/layout/FilterBar';
 import { Button } from '../../../components/ui/Button';
 import { CopyButton } from '../../../components/ui/CopyButton';
 import { Drawer } from '../../../components/ui/Drawer';
-import { FilterChip } from '../../../components/ui/FilterChip';
 import { Input } from '../../../components/ui/Input';
 import { NodeLookupInput } from '../../../components/ui/NodeLookupInput';
 import { Select } from '../../../components/ui/Select';

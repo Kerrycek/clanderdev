@@ -81,16 +81,6 @@ function focusFirst(container: HTMLElement) {
   safeFocus(container);
 }
 
-function focusLast(container: HTMLElement) {
-  const focusables = getFocusableElements(container);
-  const last = focusables[focusables.length - 1];
-  if (last) {
-    safeFocus(last);
-    return;
-  }
-  safeFocus(container);
-}
-
 function onKeyDown(e: KeyboardEvent) {
   if (e.key !== 'Tab') return;
 

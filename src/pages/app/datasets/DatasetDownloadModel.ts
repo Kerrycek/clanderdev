@@ -3,6 +3,7 @@ import type {
   SnapshotDownload,
   SnapshotDownloadFormat,
 } from "../../../lib/api/datasets";
+import { safeContentUrl } from "../../../lib/safeUrl";
 
 export interface SnapshotDownloadDraft {
   snapshotId: string;
@@ -99,13 +100,14 @@ function resolveDownloadHref(
   rawHref: string,
   options: SnapshotDownloadHrefOptions,
 ): string {
+  if (/^[\\/]{2}/.test(rawHref)) return "";
   const base = currentBase(options);
-  if (!base) return rawHref;
+  if (!base) return safeContentUrl(rawHref) ?? "";
 
   try {
-    return new URL(rawHref, `${base}/`).toString();
+    return safeContentUrl(new URL(rawHref, `${base}/`).toString()) ?? "";
   } catch {
-    return rawHref;
+    return "";
   }
 }
 
@@ -242,7 +244,7 @@ export function snapshotDownloadHref(
   options: SnapshotDownloadHrefOptions = {},
 ): string | undefined {
   const raw = snapshotDownloadRawHref(download);
-  if (raw) return resolveDownloadHref(raw, options);
+  if (raw) return resolveDownloadHref(raw, options) || undefined;
   return legacySnapshotDownloadHref(Number(download.id), options);
 }
 

@@ -11,8 +11,6 @@ import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import {
   resolveChangeRequest,
   resolveRegistrationRequest,
-  type ChangeRequest,
-  type RegistrationRequest,
   type ResolveUserRequestAction,
 } from '../../../lib/api/requests';
 
@@ -22,132 +20,25 @@ import { LinkButton } from '../../../components/ui/LinkButton';
 import { Modal } from '../../../components/ui/Modal';
 import { Select } from '../../../components/ui/Select';
 import { Textarea } from '../../../components/ui/Textarea';
-import { RequestResolveReview, type RequestResolveOverrides } from './RequestResolveReview';
+import { RequestResolveReview } from './RequestResolveReview';
+import type { RequestResolveOverrides, RequestReviewType, ReviewableRequest } from './RequestReviewTypes';
+import {
+  emptyRequestOverrides,
+  requestActionNeedsReason,
+  requestActionVariant,
+  requestOperationalLinks,
+  requestOverrides,
+  requestReviewActions,
+  safePositiveInteger,
+} from './RequestReviewModel';
 
-export type RequestReviewType = 'registration' | 'change';
-export type ReviewableRequest = RegistrationRequest | ChangeRequest;
-
-function safeNumber(value: string | undefined): number | undefined {
-  const t = String(value ?? '').trim();
-  if (!t) return undefined;
-  const n = Number(t);
-  if (!Number.isFinite(n)) return undefined;
-  const i = Math.floor(n);
-  if (i <= 0) return undefined;
-  return i;
-}
-
-export function resourceId(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return Math.floor(value);
-  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    const raw = record['id'] ?? record['value'];
-    return resourceId(raw);
-  }
-  return null;
-}
-
-export function firstResourceId(source: { [key: string]: unknown } | null | undefined, keys: string[]): number | null {
-  if (!source) return null;
-  for (const key of keys) {
-    const id = resourceId(source[key]);
-    if (id) return id;
-  }
-  return null;
-}
-
-export function requestOperationalLinks(request: ReviewableRequest | undefined) {
-  return {
-    actionStateId: firstResourceId(request, [
-      'action_state',
-      'action_state_id',
-      'resolve_action_state',
-      'resolve_action_state_id',
-    ]),
-    transactionChainId: firstResourceId(request, [
-      'transaction_chain',
-      'transaction_chain_id',
-      'resolve_transaction_chain',
-      'resolve_transaction_chain_id',
-    ]),
-    transactionId: firstResourceId(request, [
-      'transaction',
-      'transaction_id',
-      'resolve_transaction',
-      'resolve_transaction_id',
-    ]),
-  };
-}
-
-export function requestReviewActions(request: ReviewableRequest | undefined, isAdmin: boolean): ResolveUserRequestAction[] {
-  if (!isAdmin || !request) return [];
-  const state = String(request.state ?? '').trim();
-
-  if (state === 'approved') return ['deny', 'ignore', 'request_correction'];
-  if (state === 'denied') return ['approve', 'ignore', 'request_correction'];
-  if (state === 'ignored') return ['approve', 'deny', 'request_correction'];
-
-  const actions: ResolveUserRequestAction[] = ['approve', 'deny', 'ignore'];
-  if (state === 'awaiting' || state === 'pending_correction') actions.push('request_correction');
-  return actions;
-}
-
-function actionVariant(action: ResolveUserRequestAction): 'primary' | 'secondary' | 'danger' {
-  if (action === 'approve') return 'primary';
-  if (action === 'deny' || action === 'ignore') return 'danger';
-  return 'secondary';
-}
-
-function actionNeedsReason(action: ResolveUserRequestAction): boolean {
-  return action === 'deny' || action === 'request_correction';
-}
-
-function actionNeedsConfirmation(action: ResolveUserRequestAction): boolean {
-  void action;
-  return false;
-}
-
-function stringField(request: ReviewableRequest, key: string): string {
-  const value = (request as Record<string, unknown>)[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function emptyOverrides(): RequestResolveOverrides {
-  return {
-    login: '',
-    fullName: '',
-    orgName: '',
-    orgId: '',
-    email: '',
-    address: '',
-    changeReason: '',
-  };
-}
-
-function requestOverrides(reqType: RequestReviewType, request: ReviewableRequest): RequestResolveOverrides {
-  if (reqType === 'registration') {
-    return {
-      login: stringField(request, 'login'),
-      fullName: stringField(request, 'full_name'),
-      orgName: stringField(request, 'org_name'),
-      orgId: stringField(request, 'org_id'),
-      email: stringField(request, 'email'),
-      address: stringField(request, 'address'),
-      changeReason: '',
-    };
-  }
-
-  return {
-    login: '',
-    fullName: stringField(request, 'full_name'),
-    orgName: '',
-    orgId: '',
-    email: stringField(request, 'email'),
-    address: stringField(request, 'address'),
-    changeReason: stringField(request, 'change_reason'),
-  };
-}
+export type { RequestReviewType, ReviewableRequest } from './RequestReviewTypes';
+export {
+  firstResourceId,
+  requestOperationalLinks,
+  requestReviewActions,
+  resourceId,
+} from './RequestReviewModel';
 
 export function RequestOperationalLinks(props: {
   request: ReviewableRequest | undefined;
@@ -215,7 +106,6 @@ export function RequestReviewActions(props: {
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveAction, setResolveAction] = useState<ResolveUserRequestAction>('approve');
   const [resolveReason, setResolveReason] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [oLogin, setOLogin] = useState('');
@@ -237,11 +127,9 @@ export function RequestReviewActions(props: {
   });
 
   const nodes = nodesQ.data ?? [];
-  const requiresReason = actionNeedsReason(resolveAction);
-  const requiresConfirmation = actionNeedsConfirmation(resolveAction);
+  const requiresReason = requestActionNeedsReason(resolveAction);
   const reasonMissing = requiresReason && !resolveReason.trim();
-  const confirmationMissing = requiresConfirmation && !confirmed;
-  const canSubmit = !submitting && !reasonMissing && !confirmationMissing;
+  const canSubmit = !submitting && !reasonMissing;
 
   function setOverrideState(overrides: RequestResolveOverrides) {
     setOLogin(overrides.login);
@@ -256,19 +144,11 @@ export function RequestReviewActions(props: {
   function openAction(action: ResolveUserRequestAction) {
     setResolveAction(action);
     setResolveReason('');
-    setConfirmed(false);
-    setOverrideState(action === 'request_correction' ? requestOverrides(props.reqType, props.request) : emptyOverrides());
-
-    if (action === 'approve' || action === 'ignore') {
-      void submitResolveAction(action, {
-        reason: undefined,
-        overrides: emptyOverrides(),
-        approveCreateVps,
-        approveActivate,
-        approveNode,
-      });
-      return;
-    }
+    setOverrideState(
+      action === 'request_correction'
+        ? requestOverrides(props.reqType, props.request)
+        : emptyRequestOverrides(),
+    );
 
     setResolveOpen(true);
   }
@@ -299,7 +179,7 @@ export function RequestReviewActions(props: {
         if (action === 'approve') {
           p.create_vps = options.approveCreateVps;
           p.activate = options.approveActivate;
-          const nodeId = safeNumber(options.approveNode);
+          const nodeId = safePositiveInteger(options.approveNode);
           if (nodeId) p.node = nodeId;
         }
 
@@ -375,7 +255,7 @@ export function RequestReviewActions(props: {
         {actions.map((action) => (
           <Button
             key={action}
-            variant={actionVariant(action)}
+            variant={requestActionVariant(action)}
             size={props.compact ? 'sm' : undefined}
             onClick={() => openAction(action)}
             disabled={submitting}
@@ -403,7 +283,7 @@ export function RequestReviewActions(props: {
               {t('common.cancel')}
             </Button>
             <Button
-              variant={actionVariant(resolveAction)}
+              variant={requestActionVariant(resolveAction)}
               onClick={submitResolve}
               loading={submitting}
               disabled={!canSubmit}
@@ -422,8 +302,11 @@ export function RequestReviewActions(props: {
               onChange={(e) => {
                 const next = e.target.value as ResolveUserRequestAction;
                 setResolveAction(next);
-                setConfirmed(false);
-                setOverrideState(next === 'request_correction' ? requestOverrides(props.reqType, props.request) : emptyOverrides());
+                setOverrideState(
+                  next === 'request_correction'
+                    ? requestOverrides(props.reqType, props.request)
+                    : emptyRequestOverrides(),
+                );
               }}
               testId={`${props.testIdPrefix}.action_select`}
             >
@@ -453,7 +336,6 @@ export function RequestReviewActions(props: {
           reqId={props.reqId}
           action={resolveAction}
           requiresReason={requiresReason}
-          requiresConfirmation={requiresConfirmation}
           approveCreateVps={approveCreateVps}
           approveActivate={approveActivate}
           approveNode={approveNode}
@@ -468,19 +350,6 @@ export function RequestReviewActions(props: {
           }}
           testIdPrefix={props.testIdPrefix}
         />
-
-        {requiresConfirmation ? (
-          <label className="mt-4 flex items-start gap-2 rounded-lg border border-danger-border bg-danger-bg p-3 text-sm">
-            <input
-              className="mt-1"
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-              data-testid={`${props.testIdPrefix}.confirm`}
-            />
-            <span>{t('requests.resolve.confirm', { action: t(`requests.resolve.action.${resolveAction}`) })}</span>
-          </label>
-        ) : null}
 
         {props.reqType === 'registration' && resolveAction === 'approve' ? (
           <div className="mt-4 rounded-lg border border-border bg-surface-2 p-3">

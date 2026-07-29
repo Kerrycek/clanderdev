@@ -10,49 +10,24 @@ import { useChrome } from '../../../components/layout/ChromeContext';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { searchUsers } from '../../../lib/api/users';
 import {
-  fetchChangeRequest,
-  fetchChangeRequests,
-  fetchRegistrationRequest,
-  fetchRegistrationRequests,
-  resolveChangeRequest,
-  resolveRegistrationRequest,
+  fetchChangeRequest, fetchChangeRequests, fetchRegistrationRequest,
+  fetchRegistrationRequests, resolveChangeRequest, resolveRegistrationRequest,
   type ResolveUserRequestAction,
 } from '../../../lib/api/requests';
-import { formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { useDebouncedValue } from '../../../lib/hooks/useDebouncedValue';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useTierSlowIntervalMs } from '../../../lib/refreshTiers';
-import {
-  parseNumericToken,
-  splitKeyValueToken,
-  tokenizeSmartInput,
-  unquoteSmartValue,
-} from '../../../lib/smartFilter';
-import {
-  fraudRiskBadge,
-  requestStateLabelKey,
-  requestTypeLabelKey,
-} from '../../../lib/requestsBadges';
-
+import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../lib/smartFilter';
+import { requestStateLabelKey, requestTypeLabelKey } from '../../../lib/requestsBadges';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
-
-import { Badge } from '../../../components/ui/Badge';
-import { Button } from '../../../components/ui/Button';
-import { Card, CardBody } from '../../../components/ui/Card';
-import { EmptyState } from '../../../components/ui/EmptyState';
-import { ErrorState } from '../../../components/ui/ErrorState';
-import { LoadingState } from '../../../components/ui/LoadingState';
-import { Select } from '../../../components/ui/Select';
 import type { SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
-import { Textarea } from '../../../components/ui/Textarea';
-import {
-  RequestOperationalLinks,
-  RequestReviewActions,
-} from './RequestReviewActions';
+import { RequestsBulkActions } from './RequestsBulkActions';
+import { RequestsExpandedContent } from './RequestsExpandedContent';
 import { RequestsFilters } from './RequestsFilters';
 import { RequestsListContent } from './RequestsListContent';
+import { RequestsListStatus } from './RequestsListStatus';
 import {
   canonicalKey,
   changeRows,
@@ -60,25 +35,16 @@ import {
   mergeByIdDesc,
   parseTypeValue,
   registrationRows,
-  requestDateValue,
   requestId,
   requestKey,
-  requestState,
   requestType,
   requestTypeFilterFromUrl,
   resolveStateValue,
   safeNumber,
   type RequestTypeFilter,
   type UnifiedRequestRow,
-  userLabel,
   visibleRequestRows,
 } from './RequestsModel';
-
-function actionVariantForBulk(action: ResolveUserRequestAction): 'primary' | 'secondary' | 'danger' {
-  if (action === 'approve') return 'primary';
-  if (action === 'deny' || action === 'ignore') return 'danger';
-  return 'secondary';
-}
 
 export function RequestsPage() {
   const { basePath, mode } = useAppMode();
@@ -110,7 +76,6 @@ export function RequestsPage() {
   const [bulkReason, setBulkReason] = useState('');
   const [bulkSubmitting, setBulkSubmitting] = useState(false);
   const smartInputRef = useRef<HTMLInputElement>(null);
-
   // Sync from URL on navigation.
   useEffect(() => {
     setType(requestTypeFilterFromUrl(sp.get('type')));
@@ -812,98 +777,14 @@ export function RequestsPage() {
   if (!isAdmin) return <Navigate to="/app" replace />;
 
   function renderExpandedContent(request: UnifiedRequestRow, compact = false) {
-    const id = requestId(request);
-    const reqType = requestType(request);
-    const testPrefix = `admin.requests.expanded.${reqType}.${id}`;
-    const risk = request._type === 'registration' ? fraudRiskBadge(request) : null;
-    const updatedAt = requestDateValue(request, 'updated_at');
-
     return (
-      <div className="space-y-3" data-testid={testPrefix}>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div>
-            <div className="text-xs text-muted">{t('common.user')}</div>
-            <div className="text-sm">{userLabel(request.user)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted">{t('requests.detail.admin')}</div>
-            <div className="text-sm">{userLabel(request.admin)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted">{t('common.updated')}</div>
-            <div className="text-sm">{updatedAt ? formatDateTime(updatedAt) : '—'}</div>
-          </div>
-          {request._type === 'registration' ? (
-            <>
-              <div>
-                <div className="text-xs text-muted">{t('requests.field.login')}</div>
-                <div className="text-sm">{String(request.login ?? '—')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted">{t('requests.field.full_name')}</div>
-                <div className="text-sm">{String(request.full_name ?? '—')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted">{t('requests.field.email')}</div>
-                <div className="text-sm">{String(request.email ?? '—')}</div>
-              </div>
-              <div className="md:col-span-3">
-                <div className="text-xs text-muted">{t('requests.field.address')}</div>
-                <div className="whitespace-pre-line text-sm">{String(request.address ?? '—')}</div>
-              </div>
-              <div className="md:col-span-3">
-                <div className="text-xs text-muted">{t('requests.field.note')}</div>
-                <div className="whitespace-pre-line text-sm">{String(request.note ?? '—')}</div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div>
-                <div className="text-xs text-muted">{t('requests.field.full_name')}</div>
-                <div className="text-sm">{String(request.full_name ?? '—')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted">{t('requests.field.email')}</div>
-                <div className="text-sm">{String(request.email ?? '—')}</div>
-              </div>
-              <div className="md:col-span-3">
-                <div className="text-xs text-muted">{t('requests.field.change_reason')}</div>
-                <div className="whitespace-pre-line text-sm">{String(request.change_reason ?? '—')}</div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {request.admin_response ? (
-          <div className="rounded-md border border-border bg-surface p-3">
-            <div className="text-xs text-muted">{t('requests.detail.admin_response')}</div>
-            <div className="mt-1 whitespace-pre-line text-sm">{String(request.admin_response)}</div>
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          {isAdmin && risk ? (
-            <Badge variant={risk.variant} title={t('requests.risk.tooltip', { score: risk.score })}>
-              {t(risk.labelKey)} {risk.score}
-            </Badge>
-          ) : null}
-          <RequestOperationalLinks request={request} basePath={basePath} compact testIdPrefix={testPrefix} />
-        </div>
-
-        {isAdmin ? (
-          <RequestReviewActions
-            request={request}
-            reqType={reqType}
-            reqId={id}
-            isAdmin={isAdmin}
-            basePath={basePath}
-            compact={compact}
-            showDetailLink
-            testIdPrefix={`${testPrefix}.resolve`}
-            onResolved={refreshRequests}
-          />
-        ) : null}
-      </div>
+      <RequestsExpandedContent
+        request={request}
+        isAdmin={isAdmin}
+        basePath={basePath}
+        compact={compact}
+        onResolved={refreshRequests}
+      />
     );
   }
 
@@ -955,105 +836,34 @@ export function RequestsPage() {
 
     >
       {isAdmin && rows.length > 0 ? (
-        <Card className="mb-4" testId="admin.requests.bulk">
-          <CardBody className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold">{t('requests.bulk.title')}</div>
-              <div className="mt-1 text-sm text-muted">
-                {t('requests.bulk.selected', { count: String(selectedRows.length) })}
-              </div>
-              {bulkNeedsReason && !bulkReason.trim() ? (
-                <div className="mt-1 text-xs text-danger">{t('requests.bulk.reason_required')}</div>
-              ) : null}
-            </div>
-
-            <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 md:grid-cols-[minmax(180px,240px)_1fr_auto] lg:max-w-5xl">
-              <Select
-                value={bulkAction}
-                onChange={(e) => setBulkAction(e.target.value as ResolveUserRequestAction)}
-                aria-label={t('requests.bulk.action')}
-                testId="admin.requests.bulk.action"
-              >
-                <option value="approve">{t('requests.resolve.action.approve')}</option>
-                <option value="deny">{t('requests.resolve.action.deny')}</option>
-                <option value="ignore">{t('requests.resolve.action.ignore')}</option>
-                <option value="request_correction">{t('requests.resolve.action.request_correction')}</option>
-              </Select>
-
-              <Textarea
-                value={bulkReason}
-                onChange={(e) => setBulkReason(e.target.value)}
-                rows={1}
-                placeholder={t('requests.bulk.reason_placeholder')}
-                ariaLabel={t('requests.resolve.reason')}
-                disabled={!bulkNeedsReason}
-                className="min-h-9"
-                testId="admin.requests.bulk.reason"
-              />
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => toggleAllVisible(true)}
-                  disabled={rows.length === 0}
-                  testId="admin.requests.bulk.select_all"
-                >
-                  {t('requests.bulk.select_all')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => toggleAllVisible(false)}
-                  disabled={rows.length === 0 || selectedRows.length === 0}
-                  testId="admin.requests.bulk.deselect_all"
-                >
-                  {t('requests.bulk.deselect_all')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setSelectedKeys(new Set())}
-                  disabled={selectedRows.length === 0}
-                  testId="admin.requests.bulk.clear"
-                >
-                  {t('common.clear')}
-                </Button>
-                <Button
-                  variant={actionVariantForBulk(bulkAction)}
-                  onClick={applyBulkAction}
-                  loading={bulkSubmitting}
-                  disabled={selectedRows.length === 0 || (bulkNeedsReason && !bulkReason.trim())}
-                  testId="admin.requests.bulk.apply"
-                >
-                  {t('requests.bulk.apply')}
-                </Button>
-              </div>
-            </div>
-          </CardBody>
-        </Card>
+        <RequestsBulkActions
+          rowsLength={rows.length}
+          selectedRowsLength={selectedRows.length}
+          action={bulkAction}
+          reason={bulkReason}
+          needsReason={bulkNeedsReason}
+          submitting={bulkSubmitting}
+          onActionChange={setBulkAction}
+          onReasonChange={setBulkReason}
+          onSelectAll={() => toggleAllVisible(true)}
+          onDeselectAll={() => toggleAllVisible(false)}
+          onClear={() => setSelectedKeys(new Set())}
+          onApply={applyBulkAction}
+        />
       ) : null}
 
-      {isLoading ? (
-        <LoadingState testId="admin.requests.loading" title={t('common.loading')} />
-      ) : error ? (
-        <ErrorState
-          testId="admin.requests.error"
-          title={t('requests.list.load_error.title')}
-          error={error}
-          onRetry={() => {
-            if (needRegs) void regQ.refetch();
-            if (needChanges) void changeQ.refetch();
-          }}
-          showBack={false}
-          detailsExtra={{ page: isAdmin ? 'admin.requests' : 'app.requests', scope: basePath }}
-        />
-      ) : rows.length === 0 ? (
-        <EmptyState
-          testId="admin.requests.empty"
-          title={filtersActive ? t('empty.list.no_matches.title') : t('requests.list.empty')}
-          body={filtersActive ? t('empty.list.no_matches.body') : undefined}
-          actionLabel={filtersActive ? t('common.clear_filters') : undefined}
-          onAction={filtersActive ? clearFilters : undefined}
-        />
-      ) : (
+      <RequestsListStatus
+        loading={isLoading}
+        error={error}
+        empty={rows.length === 0}
+        filtersActive={filtersActive}
+        scope={basePath}
+        onRetry={() => {
+          if (needRegs) void regQ.refetch();
+          if (needChanges) void changeQ.refetch();
+        }}
+        onClear={clearFilters}
+      >
         <RequestsListContent
           rows={rows}
           isAdmin={isAdmin}
@@ -1068,7 +878,7 @@ export function RequestsPage() {
           onToggleAllVisible={toggleAllVisible}
           renderExpandedContent={renderExpandedContent}
         />
-      )}
+      </RequestsListStatus>
     </ListShell>
   );
 }

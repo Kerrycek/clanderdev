@@ -158,6 +158,7 @@ export interface NewsLog {
   published_at?: string;
   created_at?: string;
   updated_at?: string;
+  [k: string]: unknown;
 }
 
 export async function fetchPublicStats() {

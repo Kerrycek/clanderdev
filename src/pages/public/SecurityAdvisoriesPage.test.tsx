@@ -6,7 +6,10 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { fetchSecurityAdvisoriesWithCves } from '../../lib/api/securityAdvisories';
+import {
+  fetchSecurityAdvisoriesWithCves,
+  type SecurityAdvisory,
+} from '../../lib/api/securityAdvisories';
 import { SecurityAdvisoriesPage } from './SecurityAdvisoriesPage';
 
 vi.mock('../../app/i18n', () => ({
@@ -51,21 +54,25 @@ afterEach(() => {
 
 describe('SecurityAdvisoriesPage', () => {
   it('loads published advisories and renders CVEs', async () => {
+    const advisory: SecurityAdvisory = {
+      id: 17,
+      state: 'published',
+      name: 'OpenSSL advisory',
+      published_at: '2026-06-01T10:00:00Z',
+      en_summary: 'Patch OpenSSL on affected VPS.',
+      affected_user_count: 12,
+      affected_vps_count: 34,
+      affected_node_count: 2,
+    };
     vi.mocked(fetchSecurityAdvisoriesWithCves).mockResolvedValue({
       data: [
         {
-          id: 17,
-          state: 'published',
-          name: 'OpenSSL advisory',
-          published_at: '2026-06-01T10:00:00Z',
-          en_summary: 'Patch OpenSSL on affected VPS.',
-          affected_user_count: 12,
-          affected_vps_count: 34,
-          affected_node_count: 2,
+          ...advisory,
           cves: [{ id: 1, cve_id: 'CVE-2026-0001' }],
         },
       ],
-    } as any);
+      envelope: { status: true, response: {} },
+    });
 
     renderPage();
 

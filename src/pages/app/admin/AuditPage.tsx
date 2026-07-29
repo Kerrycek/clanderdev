@@ -12,7 +12,7 @@ import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 
 import { searchUsers } from '../../../lib/api/users';
-import { fetchObjectHistoryEvents, type ObjectHistoryEvent } from '../../../lib/api/audit';
+import { fetchObjectHistoryEvents } from '../../../lib/api/audit';
 import { formatDateTime } from '../../../lib/format';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useDebouncedValue } from '../../../lib/hooks/useDebouncedValue';
@@ -39,14 +39,7 @@ import { StatusDot } from '../../../components/ui/StatusDot';
 import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
-
-function safeNumber(value: string): number | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const n = Number(trimmed);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return Math.floor(n);
-}
+import { canonicalKey, safeNumber } from './audit/auditFilterSemantics';
 
 export function AuditPage() {
   const { basePath } = useAppMode();
@@ -56,6 +49,7 @@ export function AuditPage() {
   const na = t('common.na');
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const searchParamsKey = searchParams.toString();
 
   const [qText, setQText] = useState(() => searchParams.get('q') ?? '');
   const [user, setUser] = useState(() => searchParams.get('user') ?? '');
@@ -76,21 +70,14 @@ export function AuditPage() {
 
   // Sync local state from browser navigation.
   useEffect(() => {
-    const nextQ = searchParams.get('q') ?? '';
-    const nextUser = searchParams.get('user') ?? '';
-    const nextSession = searchParams.get('user_session') ?? '';
-    const nextObj = searchParams.get('object') ?? '';
-    const nextObjId = searchParams.get('object_id') ?? '';
-    const nextEvent = searchParams.get('event_type') ?? '';
-
-    if (nextQ !== qText) setQText(nextQ);
-    if (nextUser !== user) setUser(nextUser);
-    if (nextSession !== userSession) setUserSession(nextSession);
-    if (nextObj !== object) setObject(nextObj);
-    if (nextObjId !== objectId) setObjectId(nextObjId);
-    if (nextEvent !== eventType) setEventType(nextEvent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+    const current = new URLSearchParams(searchParamsKey);
+    setQText(current.get('q') ?? '');
+    setUser(current.get('user') ?? '');
+    setUserSession(current.get('user_session') ?? '');
+    setObject(current.get('object') ?? '');
+    setObjectId(current.get('object_id') ?? '');
+    setEventType(current.get('event_type') ?? '');
+  }, [searchParamsKey]);
 
   // Persist filters in URL (shareable).
   useEffect(() => {
@@ -209,26 +196,6 @@ export function AuditPage() {
   const openAudit = (historyId: number) => {
     navigate(`${basePath}/audit/${historyId}`);
   };
-
-  type SmartKey = 'id' | 'q' | 'user' | 'session' | 'object' | 'object_id' | 'event';
-
-  function canonicalKey(raw: string): SmartKey | null {
-    const k = String(raw ?? '').trim().toLowerCase();
-    if (!k) return null;
-
-    if (k === 'id' || k === '#') return 'id';
-    if (k === 'q' || k === 'search' || k === 'text' || k === 'query') return 'q';
-
-    if (k === 'user' || k === 'u' || k === 'login') return 'user';
-    if (k === 'session' || k === 'sess' || k === 'user_session' || k === 's') return 'session';
-
-    if (k === 'object' || k === 'obj' || k === 'type' || k === 'class') return 'object';
-    if (k === 'object_id' || k === 'obj_id' || k === 'oid') return 'object_id';
-
-    if (k === 'event' || k === 'event_type' || k === 'et') return 'event';
-
-    return null;
-  }
 
   async function resolveUser(value: string): Promise<{ id?: number; err?: 'none' | 'ambiguous' }> {
     const needle = String(value ?? '').trim();

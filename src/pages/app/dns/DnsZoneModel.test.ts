@@ -14,7 +14,7 @@ describe('DnsZoneModel', () => {
   });
 
   test('falls back to explicit secondary type fields', () => {
-    expect(isSecondaryDnsZone({ id: 1, type: 'secondary_type' } as any)).toBe(true);
-    expect(isSecondaryDnsZone({ id: 1, zone_type: 'secondary' } as any)).toBe(true);
+    expect(isSecondaryDnsZone({ id: 1, type: 'secondary_type' })).toBe(true);
+    expect(isSecondaryDnsZone({ id: 1, zone_type: 'secondary' })).toBe(true);
   });
 });

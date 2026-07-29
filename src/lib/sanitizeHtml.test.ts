@@ -25,4 +25,10 @@ describe('sanitizeNewsHtml', () => {
     expect(html).toContain('<a>bad</a>');
     expect(html).toContain('<strong>ok</strong>');
   });
+
+  it('rejects protocol-relative links', () => {
+    const html = sanitizeNewsHtml('<a href="//attacker.example/track">bad</a>');
+
+    expect(html).toBe('<a>bad</a>');
+  });
 });

@@ -5,7 +5,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { fetchActionState } from '../../../lib/api/actionStates';
 import { fetchIpAddressesForVps, type IpAddress } from '../../../lib/api/ipAddresses';
 import { fetchTransactionChains } from '../../../lib/api/transactions';
-import { fetchVps, vpsPasswd, vpsRestart, vpsStart, vpsStop, type Vps } from '../../../lib/api/vps';
+import { fetchVps, vpsPasswd, vpsRestart, vpsStart, vpsStop } from '../../../lib/api/vps';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
 import { useObjectScope } from '../../../app/objectScope';

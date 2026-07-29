@@ -1,5 +1,6 @@
 // Common base actions, states, and object labels
 export const enCommon_base = {
+  'common.datetime.placeholder': 'YYYY-MM-DD HH:MM:SS',
   'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.all': 'All',

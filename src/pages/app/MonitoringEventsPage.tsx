@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
-
 import {
   fetchMonitoredEvents,
   type MonitoredEvent,
@@ -30,7 +29,6 @@ import {
 } from '../../lib/lockIndex';
 import { useTierAIntervalMs } from '../../lib/refreshTiers';
 import { dotVariantFromRowVariant } from '../../lib/variantMap';
-
 import { Badge } from '../../components/ui/Badge';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';
@@ -56,7 +54,6 @@ import {
   tokenizeSmartInput,
   unquoteSmartValue,
 } from '../../lib/smartFilter';
-
 function safeNumber(value: string): number | undefined {
   const t = value.trim();
   if (!t) return undefined;
