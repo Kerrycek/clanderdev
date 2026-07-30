@@ -58,6 +58,19 @@ describe('network address API wrappers', () => {
     expect(parsed.searchParams.get('ip_address[assigned_to_interface]')).toBe('false');
   });
 
+  test('fetchIpAddresses can request ownerless addresses in ascending order', async () => {
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as any;
+
+    await fetchIpAddresses({ user: null, assignedToInterface: false, order: 'asc' });
+
+    const [url] = lastFetchCall();
+    const parsed = new URL(url);
+    expect(parsed.searchParams.has('ip_address[user]')).toBe(true);
+    expect(parsed.searchParams.get('ip_address[user]')).toBe('');
+    expect(parsed.searchParams.get('ip_address[assigned_to_interface]')).toBe('false');
+    expect(parsed.searchParams.get('ip_address[order]')).toBe('asc');
+  });
+
   test('fetchIpAddressesForVps forwards the VPS scope and custom includes', async () => {
     globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as any;
 

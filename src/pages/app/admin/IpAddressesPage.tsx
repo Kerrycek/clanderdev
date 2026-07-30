@@ -33,8 +33,11 @@ import {
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
 import {
-  sampleSuggestedIps,
+  collectSuggestedIpCandidates,
+  keepSuccessfulSuggestedIpQueries,
+  sampleSuggestedIpsByLocationAndType,
   selectSuggestedIpLocations,
+  suggestedLocationMaxPages,
   SUGGESTED_IP_QUERY_LIMIT,
 } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
@@ -134,19 +137,27 @@ export function IpAddressesPage() {
   const suggestedQ = useQuery({
     queryKey: ['ip_addresses', 'suggested_free', suggestedLocations.map((item) => item.id)],
     queryFn: async () => {
-      const pages = await Promise.all(
-        suggestedLocations.flatMap((suggestedLocation) => ([4, 6] as const).map(async (version) => ({
+      const pages = await keepSuccessfulSuggestedIpQueries(
+        suggestedLocations.flatMap((suggestedLocation) => ([4, 6] as const).map((version) => async () => ({
           locationId: suggestedLocation.id,
-          data: (
-            await fetchIpAddresses({
-              limit: SUGGESTED_IP_QUERY_LIMIT,
-              location: suggestedLocation.id,
-              version,
-              assignedToInterface: false,
-              purpose: 'vps',
-              includes: 'network__primary_location__environment,network_interface,vps,user,charged_environment',
-            })
-          ).data,
+          data: await collectSuggestedIpCandidates({
+            version,
+            locationId: suggestedLocation.id,
+            maxPages: suggestedLocationMaxPages(suggestedLocation),
+            fetchPage: async (fromId) => (
+              await fetchIpAddresses({
+                limit: SUGGESTED_IP_QUERY_LIMIT,
+                fromId,
+                location: suggestedLocation.id,
+                version,
+                user: null,
+                assignedToInterface: false,
+                order: 'asc',
+                purpose: 'vps',
+                includes: 'network__primary_location__environment,network_interface,vps,user,charged_environment',
+              })
+            ).data,
+          }),
         })))
       );
 
@@ -155,13 +166,11 @@ export function IpAddressesPage() {
         byLocation.set(page.locationId, [...(byLocation.get(page.locationId) ?? []), ...page.data]);
       });
 
-      const seen = new Set<number>();
-      return suggestedLocations.flatMap((suggestedLocation) => sampleSuggestedIps(byLocation.get(suggestedLocation.id) ?? [])
-        .filter((ip) => {
-          if (seen.has(ip.id)) return false;
-          seen.add(ip.id);
-          return true;
-        })
+      return sampleSuggestedIpsByLocationAndType(
+        suggestedLocations.map((suggestedLocation) => ({
+          locationId: suggestedLocation.id,
+          items: byLocation.get(suggestedLocation.id) ?? [],
+        }))
       );
     },
     staleTime: 10_000,
