@@ -118,7 +118,7 @@ export const enVps_storage = {
   'vps.storage.root_dataset.capacity': 'Capacity used',
   'vps.storage.root_dataset.capacity_percent': '{percent}%',
   'vps.storage.root_dataset.no_backup_note': 'This view links to dataset context without turning automatic backup activity into a daily user action.',
-  'vps.storage.root_dataset.create_subdataset_user_note': 'Subdatasets are created from the root dataset detail; if the button is not shown, this action is not available to your role.',
+  'vps.storage.root_dataset.create_subdataset_user_note': 'Subdatasets are created from the root dataset detail; if the button is not shown, this action is not available for this dataset.',
   'vps.storage.root_dataset.system_context.title': 'System/admin context',
   'vps.storage.root_dataset.system_context.body': 'Counts include background/system objects. They are shown here only as collapsed context, not as a prompt to create backups manually.',
   'vps.storage.validation.mountpoint_absolute': 'Mountpoint must be an absolute path starting with /.',

@@ -107,32 +107,31 @@ test.describe('NAS datasets alias', () => {
     const parentQueries: Array<string | null> = [];
 
     await installHaveApiMock(page, {
-      user: { id: 1, login: 'alice', level: 99 },
+      user: { id: 1, login: 'alice', level: 1 },
       handlers: {
         'GET datasets': ({ searchParams }) => {
           const user = searchParams.get('dataset[user]');
           parentQueries.push(user);
 
           return {
-            datasets: user === '1'
-              ? [
-                  {
-                    id: 901,
-                    full_name: 'tank/nas/alice',
-                    name: 'alice',
-                    used: 1024,
-                    refquota: 4096,
-                  },
-                ]
-              : [
-                  {
-                    id: 999,
-                    full_name: 'tank/nas/another-user',
-                    name: 'another-user',
-                    used: 1024,
-                    refquota: 4096,
-                  },
-                ],
+            datasets: [
+              {
+                id: 901,
+                full_name: 'tank/nas/alice',
+                name: 'alice',
+                user: { id: 1, login: 'alice' },
+                used: 1024,
+                refquota: 4096,
+              },
+              {
+                id: 999,
+                full_name: 'tank/nas/another-user',
+                name: 'another-user',
+                user: { id: 99, login: 'another-user' },
+                used: 1024,
+                refquota: 4096,
+              },
+            ],
           };
         },
         'POST datasets': (ctx) => {
@@ -158,7 +157,12 @@ test.describe('NAS datasets alias', () => {
     await expect(page.getByTestId('nas.create.parent')).toHaveValue('');
     await expect(page.getByTestId('nas.create.parent').locator('option[value="901"]')).toHaveCount(1);
     await expect(page.getByTestId('nas.create.parent').locator('option[value="999"]')).toHaveCount(0);
-    expect(parentQueries).toContain('1');
+    expect(parentQueries).toContain(null);
+    await expect(page.getByTestId('nas.create.advanced_properties')).not.toHaveAttribute('open');
+    await expect(page.getByTestId('nas.create.recordsize')).not.toBeVisible();
+    await expect(page.getByTestId('nas.create.compression')).not.toBeVisible();
+    await expect(page.getByTestId('nas.create.atime')).not.toBeVisible();
+    await expect(page.getByTestId('nas.create.relatime')).not.toBeVisible();
 
     await page.getByTestId('nas.create.parent').selectOption('901');
     await page.getByTestId('nas.create.name').fill('projects');
@@ -170,11 +174,6 @@ test.describe('NAS datasets alias', () => {
       name: 'projects',
       automount: true,
       refquota: 8192,
-      compression: true,
-      recordsize: 131072,
-      atime: false,
-      relatime: false,
-      sync: 'standard',
     });
     await expect(page).toHaveURL('/app/nas/902');
   });
@@ -251,7 +250,7 @@ test.describe('NAS datasets alias', () => {
     await page.getByTestId('dataset.manage.create.open').click();
     const createModal = page.getByTestId('dataset.manage.create.modal');
     await createModal.getByTestId('dataset.manage.create.name').fill('projects');
-    await createModal.getByTestId('dataset.manage.refquota').fill('8');
+    await createModal.getByTestId('dataset.manage.create.refquota').fill('8');
     await createModal.getByTestId('dataset.manage.create.submit').click();
 
     await expect(page).toHaveURL(/\/admin\/nas\/902$/);

@@ -150,6 +150,7 @@ export const enStorage = {
   "dataset.manage.field.admin_override": "Set regardless of available resources",
   "dataset.manage.field.admin_lock_type": "Admin lock type",
   "dataset.manage.sync.standard": "Standard",
+  "dataset.manage.sync.always": "Always",
   "dataset.manage.sync.disabled": "Disabled",
   "dataset.manage.admin_lock.no_lock": "No lock",
   "dataset.manage.admin_lock.absolute": "Absolute",

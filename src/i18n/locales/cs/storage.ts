@@ -156,6 +156,7 @@ export const csStorage = {
   "dataset.manage.field.admin_override": "Nastavit bez ohledu na volné prostředky",
   "dataset.manage.field.admin_lock_type": "Typ admin locku",
   "dataset.manage.sync.standard": "Standard",
+  "dataset.manage.sync.always": "Vždy",
   "dataset.manage.sync.disabled": "Zakázáno",
   "dataset.manage.admin_lock.no_lock": "Bez locku",
   "dataset.manage.admin_lock.absolute": "Absolutní",

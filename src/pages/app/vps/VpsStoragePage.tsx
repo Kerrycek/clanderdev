@@ -4,9 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppMode } from '../../../app/appMode';
 import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
+import { useObjectScope } from '../../../app/objectScope';
 import { useChrome } from '../../../components/layout/ChromeContext';
 import { fetchDataset } from '../../../lib/api/datasets';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { datasetCapabilities } from '../../../lib/gates/dataset';
 import { createVpsMount, deleteVpsMount, fetchVpsMounts, findDatasetByName, updateVpsMount, type Dataset, type VpsMount } from '../../../lib/api/vpsMounts';
 import { gateVpsMutation } from '../../../lib/gates/vps';
 import { preflightVpsNotBusy } from './vpsPreflight';
@@ -51,6 +53,7 @@ function firstValidationError(issues: MountValidationIssue[], t: (key: string) =
 export function VpsStoragePage() {
   const { basePath, mode } = useAppMode();
   const auth = useAuth();
+  const scope = useObjectScope();
   const chrome = useChrome();
   const qc = useQueryClient();
   const { t } = useI18n();
@@ -265,10 +268,19 @@ export function VpsStoragePage() {
   const rootDatasetQ = useQuery({
     queryKey: ['datasets', 'show', rootDatasetId, 'vps-storage-root'],
     enabled: rootDatasetId !== null,
-    queryFn: async () => (await fetchDataset(rootDatasetId as number, { includes: 'vps,environment' })).data,
+    queryFn: async () => (
+      await fetchDataset(rootDatasetId as number, { includes: 'vps,environment,user,parent' })
+    ).data,
     refetchOnWindowFocus: false,
   });
   const root = rootDatasetSummary(rootDatasetQ.data ?? null, vps.dataset ?? null);
+  const rootCapabilities = rootDatasetQ.data
+    ? datasetCapabilities(rootDatasetQ.data, {
+        role: auth.role,
+        scope: scope.scope,
+        userId: auth.user?.id,
+      })
+    : null;
   const overview = storageOverviewSummary(mounts);
 
   return (
@@ -287,6 +299,7 @@ export function VpsStoragePage() {
       <VpsStorageRootDatasetCard
         basePath={basePath}
         canAdmin={canAdmin}
+        canCreateSubdataset={rootCapabilities?.canCreateSubdataset === true}
         root={root}
         loading={rootDatasetQ.isLoading}
         error={rootDatasetQ.isError ? errorMessage(rootDatasetQ.error) : null}

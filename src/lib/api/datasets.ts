@@ -170,7 +170,7 @@ export type DatasetEditablePayload = {
   recordsize?: number;
   atime?: boolean;
   relatime?: boolean;
-  sync?: 'standard' | 'disabled';
+  sync?: 'standard' | 'always' | 'disabled';
   sharenfs?: string;
   admin_override?: boolean;
   admin_lock_type?: 'no_lock' | 'absolute' | 'not_less' | 'not_more';

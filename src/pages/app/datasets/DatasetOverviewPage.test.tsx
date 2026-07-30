@@ -9,7 +9,7 @@ import { DatasetOverviewPage } from './DatasetOverviewPage';
 import { DatasetContextProvider } from './DatasetContext';
 
 vi.mock('../../../app/auth', () => ({
-  useAuth: () => ({ role: 'user' }),
+  useAuth: () => ({ role: 'user', user: { id: 1, login: 'member' } }),
 }));
 
 vi.mock('../../../app/appMode', () => ({
@@ -28,7 +28,7 @@ vi.mock('../../../app/i18n', () => ({
 }));
 
 vi.mock('../../../app/objectScope', () => ({
-  useObjectScope: () => ({ scope: 'own' }),
+  useObjectScope: () => ({ scope: 'mine' }),
 }));
 
 vi.mock('../../../components/layout/ChromeContext', () => ({
@@ -46,8 +46,7 @@ function renderPage() {
       queries: { retry: false },
       mutations: { retry: false },
     },
-  });
-
+});
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -57,6 +56,7 @@ function renderPage() {
               id: 10402,
               name: '10802',
               full_name: 'mail.kerrycze.net/10802',
+              user: { id: 1, login: 'member' },
               quota: 10 * 1024,
               refquota: 240 * 1024,
               used: 33 * 1024,
@@ -67,7 +67,7 @@ function renderPage() {
               relatime: false,
               recordsize: 128 * 1024,
               sync: 'standard',
-            },
+            } as any,
             refetch: vi.fn(),
             section: 'datasets',
             listPath: '/datasets',
@@ -98,19 +98,26 @@ describe('DatasetOverviewPage', () => {
 
     expect(screen.getByTestId('dataset.manage.quota')).toBeVisible();
     expect(screen.getByTestId('dataset.manage.refquota')).toBeVisible();
-    expect(screen.getByTestId('dataset.manage.compression')).toBeVisible();
 
     expect(screen.getByTestId('dataset.manage.advanced_properties')).not.toHaveAttribute('open');
+    expect(screen.getByTestId('dataset.manage.compression')).not.toBeVisible();
     expect(screen.getByTestId('dataset.manage.recordsize')).not.toBeVisible();
     expect(screen.getByTestId('dataset.manage.sync')).not.toBeVisible();
     expect(screen.getByTestId('dataset.manage.atime')).not.toBeVisible();
     expect(screen.getByTestId('dataset.manage.relatime')).not.toBeVisible();
+    expect(screen.queryByTestId('dataset.manage.sharenfs')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset.manage.admin_lock_type')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset.manage.admin_override')).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId('dataset.manage.advanced_properties.summary'));
 
+    expect(screen.getByTestId('dataset.manage.compression')).toBeVisible();
     expect(screen.getByTestId('dataset.manage.recordsize')).toBeVisible();
     expect(screen.getByTestId('dataset.manage.sync')).toBeVisible();
     expect(screen.getByTestId('dataset.manage.atime')).toBeVisible();
     expect(screen.getByTestId('dataset.manage.relatime')).toBeVisible();
+    expect(screen.queryByTestId('dataset.manage.sharenfs')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset.manage.admin_lock_type')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dataset.manage.admin_override')).not.toBeInTheDocument();
   });
 });

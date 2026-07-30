@@ -32,7 +32,7 @@ import {
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { type TransactionChain } from '../../../lib/api/transactions';
 import { formatDateTime, formatMiB } from '../../../lib/format';
-import { gateDatasetAction } from '../../../lib/gates/dataset';
+import { datasetCapabilities, gateDatasetAction } from '../../../lib/gates/dataset';
 import { usageSeverityFromRatio } from '../../../lib/usage';
 
 import { useDatasetContext } from './DatasetContext';
@@ -40,7 +40,6 @@ import { useDatasetContext } from './DatasetContext';
 function asNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
-
 function positive(v: unknown): number | undefined {
   const n = asNumber(v);
   return n !== undefined && n > 0 ? n : undefined;
@@ -244,35 +243,99 @@ function TemporaryExpansionCard(props: { dataset: any }) {
 type DatasetEditForm = {
   quotaGiB: string;
   refquotaGiB: string;
+  compression?: boolean;
+  atime?: boolean;
+  relatime?: boolean;
+  recordsizeKiB: string;
+  sync?: DatasetEditablePayload['sync'];
+  sharenfs?: string;
+  adminOverride?: boolean;
+  adminLockType?: 'no_lock' | 'absolute' | 'not_less' | 'not_more';
+};
+
+type DatasetCreateForm = {
+  name: string;
+  automount: boolean;
+  quotaGiB: string;
+  refquotaGiB: string;
   compression: boolean;
   atime: boolean;
   relatime: boolean;
   recordsizeKiB: string;
-  sync: 'standard' | 'disabled';
+  sync: NonNullable<DatasetEditablePayload['sync']>;
   sharenfs: string;
   adminOverride: boolean;
-  adminLockType: 'no_lock' | 'absolute' | 'not_less' | 'not_more';
+  adminLockType: NonNullable<DatasetEditablePayload['admin_lock_type']>;
+  includeAdvanced: boolean;
 };
 
-function buildEditablePayload(form: DatasetEditForm, isAdmin: boolean): DatasetEditablePayload {
-  const payload: DatasetEditablePayload = {
-    compression: form.compression,
-    atime: form.atime,
-    relatime: form.relatime,
-    sync: form.sync,
+function initialDatasetCreateForm(): DatasetCreateForm {
+  return {
+    name: '',
+    automount: true,
+    quotaGiB: '',
+    refquotaGiB: '',
+    compression: true,
+    atime: false,
+    relatime: false,
+    recordsizeKiB: '128',
+    sync: 'standard',
+    sharenfs: '',
+    adminOverride: false,
+    adminLockType: 'no_lock',
+    includeAdvanced: false,
   };
+}
+
+function buildEditablePayload(
+  form: DatasetEditForm,
+  isAdmin: boolean,
+  includeAdvanced: boolean
+): DatasetEditablePayload {
+  const payload: DatasetEditablePayload = {};
 
   const quota = parseGiBToMiB(form.quotaGiB);
   const refquota = parseGiBToMiB(form.refquotaGiB);
-  const recordsize = parseRecordsizeKiB(form.recordsizeKiB);
 
   if (quota !== undefined) payload.quota = quota;
   if (refquota !== undefined) payload.refquota = refquota;
-  if (recordsize !== undefined) payload.recordsize = recordsize;
-  if (isAdmin) {
-    payload.sharenfs = form.sharenfs.trim();
-    payload.admin_override = form.adminOverride;
-    payload.admin_lock_type = form.adminLockType;
+
+  if (includeAdvanced) {
+    const recordsize = parseRecordsizeKiB(form.recordsizeKiB);
+    if (form.compression !== undefined) payload.compression = form.compression;
+    if (form.atime !== undefined) payload.atime = form.atime;
+    if (form.relatime !== undefined) payload.relatime = form.relatime;
+    if (form.sync !== undefined) payload.sync = form.sync;
+    if (recordsize !== undefined) payload.recordsize = recordsize;
+
+    if (isAdmin) {
+      if (form.sharenfs !== undefined) payload.sharenfs = form.sharenfs.trim();
+      if (form.adminOverride !== undefined) payload.admin_override = form.adminOverride;
+      if (form.adminLockType !== undefined) payload.admin_lock_type = form.adminLockType;
+    }
+  }
+
+  return payload;
+}
+
+function buildCreateProperties(form: DatasetCreateForm, isAdmin: boolean): DatasetEditablePayload {
+  const payload: DatasetEditablePayload = {};
+
+  if (form.quotaGiB.trim()) payload.quota = parseGiBToMiB(form.quotaGiB);
+  if (form.refquotaGiB.trim()) payload.refquota = parseGiBToMiB(form.refquotaGiB);
+
+  if (form.includeAdvanced) {
+    payload.compression = form.compression;
+    payload.atime = form.atime;
+    payload.relatime = form.relatime;
+    payload.sync = form.sync;
+    payload.recordsize = parseRecordsizeKiB(form.recordsizeKiB);
+
+    if (isAdmin) {
+      payload.sharenfs = form.sharenfs.trim();
+      payload.admin_override = form.adminOverride;
+      payload.admin_lock_type = form.adminLockType;
+    }
   }
 
   return payload;
@@ -280,31 +343,45 @@ function buildEditablePayload(form: DatasetEditForm, isAdmin: boolean): DatasetE
 
 function DatasetManagementCard() {
   const { t } = useI18n();
-  const { role } = useAuth();
+  const auth = useAuth();
+  const { role } = auth;
   const scope = useObjectScope();
   const chrome = useChrome();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { dataset, refetch, refetchChains, datasetRef, busyLocalLock, busyTransaction, listPath } = useDatasetContext();
-  const showAdminControls = role === 'admin' && scope.scope === 'all';
+  const capabilities = datasetCapabilities(dataset, {
+    role,
+    scope: scope.scope,
+    userId: auth.user?.id,
+  });
+  const showAdminControls = capabilities.canUseAdminProperties;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [childName, setChildName] = useState('');
-  const [automount, setAutomount] = useState(true);
+  const [createForm, setCreateForm] = useState<DatasetCreateForm>(initialDatasetCreateForm);
 
+  const [editAdvancedOpened, setEditAdvancedOpened] = useState(false);
+  const [editAdvancedDirty, setEditAdvancedDirty] = useState(false);
   const [edit, setEdit] = useState<DatasetEditForm>(() => ({
     quotaGiB: mibToGiBInput((dataset as any).quota),
     refquotaGiB: mibToGiBInput((dataset as any).refquota),
-    compression: (dataset as any).compression !== false,
-    atime: Boolean((dataset as any).atime),
-    relatime: Boolean((dataset as any).relatime),
+    compression: typeof (dataset as any).compression === 'boolean' ? (dataset as any).compression : undefined,
+    atime: typeof (dataset as any).atime === 'boolean' ? (dataset as any).atime : undefined,
+    relatime: typeof (dataset as any).relatime === 'boolean' ? (dataset as any).relatime : undefined,
     recordsizeKiB: recordsizeToKiBInput((dataset as any).recordsize),
-    sync: String((dataset as any).sync ?? 'standard') === 'disabled' ? 'disabled' : 'standard',
-    sharenfs: String((dataset as any).sharenfs ?? ''),
-    adminOverride: false,
-    adminLockType: 'no_lock',
+    sync: ['standard', 'always', 'disabled'].includes(String((dataset as any).sync))
+      ? ((dataset as any).sync as DatasetEditablePayload['sync'])
+      : undefined,
+    sharenfs: typeof (dataset as any).sharenfs === 'string' ? (dataset as any).sharenfs : undefined,
+    adminOverride:
+      typeof (dataset as any).admin_override === 'boolean' ? (dataset as any).admin_override : undefined,
+    adminLockType: ['no_lock', 'absolute', 'not_less', 'not_more'].includes(
+      String((dataset as any).admin_lock_type)
+    )
+      ? ((dataset as any).admin_lock_type as DatasetEditForm['adminLockType'])
+      : undefined,
   }));
 
   const objectLabel = datasetLabel(dataset);
@@ -312,7 +389,7 @@ function DatasetManagementCard() {
   useEffect(() => {
     if (searchParams.get('create') !== 'subdataset') return;
 
-    if (showAdminControls) {
+    if (capabilities.canCreateSubdataset) {
       setFormError(null);
       setCreateOpen(true);
     }
@@ -320,7 +397,7 @@ function DatasetManagementCard() {
     const next = new URLSearchParams(searchParams);
     next.delete('create');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, showAdminControls]);
+  }, [capabilities.canCreateSubdataset, searchParams, setSearchParams]);
 
   const track = (meta: unknown, labelKey: string) => {
     const asId = getMetaActionStateId(meta);
@@ -341,21 +418,21 @@ function DatasetManagementCard() {
 
   const createM = useMutation({
     mutationFn: async () => {
-      const name = childName.trim();
+      const name = createForm.name.trim();
       if (!name) throw new Error('name-required');
-      const payload = buildEditablePayload(edit, showAdminControls);
+      const payload = buildCreateProperties(createForm, showAdminControls);
       return createDataset({
         ...payload,
         dataset: Number(dataset.id),
         name,
-        automount,
+        automount: createForm.automount,
       });
     },
     onMutate: () => chrome.acquireLocalLock(datasetRef),
     onSuccess: (res) => {
       track(res.meta, 'action.dataset.create.label');
       setCreateOpen(false);
-      setChildName('');
+      setCreateForm(initialDatasetCreateForm());
       const newId = Number((res.data as Dataset | undefined)?.id);
       if (Number.isInteger(newId) && newId > 0) navigate(`${listPath}/${newId}`);
     },
@@ -366,10 +443,12 @@ function DatasetManagementCard() {
   });
 
   const updateM = useMutation({
-    mutationFn: async () => updateDataset(dataset.id, buildEditablePayload(edit, showAdminControls)),
+    mutationFn: async () =>
+      updateDataset(dataset.id, buildEditablePayload(edit, showAdminControls, editAdvancedDirty)),
     onMutate: () => chrome.acquireLocalLock(datasetRef),
     onSuccess: (res) => {
       track(res.meta, 'action.dataset.update.label');
+      setEditAdvancedDirty(false);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
@@ -392,14 +471,39 @@ function DatasetManagementCard() {
   });
 
   const busyLocal = busyLocalLock || createM.isPending || updateM.isPending || deleteM.isPending;
-  const createGate = gateDatasetAction('dataset.create', { dataset, busyLocal, busyTransaction, role });
-  const updateGate = gateDatasetAction('dataset.update', { dataset, busyLocal, busyTransaction, role });
-  const deleteGate = gateDatasetAction('dataset.delete', { dataset, busyLocal, busyTransaction, role });
+  const createGate = gateDatasetAction('dataset.create', {
+    dataset,
+    busyLocal,
+    busyTransaction,
+    role,
+    permission: capabilities.canCreateSubdataset,
+  });
+  const updateGate = gateDatasetAction('dataset.update', {
+    dataset,
+    busyLocal,
+    busyTransaction,
+    role,
+    permission: capabilities.canUpdate,
+  });
+  const deleteGate = gateDatasetAction('dataset.delete', {
+    dataset,
+    busyLocal,
+    busyTransaction,
+    role,
+    permission: capabilities.canDelete,
+  });
+
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setCreateForm(initialDatasetCreateForm());
+    setFormError(null);
+    createM.reset();
+  };
 
   const submitCreate = () => {
     setFormError(null);
     try {
-      buildEditablePayload(edit, showAdminControls);
+      buildCreateProperties(createForm, showAdminControls);
       createM.mutate();
     } catch {
       setFormError(t('dataset.manage.validation.properties'));
@@ -409,7 +513,7 @@ function DatasetManagementCard() {
   const submitUpdate = () => {
     setFormError(null);
     try {
-      buildEditablePayload(edit, showAdminControls);
+      buildEditablePayload(edit, showAdminControls, editAdvancedDirty);
       updateM.mutate();
     } catch {
       setFormError(t('dataset.manage.validation.properties'));
@@ -417,10 +521,154 @@ function DatasetManagementCard() {
   };
 
   const advancedFields = (
-    <details className="rounded-lg border border-border bg-surface-2" data-testid="dataset.manage.advanced_properties">
+    <details
+      open={editAdvancedOpened}
+      onToggle={(event) => setEditAdvancedOpened(event.currentTarget.open)}
+      className="rounded-lg border border-border bg-surface-2"
+      data-testid="dataset.manage.advanced_properties"
+    >
       <summary
         className="flex cursor-pointer select-none items-start justify-between gap-3 px-3 py-3"
         data-testid="dataset.manage.advanced_properties.summary"
+      >
+        <span>
+          <span className="block text-sm font-medium text-fg">{t('filters.advanced.label')} ZFS</span>
+          <span className="mt-1 block text-xs text-muted">
+            {t('dataset.manage.field.recordsize')} · {t('dataset.manage.field.sync')} ·{' '}
+            {t('dataset.manage.field.atime')} · {t('dataset.manage.field.relatime')}
+          </span>
+        </span>
+        <Badge variant="neutral">{t('filters.advanced.label')}</Badge>
+      </summary>
+      <div className="space-y-4 border-t border-border px-3 py-4">
+        <Checkbox
+          checked={edit.compression ?? false}
+          onChange={(value) => {
+            setEdit((previous) => ({ ...previous, compression: value }));
+            setEditAdvancedDirty(true);
+          }}
+          label={t('dataset.manage.field.compression')}
+          testId="dataset.manage.compression"
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <div className="text-xs font-medium text-muted">{t('dataset.manage.field.recordsize')}</div>
+            <Input
+              value={edit.recordsizeKiB}
+              onChange={(event) => {
+                setEdit((previous) => ({ ...previous, recordsizeKiB: event.target.value }));
+                setEditAdvancedDirty(true);
+              }}
+              placeholder="128"
+              testId="dataset.manage.recordsize"
+            />
+          </label>
+          <label className="block">
+            <div className="text-xs font-medium text-muted">{t('dataset.manage.field.sync')}</div>
+            <Select
+              value={edit.sync ?? ''}
+              onChange={(event) => {
+                setEdit((previous) => ({
+                  ...previous,
+                  sync: event.target.value as DatasetEditablePayload['sync'],
+                }));
+                setEditAdvancedDirty(true);
+              }}
+              testId="dataset.manage.sync"
+              options={[
+                { value: '', label: t('common.na'), disabled: true },
+                { value: 'standard', label: t('dataset.manage.sync.standard') },
+                { value: 'always', label: t('dataset.manage.sync.always') },
+                { value: 'disabled', label: t('dataset.manage.sync.disabled') },
+              ]}
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Checkbox
+            checked={edit.atime ?? false}
+            onChange={(value) => {
+              setEdit((previous) => ({ ...previous, atime: value }));
+              setEditAdvancedDirty(true);
+            }}
+            label={t('dataset.manage.field.atime')}
+            testId="dataset.manage.atime"
+          />
+          <Checkbox
+            checked={edit.relatime ?? false}
+            onChange={(value) => {
+              setEdit((previous) => ({ ...previous, relatime: value }));
+              setEditAdvancedDirty(true);
+            }}
+            label={t('dataset.manage.field.relatime')}
+            testId="dataset.manage.relatime"
+          />
+        </div>
+
+        {showAdminControls ? (
+          <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+            <label className="block">
+              <div className="text-xs font-medium text-muted">{t('dataset.manage.field.sharenfs')}</div>
+              <Input
+                value={edit.sharenfs ?? ''}
+                onChange={(event) => {
+                  setEdit((previous) => ({ ...previous, sharenfs: event.target.value }));
+                  setEditAdvancedDirty(true);
+                }}
+                placeholder="off"
+                testId="dataset.manage.sharenfs"
+              />
+            </label>
+            <label className="block">
+              <div className="text-xs font-medium text-muted">{t('dataset.manage.field.admin_lock_type')}</div>
+              <Select
+                value={edit.adminLockType ?? ''}
+                onChange={(event) => {
+                  setEdit((previous) => ({
+                    ...previous,
+                    adminLockType: event.target.value as DatasetEditForm['adminLockType'],
+                  }));
+                  setEditAdvancedDirty(true);
+                }}
+                testId="dataset.manage.admin_lock_type"
+                options={[
+                  { value: '', label: t('common.na'), disabled: true },
+                  { value: 'no_lock', label: t('dataset.manage.admin_lock.no_lock') },
+                  { value: 'absolute', label: t('dataset.manage.admin_lock.absolute') },
+                  { value: 'not_less', label: t('dataset.manage.admin_lock.not_less') },
+                  { value: 'not_more', label: t('dataset.manage.admin_lock.not_more') },
+                ]}
+              />
+            </label>
+            <Checkbox
+              checked={edit.adminOverride ?? false}
+              onChange={(value) => {
+                setEdit((previous) => ({ ...previous, adminOverride: value }));
+                setEditAdvancedDirty(true);
+              }}
+              label={t('dataset.manage.field.admin_override')}
+              testId="dataset.manage.admin_override"
+            />
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+
+  const createAdvancedFields = (
+    <details
+      className="rounded-lg border border-border bg-surface-2"
+      data-testid="dataset.manage.create.advanced_properties"
+      onToggle={(event) => {
+        if (event.currentTarget.open) {
+          setCreateForm((previous) => ({ ...previous, includeAdvanced: true }));
+        }
+      }}
+    >
+      <summary
+        className="flex cursor-pointer select-none items-start justify-between gap-3 px-3 py-3"
+        data-testid="dataset.manage.create.advanced_properties.summary"
       >
         <span>
           <span className="block text-sm font-medium text-fg">{t('filters.advanced.label')} ZFS</span>
@@ -436,20 +684,24 @@ function DatasetManagementCard() {
           <label className="block">
             <div className="text-xs font-medium text-muted">{t('dataset.manage.field.recordsize')}</div>
             <Input
-              value={edit.recordsizeKiB}
-              onChange={(e) => setEdit((p) => ({ ...p, recordsizeKiB: e.target.value }))}
+              value={createForm.recordsizeKiB}
+              onChange={(event) => setCreateForm((previous) => ({ ...previous, recordsizeKiB: event.target.value }))}
               placeholder="128"
-              testId="dataset.manage.recordsize"
+              testId="dataset.manage.create.recordsize"
             />
           </label>
           <label className="block">
             <div className="text-xs font-medium text-muted">{t('dataset.manage.field.sync')}</div>
             <Select
-              value={edit.sync}
-              onChange={(e) => setEdit((p) => ({ ...p, sync: e.target.value as any }))}
-              testId="dataset.manage.sync"
+              value={createForm.sync}
+              onChange={(event) => setCreateForm((previous) => ({
+                ...previous,
+                sync: event.target.value as DatasetCreateForm['sync'],
+              }))}
+              testId="dataset.manage.create.sync"
               options={[
                 { value: 'standard', label: t('dataset.manage.sync.standard') },
+                { value: 'always', label: t('dataset.manage.sync.always') },
                 { value: 'disabled', label: t('dataset.manage.sync.disabled') },
               ]}
             />
@@ -458,16 +710,22 @@ function DatasetManagementCard() {
 
         <div className="grid gap-2 sm:grid-cols-2">
           <Checkbox
-            checked={edit.atime}
-            onChange={(v) => setEdit((p) => ({ ...p, atime: v }))}
-            label={t('dataset.manage.field.atime')}
-            testId="dataset.manage.atime"
+            checked={createForm.compression}
+            onChange={(value) => setCreateForm((previous) => ({ ...previous, compression: value }))}
+            label={t('dataset.manage.field.compression')}
+            testId="dataset.manage.create.compression"
           />
           <Checkbox
-            checked={edit.relatime}
-            onChange={(v) => setEdit((p) => ({ ...p, relatime: v }))}
+            checked={createForm.atime}
+            onChange={(value) => setCreateForm((previous) => ({ ...previous, atime: value }))}
+            label={t('dataset.manage.field.atime')}
+            testId="dataset.manage.create.atime"
+          />
+          <Checkbox
+            checked={createForm.relatime}
+            onChange={(value) => setCreateForm((previous) => ({ ...previous, relatime: value }))}
             label={t('dataset.manage.field.relatime')}
-            testId="dataset.manage.relatime"
+            testId="dataset.manage.create.relatime"
           />
         </div>
 
@@ -476,18 +734,21 @@ function DatasetManagementCard() {
             <label className="block">
               <div className="text-xs font-medium text-muted">{t('dataset.manage.field.sharenfs')}</div>
               <Input
-                value={edit.sharenfs}
-                onChange={(e) => setEdit((p) => ({ ...p, sharenfs: e.target.value }))}
+                value={createForm.sharenfs}
+                onChange={(event) => setCreateForm((previous) => ({ ...previous, sharenfs: event.target.value }))}
                 placeholder="off"
-                testId="dataset.manage.sharenfs"
+                testId="dataset.manage.create.sharenfs"
               />
             </label>
             <label className="block">
               <div className="text-xs font-medium text-muted">{t('dataset.manage.field.admin_lock_type')}</div>
               <Select
-                value={edit.adminLockType}
-                onChange={(e) => setEdit((p) => ({ ...p, adminLockType: e.target.value as any }))}
-                testId="dataset.manage.admin_lock_type"
+                value={createForm.adminLockType}
+                onChange={(event) => setCreateForm((previous) => ({
+                  ...previous,
+                  adminLockType: event.target.value as DatasetCreateForm['adminLockType'],
+                }))}
+                testId="dataset.manage.create.admin_lock_type"
                 options={[
                   { value: 'no_lock', label: t('dataset.manage.admin_lock.no_lock') },
                   { value: 'absolute', label: t('dataset.manage.admin_lock.absolute') },
@@ -497,10 +758,10 @@ function DatasetManagementCard() {
               />
             </label>
             <Checkbox
-              checked={edit.adminOverride}
-              onChange={(v) => setEdit((p) => ({ ...p, adminOverride: v }))}
+              checked={createForm.adminOverride}
+              onChange={(value) => setCreateForm((previous) => ({ ...previous, adminOverride: value }))}
               label={t('dataset.manage.field.admin_override')}
-              testId="dataset.manage.admin_override"
+              testId="dataset.manage.create.admin_override"
             />
           </div>
         ) : null}
@@ -537,10 +798,6 @@ function DatasetManagementCard() {
         </label>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Checkbox checked={edit.compression} onChange={(v) => setEdit((p) => ({ ...p, compression: v }))} label={t('dataset.manage.field.compression')} testId="dataset.manage.compression" />
-      </div>
-
       {advancedFields}
     </div>
   );
@@ -551,33 +808,37 @@ function DatasetManagementCard() {
         title={t('dataset.manage.title')}
         subtitle={t('dataset.manage.subtitle')}
         actions={
-          showAdminControls ? (
+          capabilities.canCreateSubdataset || capabilities.canDelete ? (
             <div className="flex flex-wrap gap-2">
-              <ActionButton
-                variant="secondary"
-                size="sm"
-                testId="dataset.manage.create.open"
-                disabled={!createGate.allowed}
-                disabledReason={!createGate.allowed ? createGate.reason : undefined}
-                onClick={() => {
-                  setFormError(null);
-                  setCreateOpen(true);
-                }}
-              >
-                {t('dataset.manage.create.open')}
-              </ActionButton>
-              <ActionButton
-                variant="danger"
-                size="sm"
-                testId="dataset.manage.delete.open"
-                disabled={!deleteGate.allowed}
-                disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
-                onClick={() => {
-                  setDeleteOpen(true);
-                }}
-              >
-                {t('common.delete')}
-              </ActionButton>
+              {capabilities.canCreateSubdataset ? (
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  testId="dataset.manage.create.open"
+                  disabled={!createGate.allowed}
+                  disabledReason={!createGate.allowed ? createGate.reason : undefined}
+                  onClick={() => {
+                    setFormError(null);
+                    setCreateOpen(true);
+                  }}
+                >
+                  {t('dataset.manage.create.open')}
+                </ActionButton>
+              ) : null}
+              {capabilities.canDelete ? (
+                <ActionButton
+                  variant="danger"
+                  size="sm"
+                  testId="dataset.manage.delete.open"
+                  disabled={!deleteGate.allowed}
+                  disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
+                  onClick={() => {
+                    setDeleteOpen(true);
+                  }}
+                >
+                  {t('common.delete')}
+                </ActionButton>
+              ) : null}
             </div>
           ) : null
         }
@@ -610,13 +871,13 @@ function DatasetManagementCard() {
         </div>
       </CardBody>
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('dataset.manage.create.title')}>
+      <Modal open={createOpen} onClose={closeCreate} title={t('dataset.manage.create.title')}>
         <div className="space-y-4" data-testid="dataset.manage.create.modal">
           <label className="block">
             <div className="text-xs font-medium text-muted">{t('dataset.manage.field.child_name')}</div>
             <Input
-              value={childName}
-              onChange={(e) => setChildName(e.target.value)}
+              value={createForm.name}
+              onChange={(event) => setCreateForm((previous) => ({ ...previous, name: event.target.value }))}
               placeholder="data"
               testId="dataset.manage.create.name"
             />
@@ -624,16 +885,48 @@ function DatasetManagementCard() {
           <div className="rounded-md border border-border bg-surface-2 p-3 text-xs text-muted">
             {t('dataset.manage.create.scope', { dataset: objectLabel })}
           </div>
-          <Checkbox checked={automount} onChange={setAutomount} label={t('dataset.manage.field.automount')} testId="dataset.manage.create.automount" />
-          {fields}
+          <Checkbox
+            checked={createForm.automount}
+            onChange={(value) => setCreateForm((previous) => ({ ...previous, automount: value }))}
+            label={t('dataset.manage.field.automount')}
+            testId="dataset.manage.create.automount"
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <div className="text-xs font-medium text-muted">{t('dataset.manage.field.quota')}</div>
+              <Input
+                value={createForm.quotaGiB}
+                onChange={(event) => setCreateForm((previous) => ({ ...previous, quotaGiB: event.target.value }))}
+                placeholder="10"
+                testId="dataset.manage.create.quota"
+              />
+            </label>
+            <label className="block">
+              <div className="text-xs font-medium text-muted">{t('dataset.manage.field.refquota')}</div>
+              <Input
+                value={createForm.refquotaGiB}
+                onChange={(event) => setCreateForm((previous) => ({ ...previous, refquotaGiB: event.target.value }))}
+                placeholder="10"
+                testId="dataset.manage.create.refquota"
+              />
+            </label>
+          </div>
+          {createAdvancedFields}
           {createM.isError ? (
             <Alert title={t('dataset.manage.create.error')} variant="danger">
               {String((createM.error as any)?.message ?? createM.error)}
             </Alert>
           ) : null}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
-            <ActionButton loading={createM.isPending} disabled={!childName.trim() || !createGate.allowed} onClick={submitCreate} testId="dataset.manage.create.submit">
+            <Button variant="secondary" onClick={closeCreate}>
+              {t('common.cancel')}
+            </Button>
+            <ActionButton
+              loading={createM.isPending}
+              disabled={!createForm.name.trim() || !createGate.allowed}
+              onClick={submitCreate}
+              testId="dataset.manage.create.submit"
+            >
               {t('common.create')}
             </ActionButton>
           </div>

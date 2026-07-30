@@ -16,7 +16,6 @@ function MetadataItem(props: { label: React.ReactNode; value: React.ReactNode })
     </div>
   );
 }
-
 function countLabel(value: number | null): string | number {
   return value ?? '—';
 }
@@ -24,6 +23,7 @@ function countLabel(value: number | null): string | number {
 export function VpsStorageRootDatasetCard(props: {
   basePath: string;
   canAdmin: boolean;
+  canCreateSubdataset: boolean;
   root: RootDatasetSummary;
   loading: boolean;
   error: string | null;
@@ -76,7 +76,7 @@ export function VpsStorageRootDatasetCard(props: {
           <ChipLink to={`${props.basePath}/datasets/${root.id}`} data-testid="vps.storage.root_dataset.open">
             {t('vps.storage.root_dataset.open')}
           </ChipLink>
-          {props.canAdmin ? (
+          {props.canCreateSubdataset ? (
             <ChipLink to={`${props.basePath}/datasets/${root.id}?create=subdataset`} data-testid="vps.storage.root_dataset.create_subdataset">
               {t('vps.storage.root_dataset.create_subdataset')}
             </ChipLink>
@@ -90,7 +90,9 @@ export function VpsStorageRootDatasetCard(props: {
         </div>
 
         <div className="mt-3 text-xs text-muted">{t('vps.storage.root_dataset.no_backup_note')}</div>
-        {!props.canAdmin ? <div className="mt-1 text-xs text-muted">{t('vps.storage.root_dataset.create_subdataset_user_note')}</div> : null}
+        {!props.loading && !props.canCreateSubdataset ? (
+          <div className="mt-1 text-xs text-muted">{t('vps.storage.root_dataset.create_subdataset_user_note')}</div>
+        ) : null}
 
         {props.canAdmin ? (
           <details className="mt-4 rounded-md border border-border bg-surface-2 p-3 text-xs text-muted" data-testid="vps.storage.root_dataset.system_context">

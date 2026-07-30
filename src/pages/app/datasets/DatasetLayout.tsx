@@ -53,7 +53,9 @@ export function DatasetLayout() {
   const q = useQuery({
     queryKey: ['datasets', 'show', id],
     enabled: Number.isFinite(id) && id > 0,
-    queryFn: async () => (await fetchDataset(id, { includes: 'vps,environment,dataset_expansion' })).data,
+    queryFn: async () => (
+      await fetchDataset(id, { includes: 'vps,environment,dataset_expansion,user,parent' })
+    ).data,
   });
 
   const chainsQ = useQuery({
