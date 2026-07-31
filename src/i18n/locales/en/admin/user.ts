@@ -194,8 +194,6 @@ export const enAdmin_user = {
   "admin.user.resource_usage.total": "Allocated",
   "admin.user.resource_usage.empty.title": "No resources",
   "admin.user.resource_usage.empty.body": "No resources were returned for this user.",
-  "admin.user.resource_usage.error.title": "Resource usage could not be loaded",
-  "admin.user.resource_usage.error.body": "Try loading the allocated capacity again.",
   "admin.user.resources.empty.title": "No assigned resources",
   "admin.user.resources.empty.body": "This user has no resource package assigned in any environment yet.",
   "admin.user.resources.remove.title": "Remove package?",
