@@ -37,6 +37,7 @@ export const csCommon_navigation = {
   'nav.nodes': 'Nody',
   'nav.migration_plans': 'Migrační plány',
   'nav.admin': 'Administrace',
+  'nav.security_advisories': 'Bezpečnostní upozornění',
   'nav.account': 'Účet',
   'user_menu.open': 'Otevřít menu účtu',
   'user_menu.account': 'Účet',

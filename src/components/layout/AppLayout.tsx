@@ -321,12 +321,8 @@ export function AppLayout(props: { children: React.ReactNode }) {
 
   const navItems = useMemo(
     () =>
-      buildSidebarNavItems({
-        basePath,
-        appMode: mode,
-        t: i18n.t,
-      }),
-    [basePath, i18n, mode]
+      buildSidebarNavItems({ basePath, appMode: mode, role: auth.role, t: i18n.t }),
+    [auth.role, basePath, i18n, mode]
   );
 
   const chainsQ = useQuery({

@@ -7,6 +7,7 @@ import { PublicLayout } from '../components/layout/PublicLayout';
 import { RouteProvidersLayout } from './RouteProvidersLayout';
 import { lazyRoute } from './lazyRoute';
 import * as CoreRoutes from './coreRouteComponents';
+import { securityAdvisoryAdminRoutes } from './securityAdvisoryAdminRoutes';
 
 import { ErrorPage } from '../pages/ErrorPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
@@ -148,6 +149,7 @@ export const router = createBrowserRouter([
             { path: 'outages/:outageId', element: <CoreRoutes.OutageDetailPage /> },
             { path: 'news', element: <CoreRoutes.NewsPage /> },
             { path: 'security-advisories', element: <CoreRoutes.SecurityAdvisoriesPage /> },
+            { path: 'security-advisories/:advisoryId', element: <CoreRoutes.SecurityAdvisoryDetailPage /> },
             { path: 'requests/registrations/:requestId/:token', element: <CoreRoutes.RegistrationCorrectionPage /> },
             { path: '*', element: <NotFoundPage /> },
             // The old webui has a useful index page. We keep public status pages accessible.
@@ -279,6 +281,7 @@ export const router = createBrowserRouter([
             { index: true, element: <CoreRoutes.DashboardPage /> },
             { path: 'outages', element: <AdminOutagesPage /> },
             { path: 'outages/:outageId', element: <AdminOutagesPage /> },
+            ...securityAdvisoryAdminRoutes,
             { path: 'nodes', element: <NodesPage /> },
             { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
             { path: 'migration-plans', element: <MigrationPlansPage /> },

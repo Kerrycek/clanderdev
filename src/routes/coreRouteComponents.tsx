@@ -9,6 +9,10 @@ export const SecurityAdvisoriesPage = lazyRoute(
   () => import('../pages/public/SecurityAdvisoriesPage'),
   'SecurityAdvisoriesPage',
 );
+export const SecurityAdvisoryDetailPage = lazyRoute(
+  () => import('../pages/public/SecurityAdvisoryDetailPage'),
+  'SecurityAdvisoryDetailPage',
+);
 export const RegistrationCorrectionPage = lazyRoute(
   () => import('../pages/public/RegistrationCorrectionPage'),
   'RegistrationCorrectionPage',
