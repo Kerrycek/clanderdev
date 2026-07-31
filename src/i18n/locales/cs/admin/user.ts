@@ -194,6 +194,8 @@ export const csAdmin_user = {
   "admin.user.resource_usage.total": "Přiděleno",
   "admin.user.resource_usage.empty.title": "Žádné prostředky",
   "admin.user.resource_usage.empty.body": "Pro tohoto uživatele nebyly vráceny žádné prostředky.",
+  "admin.user.resource_usage.error.title": "Využití prostředků se nepodařilo načíst",
+  "admin.user.resource_usage.error.body": "Zkus přidělenou kapacitu načíst znovu.",
   "admin.user.resources.empty.title": "Žádné přidělené prostředky",
   "admin.user.resources.empty.body": "Uživatel zatím nemá v žádném prostředí přiřazený balíček.",
   "admin.user.resources.remove.title": "Odebrat balíček?",

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '../../app/i18n';
 import { Card, CardBody, CardHeader } from '../ui/Card';
 import { EmptyState } from '../ui/EmptyState';
+import { ErrorState } from '../ui/ErrorState';
 import { UsageBar } from '../ui/UsageBar';
 import { fetchUserClusterResources, type ClusterResource } from '../../lib/api/clusterResources';
 
@@ -49,6 +50,20 @@ export function UserResourceUsagePanel(props: { userId: number; testIdPrefix: st
     }
     return [...byEnvironment.entries()].map(([key, group]) => ({ key, ...group }));
   }, [resourcesQ.data]);
+
+  if (resourcesQ.isError) {
+    return (
+      <ErrorState
+        error={resourcesQ.error}
+        title={t('admin.user.resource_usage.error.title')}
+        body={t('admin.user.resource_usage.error.body')}
+        onRetry={() => void resourcesQ.refetch()}
+        showBack={false}
+        showStatusLink={false}
+        testId={`${props.testIdPrefix}.error`}
+      />
+    );
+  }
 
   return (
     <div className="space-y-4" data-testid={props.testIdPrefix}>

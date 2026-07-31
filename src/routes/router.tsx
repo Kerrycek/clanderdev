@@ -231,6 +231,7 @@ export const router = createBrowserRouter([
             { path: 'monitoring', element: <CoreRoutes.MonitoringEventsPage /> },
             { path: 'monitoring/:eventId', element: <CoreRoutes.MonitoringEventDetailPage /> },
             { path: 'incidents', element: <CoreRoutes.IncidentsPage /> },
+            { path: 'incidents/new', element: <CoreRoutes.IncidentReportNewPage /> },
             { path: 'incidents/:incidentId', element: <CoreRoutes.IncidentReportDetailPage /> },
             { path: 'oom-reports', element: <CoreRoutes.OomReportsPage /> },
             { path: 'oom-reports/rules/:vpsId', element: <CoreRoutes.OomReportRulesPage /> },

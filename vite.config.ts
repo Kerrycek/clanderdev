@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
+import { buildInfoPlugin } from './build/buildInfo';
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -88,7 +90,7 @@ export default defineConfig(({ mode }) => {
   const prefixRe = new RegExp(`^${escapeRegExp(proxyPrefix)}`);
 
   return {
-    plugins: [react()],
+    plugins: [react(), buildInfoPlugin({ cwd: process.cwd(), env })],
     base,
     server: {
       port,
