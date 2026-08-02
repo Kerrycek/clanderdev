@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { useAuth } from '../../../app/auth';
@@ -11,6 +11,7 @@ import { PageHeader } from '../../../components/layout/PageHeader';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
+import { clsx } from '../../../components/ui/clsx';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { LoadingState } from '../../../components/ui/LoadingState';
@@ -18,8 +19,12 @@ import { Select } from '../../../components/ui/Select';
 import { StatusDot } from '../../../components/ui/StatusDot';
 import { TableCard } from '../../../components/ui/TableCard';
 import type { ResourceRef } from '../../../lib/api/appTypes';
-import { fetchIpAddresses, fetchIpAddressesForVps, type IpAddress } from '../../../lib/api/ipAddresses';
+import { fetchIpAddresses, type IpAddress } from '../../../lib/api/ipAddresses';
 import type { NetworkInterface } from '../../../lib/api/networkInterfaces';
+import {
+  fetchIpAddressAssignments,
+  type IpAddressAssignment,
+} from '../../../lib/api/networking';
 import { fetchVpsList } from '../../../lib/api/vps';
 import { AssignIpAddressModal } from './AssignIpAddressModal';
 import {
@@ -32,44 +37,59 @@ import {
   uniqueIpAddresses,
 } from './IpAddressAssignmentModel';
 import { UserNetworkTrafficCard } from './UserNetworkTrafficCard';
+import { UserNetworkLiveCard } from './UserNetworkLiveCard';
 
 type KindFilter = 'all' | AssignableIpKind;
+type NetworkTab = 'addresses' | 'traffic' | 'live';
 
 interface ScopedIpAddress {
   ip: IpAddress;
   vpsId: number | null;
 }
 
-const IP_LOOKUP_CONCURRENCY = 6;
+function assignmentIpAddress(assignment: IpAddressAssignment): ScopedIpAddress | null {
+  const source = assignment.ip_address;
+  if (!source || typeof source !== 'object' || !resourceId(source)) return null;
 
-async function fetchAssignedIpAddresses(vpsIds: number[]): Promise<ScopedIpAddress[]> {
-  const responses: Array<{ vpsId: number; ips: IpAddress[] }> = [];
+  const embedded = source as IpAddress & { ip_addr?: string };
+  const assignmentVps = assignment.vps ?? embedded.vps;
+  const networkInterface = embedded.network_interface;
+  const expandedInterface = networkInterface && typeof networkInterface === 'object'
+    ? { ...networkInterface, vps: (networkInterface as NetworkInterface).vps ?? assignmentVps }
+    : networkInterface;
+  const ip: IpAddress = {
+    ...embedded,
+    addr: embedded.addr ?? embedded.ip_addr ?? assignment.ip_addr,
+    prefix: embedded.prefix ?? assignment.ip_prefix,
+    vps: embedded.vps ?? assignmentVps,
+    network_interface: expandedInterface,
+  };
 
-  for (let offset = 0; offset < vpsIds.length; offset += IP_LOOKUP_CONCURRENCY) {
-    const batch = vpsIds.slice(offset, offset + IP_LOOKUP_CONCURRENCY);
-    responses.push(
-      ...(await Promise.all(
-        batch.map(async (vpsId) => ({
-          vpsId,
-          ips: (
-            await fetchIpAddressesForVps(vpsId, {
-              limit: 250,
-              includes: 'network__primary_location__environment,network_interface__vps,user',
-            })
-          ).data,
-        })),
-      )),
-    );
-  }
+  return {
+    ip,
+    vpsId: resourceId(assignmentVps) ?? ipVpsId(ip),
+  };
+}
 
+async function fetchAssignedIpAddresses(userId?: number): Promise<ScopedIpAddress[]> {
+  const assignments = (
+    await fetchIpAddressAssignments({
+      limit: 250,
+      user: userId,
+      active: true,
+      order: 'newest',
+      includes:
+        'ip_address__network__primary_location__environment,' +
+        'ip_address__network_interface__vps,user,vps',
+    })
+  ).data;
   const seen = new Set<number>();
-  return responses.flatMap(({ vpsId, ips }) =>
-    ips.flatMap((ip) => {
-      if (seen.has(ip.id)) return [];
-      seen.add(ip.id);
-      return [{ ip, vpsId: ipVpsId(ip) ?? vpsId }];
-    }),
-  );
+  return assignments.flatMap((assignment) => {
+    const scoped = assignmentIpAddress(assignment);
+    if (!scoped || seen.has(scoped.ip.id)) return [];
+    seen.add(scoped.ip.id);
+    return [scoped];
+  });
 }
 
 function interfaceId(ip: IpAddress): number | null {
@@ -104,13 +124,43 @@ function kindTranslationKey(kind: AssignableIpKind) {
   return 'network.user.kind.ipv4_public' as const;
 }
 
+function NetworkTabButton(props: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={props.active}
+      className={clsx(
+        'inline-flex min-h-10 items-center rounded-md px-4 py-2 text-sm font-medium transition',
+        props.active
+          ? 'bg-surface-2 text-fg ring-1 ring-border'
+          : 'text-muted hover:bg-surface-2 hover:text-fg'
+      )}
+      onClick={props.onClick}
+      data-testid={props.testId}
+    >
+      {props.children}
+    </button>
+  );
+}
+
 export function UserNetworkPage() {
   const auth = useAuth();
   const { basePath } = useAppMode();
   const { t } = useI18n();
   const scope = useObjectScope();
+  const [searchParams, setSearchParams] = useSearchParams();
   const userId = resourceId(auth.user?.id as number | string | undefined);
   const scopedUserId = scope.mineUserId;
+  const requestedTab = searchParams.get('tab');
+  const activeTab: NetworkTab = requestedTab === 'traffic' || requestedTab === 'live'
+    ? requestedTab
+    : 'addresses';
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [assignOpen, setAssignOpen] = useState(false);
   const [initialIp, setInitialIp] = useState<IpAddress | null>(null);
@@ -124,18 +174,14 @@ export function UserNetworkPage() {
         includes: 'node__location__environment,user',
       })
     ).data,
+    enabled: activeTab === 'addresses',
     staleTime: 10_000,
   });
 
-  const vpsIds = useMemo(() => (vpsesQ.data ?? []).map((vps) => vps.id), [vpsesQ.data]);
-
   const assignedQ = useQuery({
-    queryKey: ['ip_address', 'user-network', 'assigned', { userId, scopedUserId, vpsIds }],
-    queryFn: async (): Promise<ScopedIpAddress[]> => {
-      if (vpsIds.length === 0) return [];
-      return fetchAssignedIpAddresses(vpsIds);
-    },
-    enabled: vpsesQ.isSuccess,
+    queryKey: ['ip_address_assignment', 'user-network', 'active', { userId, scopedUserId }],
+    queryFn: () => fetchAssignedIpAddresses(scopedUserId),
+    enabled: activeTab === 'addresses' && userId !== null,
     staleTime: 5_000,
   });
 
@@ -149,7 +195,7 @@ export function UserNetworkPage() {
         includes: 'network__primary_location__environment,network_interface__vps,user',
       })
     ).data,
-    enabled: userId !== null,
+    enabled: activeTab === 'addresses' && userId !== null,
     staleTime: 5_000,
   });
 
@@ -188,6 +234,13 @@ export function UserNetworkPage() {
     setAssignOpen(true);
   };
 
+  const selectTab = (tab: NetworkTab) => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'addresses') next.delete('tab');
+    else next.set('tab', tab);
+    setSearchParams(next);
+  };
+
   const refresh = () => {
     void vpsesQ.refetch();
     void assignedQ.refetch();
@@ -223,39 +276,78 @@ export function UserNetworkPage() {
           title={t('network.user.title')}
           description={t('network.user.subtitle')}
           testId="network.user.header"
-          actions={
+          actions={activeTab === 'addresses' ? (
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" onClick={refresh}>{t('common.refresh')}</Button>
               <Button variant="primary" testId="network.user.add" onClick={() => openAssignment()}>
                 {t('network.user.action.add')}
               </Button>
             </div>
-          }
+          ) : undefined}
         />
       }
       filters={
-        <Card>
-          <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,240px)_1fr] sm:items-end">
-            <Select
-              label={t('network.user.filter.kind')}
-              testId="network.user.filter.kind"
-              value={kindFilter}
-              onChange={(event) => setKindFilter(event.target.value as KindFilter)}
-              options={[
-                { value: 'all', label: t('network.user.filter.kind.all') },
-                { value: 'ipv4_public', label: t('network.user.kind.ipv4_public') },
-                { value: 'ipv4_private', label: t('network.user.kind.ipv4_private') },
-                { value: 'ipv6', label: t('network.user.kind.ipv6') },
-              ]}
-            />
-            <div className="text-sm text-muted">{t('network.user.scope_hint')}</div>
+        <div className="space-y-4">
+          <div
+            className="flex flex-wrap gap-2"
+            role="tablist"
+            aria-label={t('network.user.tabs.aria')}
+            data-testid="network.user.tabs"
+          >
+            <NetworkTabButton
+              active={activeTab === 'addresses'}
+              onClick={() => selectTab('addresses')}
+              testId="network.user.tab.addresses"
+            >
+              {t('network.user.tab.addresses')}
+            </NetworkTabButton>
+            <NetworkTabButton
+              active={activeTab === 'traffic'}
+              onClick={() => selectTab('traffic')}
+              testId="network.user.tab.traffic"
+            >
+              {t('network.user.tab.traffic')}
+            </NetworkTabButton>
+            <NetworkTabButton
+              active={activeTab === 'live'}
+              onClick={() => selectTab('live')}
+              testId="network.user.tab.live"
+            >
+              {t('network.user.tab.live')}
+            </NetworkTabButton>
           </div>
-        </Card>
+
+          {activeTab === 'addresses' ? (
+            <Card>
+              <div className="grid gap-3 p-4 sm:grid-cols-[minmax(0,240px)_1fr] sm:items-end">
+                <Select
+                  label={t('network.user.filter.kind')}
+                  testId="network.user.filter.kind"
+                  value={kindFilter}
+                  onChange={(event) => setKindFilter(event.target.value as KindFilter)}
+                  options={[
+                    { value: 'all', label: t('network.user.filter.kind.all') },
+                    { value: 'ipv4_public', label: t('network.user.kind.ipv4_public') },
+                    { value: 'ipv4_private', label: t('network.user.kind.ipv4_private') },
+                    { value: 'ipv6', label: t('network.user.kind.ipv6') },
+                  ]}
+                />
+                <div className="text-sm text-muted">{t('network.user.scope_hint')}</div>
+              </div>
+            </Card>
+          ) : null}
+        </div>
       }
     >
-      <UserNetworkTrafficCard userId={userId} isAdmin={scopedUserId !== undefined} />
+      {activeTab === 'traffic' ? (
+        <UserNetworkTrafficCard userId={userId} isAdmin={scopedUserId !== undefined} />
+      ) : null}
 
-      {loading ? (
+      {activeTab === 'live' ? (
+        <UserNetworkLiveCard userId={userId} isAdmin={scopedUserId !== undefined} />
+      ) : null}
+
+      {activeTab === 'addresses' && (loading ? (
         <LoadingState testId="network.user.loading" />
       ) : error ? (
         <ErrorState error={error} testId="network.user.error" onRetry={refresh} />
@@ -340,9 +432,9 @@ export function UserNetworkPage() {
             </tbody>
           </TableCard>
         </>
-      )}
+      ))}
 
-      <AssignIpAddressModal
+      {activeTab === 'addresses' ? <AssignIpAddressModal
         open={assignOpen}
         availableVpses={vpsesQ.data ?? []}
         initialIp={initialIp}
@@ -352,7 +444,7 @@ export function UserNetworkPage() {
           setInitialIp(null);
         }}
         onAssigned={refresh}
-      />
+      /> : null}
     </ListShell>
   );
 }

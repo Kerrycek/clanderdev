@@ -1,5 +1,6 @@
 import type { ResourceRef, User, Vps, NetworkInterface } from './app';
 import { expectArray, haveApiCall } from './haveapi';
+import type { IpAddress } from './ipAddresses';
 
 export interface HostIpAddress {
   id: number;
@@ -13,7 +14,7 @@ export interface HostIpAddress {
 
 export interface IpAddressAssignment {
   id: number;
-  ip_address?: ResourceRef & { id?: number; addr?: string; ip_addr?: string };
+  ip_address?: IpAddress | (ResourceRef & { id?: number; addr?: string; ip_addr?: string });
   ip_addr?: string;
   ip_prefix?: number;
   user?: User | ResourceRef;
@@ -150,6 +151,7 @@ export async function fetchIpAddressAssignments(opts?: {
   location?: number;
   network?: number;
   order?: 'newest' | 'oldest';
+  includes?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -167,7 +169,9 @@ export async function fetchIpAddressAssignments(opts?: {
     path: '/ip_address_assignments',
     namespace: 'ip_address_assignment',
     params,
-    meta: { includes: 'user,vps,assigned_by_chain,unassigned_by_chain,ip_address' },
+    meta: {
+      includes: opts?.includes ?? 'user,vps,assigned_by_chain,unassigned_by_chain,ip_address',
+    },
   });
   return { ...res, data: expectArray<IpAddressAssignment>(res.data, 'ip_address_assignments#index') };
 }

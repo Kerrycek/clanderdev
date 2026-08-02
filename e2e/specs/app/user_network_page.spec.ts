@@ -1,8 +1,15 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
-test('@pr-smoke user network page lists only own addresses and assigns all supported address types', async ({ page }) => {
+function visibleAddressItem(page: Page, id: number) {
+  return page.locator(
+    `[data-testid="network.user.ip.row.${id}"]:visible, ` +
+    `[data-testid="network.user.ip.card.${id}"]:visible`
+  );
+}
+
+test('@pr-smoke @pr-smoke-mobile user network page lists only own addresses and assigns all supported address types', async ({ page }) => {
   await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
   const vps = {
@@ -60,7 +67,9 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
     user: null,
   };
   const listRequests: URL[] = [];
+  const assignmentRequests: URL[] = [];
   const accountingRequests: URL[] = [];
+  const monitorRequests: URL[] = [];
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
@@ -70,6 +79,27 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
     handlers: {
       'GET vpses': () => ({ vpses: [vps] }),
       'GET network_interfaces': () => ({ network_interfaces: [{ id: 501, name: 'eth0', vps: { id: 123 } }] }),
+      'GET ip_address_assignments': (ctx) => {
+        assignmentRequests.push(new URL(ctx.url.href));
+        return {
+          ip_address_assignments: [
+            { id: 801, ip_address: assigned, ip_addr: assigned.addr, ip_prefix: 32, vps, user: { id: 7 } },
+            {
+              id: 802,
+              ip_address: {
+                ...assigned,
+                id: 999,
+                addr: '203.0.113.99',
+                user: { id: 88, login: 'someone-else' },
+                network_interface: { id: 999, name: 'eth0', vps: { id: 999 } },
+                vps: { id: 999, hostname: 'foreign-vps.example' },
+              },
+              vps: { id: 999, hostname: 'foreign-vps.example' },
+              user: { id: 88 },
+            },
+          ],
+        };
+      },
       'GET network_interface_accountings': (ctx) => {
         accountingRequests.push(new URL(ctx.url.href));
         const year = Number(ctx.searchParams.get('network_interface_accounting[year]'));
@@ -90,28 +120,28 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
         }
         return { network_interface_accountings: [] };
       },
+      'GET network_interface_monitors': (ctx) => {
+        monitorRequests.push(new URL(ctx.url.href));
+        return {
+          network_interface_monitors: [
+            {
+              id: 901,
+              bytes_in: 4096,
+              bytes_out: 8192,
+              packets_in: 40,
+              packets_out: 80,
+              delta: 2,
+              updated_at: new Date().toISOString(),
+              network_interface: { id: 501, name: 'eth0', vps },
+            },
+          ],
+        };
+      },
       'GET ip_addresses': (ctx) => {
         listRequests.push(new URL(ctx.url.href));
-        const vpsId = ctx.searchParams.get('ip_address[vps]');
         const assignedFilter = ctx.searchParams.get('ip_address[assigned_to_interface]');
         const role = ctx.searchParams.get('ip_address[role]');
         const version = ctx.searchParams.get('ip_address[version]');
-
-        if (vpsId === '123') {
-          return {
-            ip_addresses: [
-              assigned,
-              {
-                ...assigned,
-                id: 999,
-                addr: '203.0.113.99',
-                user: { id: 88, login: 'someone-else' },
-                network_interface: { id: 999, name: 'eth0', vps: { id: 999 } },
-                vps: { id: 999, hostname: 'foreign-vps.example' },
-              },
-            ],
-          };
-        }
 
         if (role === 'private_access' && version === '4') {
           return { ip_addresses: [freePrivate] };
@@ -131,9 +161,19 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
   await page.goto('/app/networking');
 
   await expect(page.getByTestId('network.user.page')).toBeVisible();
-  await expect(page.getByTestId('nav.sidebar.networking')).toBeVisible();
-  await expect(page.getByTestId('network.user.ip.row.101')).toBeVisible();
-  await expect(page.getByTestId('network.user.ip.row.102')).toBeVisible();
+  await expect(page.getByTestId('nav.sidebar.networking')).toHaveCount(1);
+  await expect(page.getByTestId('network.user.tab.addresses')).toHaveAttribute('aria-selected', 'true');
+  await expect(visibleAddressItem(page, 101)).toBeVisible();
+  await expect(visibleAddressItem(page, 102)).toBeVisible();
+  await expect(page.getByTestId('network.user.traffic')).toHaveCount(0);
+  expect(accountingRequests).toHaveLength(0);
+  expect(monitorRequests).toHaveLength(0);
+  expect(assignmentRequests).toHaveLength(1);
+  expect(assignmentRequests[0]?.searchParams.get('ip_address_assignment[active]')).toBe('true');
+  expect(listRequests.some((url) => url.searchParams.has('ip_address[vps]'))).toBe(false);
+
+  await page.getByTestId('network.user.tab.traffic').click();
+  await expect(page).toHaveURL(/tab=traffic/);
   await expect(page.getByTestId('network.user.traffic')).toBeVisible();
   await expect(page.getByTestId('network.user.traffic.stat.total')).toContainText('3.00 GiB');
   await expect(page.getByTestId('network.user.traffic.panel.overview')).toBeVisible();
@@ -142,15 +182,28 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
   await expect(page.getByTestId('network.user.traffic.panel.breakdown')).toBeVisible();
   await expect(page.getByTestId('network.user.traffic.table')).toContainText('my-vps.example');
   await expect(page.getByTestId('network.user.traffic.table')).toContainText('eth0');
+  expect(accountingRequests).toHaveLength(6);
+  expect(monitorRequests).toHaveLength(0);
+
+  await page.getByTestId('network.user.tab.live').click();
+  await expect(page).toHaveURL(/tab=live/);
+  await expect(page.getByTestId('network.user.live')).toBeVisible();
+  await expect(page.getByTestId('network.user.live.stat.in')).toContainText('2.00 KiB/s');
+  await expect(page.getByTestId('network.user.live.stat.out')).toContainText('4.00 KiB/s');
+  await expect(page.getByTestId('network.user.live.table')).toContainText('my-vps.example');
+  expect(monitorRequests).toHaveLength(1);
+
+  await page.getByTestId('network.user.tab.addresses').click();
+  await expect(page).not.toHaveURL(/tab=/);
+  const monitorRequestsAfterLeaving = monitorRequests.length;
+  await page.waitForTimeout(5_500);
+  expect(monitorRequests).toHaveLength(monitorRequestsAfterLeaving);
   await expect(page.getByText('203.0.113.99/32')).toHaveCount(0);
   await expect(page.getByText('10.20.30.40/32')).toHaveCount(0);
 
-  const assignedRequest = listRequests.find((url) => url.searchParams.get('ip_address[vps]') === '123');
   const detachedRequest = listRequests.find(
     (url) => url.searchParams.get('ip_address[assigned_to_interface]') === 'false'
   );
-  expect(assignedRequest).toBeTruthy();
-  expect(assignedRequest?.searchParams.get('ip_address[purpose]')).toBeNull();
   expect(detachedRequest?.searchParams.get('ip_address[purpose]')).toBeNull();
   expect(detachedRequest?.searchParams.get('ip_address[order]')).toBeNull();
   expect(
@@ -179,7 +232,7 @@ test('@pr-smoke user network page lists only own addresses and assigns all suppo
   });
   await expect(page.getByTestId('network.user.assign')).toBeHidden();
 
-  await page.getByTestId('network.user.ip.row.102').getByTestId('network.user.ip.102.assign').click();
+  await visibleAddressItem(page, 102).getByTestId('network.user.ip.102.assign').click();
   await page.getByTestId('network.user.assign.vps').selectOption('123');
   await page.getByTestId('network.user.assign.continue').click();
   await expect(page.getByTestId('network.user.assign.address')).toContainText('2001:db8::10/128');
@@ -236,9 +289,8 @@ test('user network assignment offers only VPS compatible with the selected detac
     user: { id: 7, login: 'member', level: 1 },
     handlers: {
       'GET vpses': () => ({ vpses: [pragueVps, brnoVps] }),
-      'GET network_interface_accountings': () => ({ network_interface_accountings: [] }),
+      'GET ip_address_assignments': () => ({ ip_address_assignments: [] }),
       'GET ip_addresses': (ctx) => {
-        if (ctx.searchParams.get('ip_address[vps]')) return { ip_addresses: [] };
         if (ctx.searchParams.get('ip_address[assigned_to_interface]') === 'false') {
           return { ip_addresses: [brnoDetachedIp] };
         }
@@ -250,15 +302,15 @@ test('user network assignment offers only VPS compatible with the selected detac
 
   await page.goto('/app/networking');
 
-  await expect(page.getByTestId('network.user.ip.row.301')).toBeVisible();
-  await page.getByTestId('network.user.ip.row.301').getByTestId('network.user.ip.301.assign').click();
+  await expect(visibleAddressItem(page, 301)).toBeVisible();
+  await visibleAddressItem(page, 301).getByTestId('network.user.ip.301.assign').click();
 
   const vpsSelect = page.getByTestId('network.user.assign.vps');
   await expect(vpsSelect.locator('option')).toContainText(['Select VPS…', 'brno-vps.example (#124)']);
   await expect.poll(async () => (await vpsSelect.locator('option').allTextContents()).join('\n')).not.toContain('praha-vps.example');
 });
 
-test('admin user view fetches addresses through own VPS scope instead of the global cluster list', async ({ page }) => {
+test('admin user view fetches assignments through own user scope instead of the global cluster list', async ({ page }) => {
   await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
   const vps = {
@@ -300,6 +352,7 @@ test('admin user view fetches addresses through own VPS scope instead of the glo
     user: { id: 7, login: 'admin-member' },
   };
   const requests: URL[] = [];
+  const assignmentRequests: URL[] = [];
   const accountingRequests: URL[] = [];
 
   await installHaveApiMock(page, {
@@ -313,13 +366,24 @@ test('admin user view fetches addresses through own VPS scope instead of the glo
         accountingRequests.push(new URL(ctx.url.href));
         return { network_interface_accountings: [] };
       },
+      'GET ip_address_assignments': (ctx) => {
+        assignmentRequests.push(new URL(ctx.url.href));
+        return {
+          ip_address_assignments: [{
+            id: 901,
+            ip_address: assignedWithoutNestedInterface,
+            ip_addr: assignedWithoutNestedInterface.addr,
+            ip_prefix: assignedWithoutNestedInterface.prefix,
+            vps,
+            user: { id: 7, login: 'admin-member' },
+          }],
+        };
+      },
       'GET ip_addresses': (ctx) => {
         requests.push(new URL(ctx.url.href));
-        const vpsId = ctx.searchParams.get('ip_address[vps]');
         const assignedFilter = ctx.searchParams.get('ip_address[assigned_to_interface]');
         const ownerId = ctx.searchParams.get('ip_address[user]');
 
-        if (vpsId === '123') return { ip_addresses: [assignedWithoutNestedInterface] };
         if (assignedFilter === 'false' && ownerId === '7') return { ip_addresses: [ownedDetached] };
 
         return {
@@ -331,21 +395,21 @@ test('admin user view fetches addresses through own VPS scope instead of the glo
 
   await page.goto('/app/networking');
 
-  await expect(page.getByTestId('network.user.ip.row.201')).toBeVisible();
-  await expect(page.getByTestId('network.user.ip.row.202')).toBeVisible();
+  await expect(visibleAddressItem(page, 201)).toBeVisible();
+  await expect(visibleAddressItem(page, 202)).toBeVisible();
   await expect(page.getByTestId('network.user.empty')).toHaveCount(0);
-  await expect(page.getByTestId('network.user.ip.row.201').getByText('my-vps.example')).toBeVisible();
+  await expect(visibleAddressItem(page, 201).getByText('my-vps.example')).toBeVisible();
   await expect(page.getByText('203.0.113.99/32')).toHaveCount(0);
 
-  expect(requests.some((url) => url.searchParams.get('ip_address[vps]') === '123')).toBe(true);
-  expect(
-    requests.some(
-      (url) =>
-        url.searchParams.get('ip_address[assigned_to_interface]') === 'true' &&
-        url.searchParams.get('ip_address[vps]') === null
-    )
-  ).toBe(false);
-  expect(accountingRequests.length).toBeGreaterThan(0);
+  expect(assignmentRequests).toHaveLength(1);
+  expect(assignmentRequests[0]?.searchParams.get('ip_address_assignment[user]')).toBe('7');
+  expect(assignmentRequests[0]?.searchParams.get('ip_address_assignment[active]')).toBe('true');
+  expect(requests.some((url) => url.searchParams.has('ip_address[vps]'))).toBe(false);
+  expect(accountingRequests).toHaveLength(0);
+
+  await page.getByTestId('network.user.tab.traffic').click();
+  await expect(page.getByTestId('network.user.traffic')).toBeVisible();
+  expect(accountingRequests).toHaveLength(6);
   expect(
     accountingRequests.every((url) => url.searchParams.get('network_interface_accounting[user]') === '7')
   ).toBe(true);
