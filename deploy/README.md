@@ -16,6 +16,8 @@ It deploys a **static SPA at `/`** plus a tiny **OAuth BFF** bound to `127.0.0.1
   - serves the SPA with history fallback
   - proxies `/config.js`, `/session.json`, and `/oauth/*` to the BFF
 - obtains Let's Encrypt certificate when DNS is ready and reloads nginx on renew
+- stops the deployment if `/healthz`, `/session.json`, or `/oauth/login` is not
+  publicly routed to the OAuth BFF as expected
 
 ## Quick start
 
@@ -54,3 +56,15 @@ The script writes `/etc/webui-next/oauth.env` (root-only) with:
 - `HAVEAPI_AUTH_HEADER` (defaults to `X-HaveAPI-OAuth2-Token`)
 
 The secret is **not** embedded in the frontend build.
+
+## Authentication smoke check
+
+Run the same post-deployment check independently with:
+
+```bash
+bash deploy/smoke-auth-endpoints.sh https://clankerdev.vpsfree.cz
+```
+
+The check deliberately requests `/session.json` like the browser does and
+requires a JSON response. This catches nginx drift where the SPA fallback would
+otherwise return `index.html` and silently break login after OAuth succeeds.

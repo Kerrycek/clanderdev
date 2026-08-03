@@ -5,6 +5,8 @@ set -euo pipefail
 # Target: Ubuntu 24.04 LTS
 # Host: https://clankerdev.vpsfree.cz/
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 DOMAIN="clankerdev.vpsfree.cz"
 EXPECTED_IPV4="37.205.15.4"
 EXPECTED_IPV6="2a03:3b40:fe:438::1"
@@ -174,6 +176,12 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
   }
 
+  location = /healthz {
+    proxy_pass http://127.0.0.1:${BFF_PORT}/healthz;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+
   location ^~ /oauth/ {
     proxy_pass http://127.0.0.1:${BFF_PORT};
     proxy_set_header Host \$host;
@@ -272,6 +280,12 @@ server {
     add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
+  }
+
+  location = /healthz {
+    proxy_pass http://127.0.0.1:${BFF_PORT}/healthz;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
   }
 
   location ^~ /oauth/ {
@@ -527,6 +541,14 @@ if obtain_cert_if_dns_ready; then
   nginx -t
   systemctl reload nginx
 fi
+
+PUBLIC_URL="http://${DOMAIN}"
+if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+  PUBLIC_URL="https://${DOMAIN}"
+fi
+
+echo "==> Checking public authentication endpoints..."
+bash "${SCRIPT_DIR}/smoke-auth-endpoints.sh" "${PUBLIC_URL}"
 
 echo
 echo "✅ Deployment complete."

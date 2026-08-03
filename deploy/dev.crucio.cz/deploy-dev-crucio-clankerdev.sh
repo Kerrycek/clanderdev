@@ -39,3 +39,6 @@ fi
 
 systemctl daemon-reload
 systemctl restart webui-next-bff.service
+
+echo "Checking public authentication endpoints..."
+bash deploy/smoke-auth-endpoints.sh https://dev.crucio.cz --insecure
