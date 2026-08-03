@@ -52,6 +52,51 @@ test('auth deployment smoke accepts correctly routed BFF endpoints', async () =>
   })
 })
 
+test('auth deployment smoke waits for the BFF to become ready', async () => {
+  let healthRequests = 0
+
+  await withServer((request, response) => {
+    if (request.url === '/healthz') {
+      healthRequests += 1
+
+      if (healthRequests < 3) {
+        response.writeHead(502, { 'Content-Type': 'text/plain' })
+        response.end('starting')
+        return
+      }
+
+      response.writeHead(200, { 'Content-Type': 'text/plain' })
+      response.end('ok')
+      return
+    }
+
+    if (request.url === '/session.json') {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ accessToken: null, sessionExpiresAt: null }))
+      return
+    }
+
+    if (request.url === '/oauth/login') {
+      response.writeHead(302, { Location: '/authorize' })
+      response.end()
+      return
+    }
+
+    response.writeHead(404)
+    response.end()
+  }, async (baseUrl) => {
+    const result = await execFileAsync('bash', [smokeScript.pathname, baseUrl], {
+      env: {
+        ...process.env,
+        AUTH_SMOKE_HEALTH_DELAY_SECONDS: '0.01',
+      },
+    })
+
+    assert.match(result.stdout, /Auth endpoints OK/)
+    assert.equal(healthRequests, 3)
+  })
+})
+
 test('auth deployment smoke rejects an SPA fallback for session.json', async () => {
   await withServer((request, response) => {
     if (request.url === '/healthz') {

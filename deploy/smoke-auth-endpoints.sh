@@ -11,6 +11,18 @@ fi
 
 base_url="${base_url%/}"
 curl_args=(--silent --show-error --max-time 20)
+health_attempts="${AUTH_SMOKE_HEALTH_ATTEMPTS:-20}"
+health_delay="${AUTH_SMOKE_HEALTH_DELAY_SECONDS:-1}"
+
+if ! [[ "$health_attempts" =~ ^[1-9][0-9]*$ ]]; then
+  echo "AUTH_SMOKE_HEALTH_ATTEMPTS must be a positive integer." >&2
+  exit 2
+fi
+
+if ! [[ "$health_delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+  echo "AUTH_SMOKE_HEALTH_DELAY_SECONDS must be a non-negative number." >&2
+  exit 2
+fi
 
 if [[ "$tls_mode" == "--insecure" ]]; then
   curl_args+=(--insecure)
@@ -36,9 +48,26 @@ request() {
     "${base_url}${path}"
 }
 
-health_status="$(request "/healthz" "$tmp_dir/health.body" \
-  "$tmp_dir/health.headers")"
-if [[ "$health_status" != "200" ]] || [[ "$(cat "$tmp_dir/health.body")" != "ok" ]]; then
+health_status="000"
+health_ready=false
+
+for ((attempt = 1; attempt <= health_attempts; attempt += 1)); do
+  if health_status="$(request "/healthz" "$tmp_dir/health.body" \
+      "$tmp_dir/health.headers" \
+      --connect-timeout 1 \
+      --max-time 2)" && \
+      [[ "$health_status" == "200" ]] && \
+      [[ "$(cat "$tmp_dir/health.body")" == "ok" ]]; then
+    health_ready=true
+    break
+  fi
+
+  if ((attempt < health_attempts)); then
+    sleep "$health_delay"
+  fi
+done
+
+if [[ "$health_ready" != true ]]; then
   echo "Auth smoke failed: /healthz is not healthy (HTTP $health_status)." >&2
   exit 1
 fi
