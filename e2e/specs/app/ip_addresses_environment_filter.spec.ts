@@ -8,6 +8,10 @@ test.describe('IP address environment filter', () => {
     const requestedAssigned: string[] = [];
     const requestedOwners: Array<string | null> = [];
     const requestedOrders: Array<string | null> = [];
+    const requestedRoles: Array<string | null> = [];
+    const requestedLimits: Array<string | null> = [];
+    const requestedCursors: Array<string | null> = [];
+    const requestedIncludes: Array<string | null> = [];
     const itemKind = testInfo.project.name === 'mobile-chrome' ? 'card' : 'row';
     const item = (id: number) => page.getByTestId(`admin.ip_addresses.${itemKind}.${id}`);
 
@@ -25,10 +29,15 @@ test.describe('IP address environment filter', () => {
         'GET ip_addresses': (ctx) => {
           const location = ctx.searchParams.get('ip_address[location]');
           const version = ctx.searchParams.get('ip_address[version]');
+          const role = ctx.searchParams.get('ip_address[role]');
           if (location) requestedLocations.push(location);
           requestedAssigned.push(ctx.searchParams.get('ip_address[assigned_to_interface]') ?? '');
           requestedOwners.push(ctx.searchParams.get('ip_address[user]'));
           requestedOrders.push(ctx.searchParams.get('ip_address[order]'));
+          requestedRoles.push(role);
+          requestedLimits.push(ctx.searchParams.get('ip_address[limit]'));
+          requestedCursors.push(ctx.searchParams.get('ip_address[from_id]'));
+          requestedIncludes.push(ctx.searchParams.get('_meta[includes]'));
 
           const locations = {
             '7': { id: 600, location: { id: 7, label: 'Brno', environment: { id: 3, label: 'Production' } } },
@@ -50,22 +59,23 @@ test.describe('IP address environment filter', () => {
             },
           });
 
-          return {
-            ip_addresses: version === '6'
+          const items = version === '6'
+            ? [1, 2, 3].map((offset) =>
+              address(selected.id + 20 + offset, `2a03:3b40:${location}::${offset}`)
+            )
+            : role === 'private_access'
               ? [1, 2, 3].map((offset) =>
-                address(selected.id + 20 + offset, `2a03:3b40:${location}::${offset}`)
+                address(selected.id + 10 + offset, `10.${location}.0.${offset}`)
               )
               : [
                 ...[1, 2, 3].map((offset) =>
                   address(selected.id + offset, `198.51.${location}.${offset}`)
                 ),
-                ...[1, 2, 3].map((offset) =>
-                  address(selected.id + 10 + offset, `10.${location}.0.${offset}`)
-                ),
                 { ...address(selected.id + 1_000, `198.51.${location}.100`), user: { id: 99, login: 'already-owned' } },
                 { ...address(selected.id + 2_000, `198.51.${location}.101`), vps: { id: 77, hostname: 'already-used' } },
-              ],
-          };
+              ];
+
+          return { ip_addresses: items };
         },
       },
     });
@@ -84,7 +94,10 @@ test.describe('IP address environment filter', () => {
 
     const renderedIds = await page
       .locator(`[data-testid^="admin.ip_addresses.${itemKind}."]`)
-      .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute('data-testid')?.split('.').at(-1))));
+      .evaluateAll((nodes) => nodes.flatMap((node) => {
+        const match = node.getAttribute('data-testid')?.match(/\.(\d+)$/);
+        return match ? [Number(match[1])] : [];
+      }));
     expect(renderedIds).toEqual([
       501, 502, 503,
       601, 602, 603,
@@ -101,6 +114,22 @@ test.describe('IP address environment filter', () => {
     expect(requestedAssigned.every((value) => value === 'false')).toBe(true);
     expect(requestedOwners.every((value) => value === '')).toBe(true);
     expect(requestedOrders.every((value) => value === 'asc')).toBe(true);
+    expect(requestedLocations).toHaveLength(9);
+    expect(requestedRoles).toEqual([
+      'public_access', 'private_access', null,
+      'public_access', 'private_access', null,
+      'public_access', 'private_access', null,
+    ]);
+    expect(requestedLimits.every((value) => value === '50')).toBe(true);
+    expect(requestedCursors.every((value) => value === null)).toBe(true);
+    expect(requestedIncludes.every((value) => value === 'network__primary_location__environment')).toBe(true);
+
+    if (process.env.E2E_IP_SUGGESTIONS_PROOF_SCREENSHOT) {
+      await page.screenshot({
+        path: process.env.E2E_IP_SUGGESTIONS_PROOF_SCREENSHOT,
+        fullPage: true,
+      });
+    }
   });
 
   test('shows a deliberately selected legacy subnet', async ({ page }, testInfo) => {

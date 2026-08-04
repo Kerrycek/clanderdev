@@ -9,13 +9,16 @@ import {
 } from './ipAddressListSemantics';
 
 export const SUGGESTED_IPS_PER_TYPE = 3;
-export const SUGGESTED_IP_QUERY_LIMIT = 150;
-export const SUGGESTED_IP_QUERY_CONCURRENCY = 6;
-export const SUGGESTED_PRIORITY_LOCATION_MAX_PAGES = 8;
-export const SUGGESTED_OTHER_LOCATION_MAX_PAGES = 1;
+export const SUGGESTED_IP_QUERY_LIMIT = 50;
 export const SUGGESTED_LOCATION_LIMIT = 12;
 
 type SuggestedIpBucket = 'public4' | 'private4' | 'ipv6';
+
+export interface SuggestedIpQuery {
+  locationId: number;
+  version: 4 | 6;
+  role?: 'public_access' | 'private_access';
+}
 
 function normalizedLocationText(location: InfraLocation): string {
   return `${location.label ?? ''} ${location.environment?.label ?? ''}`.toLocaleLowerCase('cs');
@@ -41,12 +44,6 @@ function isPrahaProductionLocation(location: InfraLocation): boolean {
 
 function isBrnoProductionLocation(location: InfraLocation): boolean {
   return isBrnoLocation(location) && isProductionLocation(location);
-}
-
-export function suggestedLocationMaxPages(location: InfraLocation): number {
-  return isPrahaProductionLocation(location) || isBrnoProductionLocation(location)
-    ? SUGGESTED_PRIORITY_LOCATION_MAX_PAGES
-    : SUGGESTED_OTHER_LOCATION_MAX_PAGES;
 }
 
 function environmentKey(location: InfraLocation): string {
@@ -99,9 +96,24 @@ export function selectSuggestedIpLocations(locations: InfraLocation[]): InfraLoc
     coveredEnvironments.add(key);
   }
 
-  for (const location of ordered) add(location);
-
   return selected.slice(0, SUGGESTED_LOCATION_LIMIT);
+}
+
+/**
+ * Build one bounded API request for every visible location/address type.
+ *
+ * Filtering IPv4 by network role prevents public and private pools from
+ * displacing each other in the API's ID-ordered result. IPv6 remains a single
+ * bucket, matching the UI. The plan is location-major so the browser starts
+ * Prague and Brno production requests first and can paint those rows while
+ * lower-priority locations are still loading.
+ */
+export function buildSuggestedIpQueryPlan(locations: InfraLocation[]): SuggestedIpQuery[] {
+  return locations.flatMap((location) => [
+    { locationId: location.id, version: 4 as const, role: 'public_access' as const },
+    { locationId: location.id, version: 4 as const, role: 'private_access' as const },
+    { locationId: location.id, version: 6 as const },
+  ]);
 }
 
 function suggestedIpBucket(ip: IpAddress): SuggestedIpBucket {
@@ -122,100 +134,6 @@ function eligibleSuggestedIps(items: IpAddress[], locationId?: number): IpAddres
     .filter((ip) => !isDefaultHiddenLegacyNetwork(ip))
     .filter(isUnallocatedIp)
     .filter((ip) => locationId === undefined || primaryLocationId(ip) === locationId);
-}
-
-export function hasSuggestedIpQuota(items: IpAddress[], version: 4 | 6, locationId?: number): boolean {
-  const counts: Record<SuggestedIpBucket, number> = {
-    public4: 0,
-    private4: 0,
-    ipv6: 0,
-  };
-
-  eligibleSuggestedIps(items, locationId).forEach((ip) => {
-    counts[suggestedIpBucket(ip)] += 1;
-  });
-
-  const buckets: SuggestedIpBucket[] = version === 4
-    ? ['public4', 'private4']
-    : ['ipv6'];
-
-  return buckets.every((bucket) => counts[bucket] >= SUGGESTED_IPS_PER_TYPE);
-}
-
-export async function collectSuggestedIpCandidates(opts: {
-  fetchPage: (fromId?: number) => Promise<IpAddress[]>;
-  version: 4 | 6;
-  locationId: number;
-  maxPages?: number;
-  pageSize?: number;
-}): Promise<IpAddress[]> {
-  const pageSize = opts.pageSize ?? SUGGESTED_IP_QUERY_LIMIT;
-  const maxPages = opts.maxPages ?? SUGGESTED_OTHER_LOCATION_MAX_PAGES;
-  const collected: IpAddress[] = [];
-  const seenIds = new Set<number>();
-  const seenCursors = new Set<number>();
-  let fromId: number | undefined;
-
-  for (let pageNumber = 0; pageNumber < maxPages; pageNumber += 1) {
-    const page = await opts.fetchPage(fromId);
-    page.forEach((ip) => {
-      if (seenIds.has(ip.id)) return;
-      seenIds.add(ip.id);
-      collected.push(ip);
-    });
-
-    if (hasSuggestedIpQuota(collected, opts.version, opts.locationId)) break;
-    if (page.length < pageSize) break;
-
-    const cursor = page.reduce<number | undefined>((max, ip) => {
-      if (!Number.isFinite(ip.id) || ip.id <= 0) return max;
-      return max === undefined || ip.id > max ? ip.id : max;
-    }, undefined);
-
-    if (cursor === undefined || seenCursors.has(cursor)) break;
-    seenCursors.add(cursor);
-    fromId = cursor;
-  }
-
-  return collected;
-}
-
-export async function keepSuccessfulSuggestedIpQueries<T>(
-  queryFactories: Array<() => Promise<T>>,
-  concurrency = SUGGESTED_IP_QUERY_CONCURRENCY
-): Promise<T[]> {
-  const requestedConcurrency = Number.isFinite(concurrency) ? Math.floor(concurrency) : SUGGESTED_IP_QUERY_CONCURRENCY;
-  const workerCount = Math.min(queryFactories.length, Math.max(1, requestedConcurrency));
-  const successful: Array<{ index: number; value: T }> = [];
-  const failed: Array<{ index: number; reason: unknown }> = [];
-  let nextIndex = 0;
-
-  const worker = async () => {
-    while (nextIndex < queryFactories.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      const factory = queryFactories[index];
-      if (!factory) continue;
-
-      try {
-        successful.push({ index, value: await factory() });
-      } catch (reason) {
-        failed.push({ index, reason });
-      }
-    }
-  };
-
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-
-  if (successful.length > 0) {
-    return successful
-      .sort((a, b) => a.index - b.index)
-      .map((result) => result.value);
-  }
-
-  const firstFailure = failed.sort((a, b) => a.index - b.index)[0];
-  if (firstFailure) throw firstFailure.reason;
-  throw new Error('No suggested IP address query completed');
 }
 
 export function sampleSuggestedIps(items: IpAddress[], locationId?: number): IpAddress[] {

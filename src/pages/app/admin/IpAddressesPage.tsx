@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
@@ -33,11 +33,9 @@ import {
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
 import {
-  collectSuggestedIpCandidates,
-  keepSuccessfulSuggestedIpQueries,
+  buildSuggestedIpQueryPlan,
   sampleSuggestedIpsByLocationAndType,
   selectSuggestedIpLocations,
-  suggestedLocationMaxPages,
   SUGGESTED_IP_QUERY_LIMIT,
 } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
@@ -124,7 +122,8 @@ export function IpAddressesPage() {
   const locationsQ = useQuery({
     queryKey: ['locations', 'ip_addresses', 'active'],
     queryFn: async () => (await fetchLocations({ limit: 200, includes: 'environment' })).data,
-    staleTime: 60_000,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const environmentLocations = useMemo(() => (locationsQ.data ?? []) as InfraLocation[], [locationsQ.data]);
@@ -133,49 +132,54 @@ export function IpAddressesPage() {
     [environmentLocations]
   );
   const showingSuggestedFreeIps = !filtersActive && suggestedLocations.length > 0;
-
-  const suggestedQ = useQuery({
-    queryKey: ['ip_addresses', 'suggested_free', suggestedLocations.map((item) => item.id)],
-    queryFn: async () => {
-      const pages = await keepSuccessfulSuggestedIpQueries(
-        suggestedLocations.flatMap((suggestedLocation) => ([4, 6] as const).map((version) => async () => ({
-          locationId: suggestedLocation.id,
-          data: await collectSuggestedIpCandidates({
-            version,
-            locationId: suggestedLocation.id,
-            maxPages: suggestedLocationMaxPages(suggestedLocation),
-            fetchPage: async (fromId) => (
-              await fetchIpAddresses({
-                limit: SUGGESTED_IP_QUERY_LIMIT,
-                fromId,
-                location: suggestedLocation.id,
-                version,
-                user: null,
-                assignedToInterface: false,
-                order: 'asc',
-                purpose: 'vps',
-                includes: 'network__primary_location__environment,network_interface,vps,user,charged_environment',
-              })
-            ).data,
-          }),
-        })))
-      );
-
-      const byLocation = new Map<number, IpAddress[]>();
-      pages.forEach((page) => {
-        byLocation.set(page.locationId, [...(byLocation.get(page.locationId) ?? []), ...page.data]);
-      });
-
-      return sampleSuggestedIpsByLocationAndType(
-        suggestedLocations.map((suggestedLocation) => ({
-          locationId: suggestedLocation.id,
-          items: byLocation.get(suggestedLocation.id) ?? [],
-        }))
-      );
-    },
-    staleTime: 10_000,
-    enabled: showingSuggestedFreeIps,
+  const suggestedQueryPlan = useMemo(
+    () => buildSuggestedIpQueryPlan(suggestedLocations),
+    [suggestedLocations]
+  );
+  const suggestedQueries = useQueries({
+    queries: suggestedQueryPlan.map((query) => ({
+      queryKey: ['ip_addresses', 'suggested_free', query.locationId, query.version, query.role ?? 'any'],
+      queryFn: async () => (
+        await fetchIpAddresses({
+          limit: SUGGESTED_IP_QUERY_LIMIT,
+          location: query.locationId,
+          version: query.version,
+          role: query.role,
+          user: null,
+          assignedToInterface: false,
+          order: 'asc',
+          purpose: 'vps',
+          includes: 'network__primary_location__environment',
+        })
+      ).data,
+      staleTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+      enabled: showingSuggestedFreeIps,
+    })),
   });
+  const suggestedData = useMemo(() => {
+    const byLocation = new Map<number, IpAddress[]>();
+    suggestedQueries.forEach((query, index) => {
+      const locationId = suggestedQueryPlan[index]?.locationId;
+      if (locationId === undefined || !query.data) return;
+      byLocation.set(locationId, [...(byLocation.get(locationId) ?? []), ...query.data]);
+    });
+
+    return sampleSuggestedIpsByLocationAndType(
+      suggestedLocations.map((suggestedLocation) => ({
+        locationId: suggestedLocation.id,
+        items: byLocation.get(suggestedLocation.id) ?? [],
+      }))
+    );
+  }, [suggestedLocations, suggestedQueries, suggestedQueryPlan]);
+  const suggestedPending = suggestedQueries.some((query) => query.isPending);
+  const suggestedError = suggestedQueries.find((query) => query.isError)?.error;
+  const retrySuggestedQueries = () => {
+    suggestedQueries.forEach((query) => {
+      void query.refetch();
+    });
+  };
 
   const listQ = useQuery({
     queryKey: [
@@ -222,8 +226,13 @@ export function IpAddressesPage() {
     enabled: !locationsQ.isLoading && !showingSuggestedFreeIps,
   });
 
-  const activeListQ = showingSuggestedFreeIps ? suggestedQ : listQ;
-  const rawPageData = activeListQ.data ?? [];
+  const rawPageData = showingSuggestedFreeIps ? suggestedData : (listQ.data ?? []);
+  const activeListLoading = showingSuggestedFreeIps
+    ? suggestedData.length === 0 && suggestedPending
+    : listQ.isLoading;
+  const activeListError = showingSuggestedFreeIps
+    ? (suggestedData.length === 0 ? suggestedError : undefined)
+    : listQ.error;
   const hideLegacyNetworksByDefault = networkId === undefined && !qText.trim() && !addr.trim() && prefixNum === undefined && versionNum === undefined;
   const pageData = useMemo(
     () => (hideLegacyNetworksByDefault ? rawPageData.filter((ip) => !isDefaultHiddenLegacyNetwork(ip)) : rawPageData),
@@ -551,22 +560,24 @@ export function IpAddressesPage() {
         />
       }
     >
-      {locationsQ.isLoading || activeListQ.isLoading ? (
+      {locationsQ.isLoading || activeListLoading ? (
         <LoadingState testId="admin.ip_addresses.loading" />
-      ) : locationsQ.isError || activeListQ.isError ? (
+      ) : locationsQ.isError || activeListError ? (
         <ErrorState
           testId="admin.ip_addresses.error"
-          error={locationsQ.error ?? activeListQ.error}
+          error={locationsQ.error ?? activeListError}
           onRetry={() => {
             void locationsQ.refetch();
-            void activeListQ.refetch();
+            if (showingSuggestedFreeIps) retrySuggestedQueries();
+            else void listQ.refetch();
           }}
           actions={{
             primary: {
               label: t('common.retry'),
               onClick: () => {
                 void locationsQ.refetch();
-                void activeListQ.refetch();
+                if (showingSuggestedFreeIps) retrySuggestedQueries();
+                else void listQ.refetch();
               },
             },
             secondary: {
