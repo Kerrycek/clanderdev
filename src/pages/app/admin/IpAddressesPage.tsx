@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 
-import { fetchIpAddresses, type IpAddress } from '../../../lib/api/ipAddresses';
+import { fetchIpAddresses } from '../../../lib/api/ipAddresses';
 import { fetchLocations, type Location as InfraLocation } from '../../../lib/api/infra';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
@@ -17,6 +17,8 @@ import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorState } from '../../../components/ui/ErrorState';
+import { Alert } from '../../../components/ui/Alert';
+import { Button } from '../../../components/ui/Button';
 import { FilterChip } from '../../../components/ui/FilterChip';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import type { SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
@@ -33,12 +35,11 @@ import {
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
 import {
-  buildSuggestedIpQueryPlan,
-  sampleSuggestedIpsByLocationAndType,
   selectSuggestedIpLocations,
-  SUGGESTED_IP_QUERY_LIMIT,
 } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
+import { useProgressiveSuggestedIpQueries } from './ipAddresses/useProgressiveSuggestedIpQueries';
+
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
@@ -132,54 +133,10 @@ export function IpAddressesPage() {
     [environmentLocations]
   );
   const showingSuggestedFreeIps = !filtersActive && suggestedLocations.length > 0;
-  const suggestedQueryPlan = useMemo(
-    () => buildSuggestedIpQueryPlan(suggestedLocations),
-    [suggestedLocations]
+  const suggested = useProgressiveSuggestedIpQueries(
+    suggestedLocations,
+    showingSuggestedFreeIps
   );
-  const suggestedQueries = useQueries({
-    queries: suggestedQueryPlan.map((query) => ({
-      queryKey: ['ip_addresses', 'suggested_free', query.locationId, query.version, query.role ?? 'any'],
-      queryFn: async () => (
-        await fetchIpAddresses({
-          limit: SUGGESTED_IP_QUERY_LIMIT,
-          location: query.locationId,
-          version: query.version,
-          role: query.role,
-          user: null,
-          assignedToInterface: false,
-          order: 'asc',
-          purpose: 'vps',
-          includes: 'network__primary_location__environment',
-        })
-      ).data,
-      staleTime: 5 * 60_000,
-      refetchOnWindowFocus: false,
-      retry: 1,
-      enabled: showingSuggestedFreeIps,
-    })),
-  });
-  const suggestedData = useMemo(() => {
-    const byLocation = new Map<number, IpAddress[]>();
-    suggestedQueries.forEach((query, index) => {
-      const locationId = suggestedQueryPlan[index]?.locationId;
-      if (locationId === undefined || !query.data) return;
-      byLocation.set(locationId, [...(byLocation.get(locationId) ?? []), ...query.data]);
-    });
-
-    return sampleSuggestedIpsByLocationAndType(
-      suggestedLocations.map((suggestedLocation) => ({
-        locationId: suggestedLocation.id,
-        items: byLocation.get(suggestedLocation.id) ?? [],
-      }))
-    );
-  }, [suggestedLocations, suggestedQueries, suggestedQueryPlan]);
-  const suggestedPending = suggestedQueries.some((query) => query.isPending);
-  const suggestedError = suggestedQueries.find((query) => query.isError)?.error;
-  const retrySuggestedQueries = () => {
-    suggestedQueries.forEach((query) => {
-      void query.refetch();
-    });
-  };
 
   const listQ = useQuery({
     queryKey: [
@@ -226,12 +183,12 @@ export function IpAddressesPage() {
     enabled: !locationsQ.isLoading && !showingSuggestedFreeIps,
   });
 
-  const rawPageData = showingSuggestedFreeIps ? suggestedData : (listQ.data ?? []);
+  const rawPageData = showingSuggestedFreeIps ? suggested.data : (listQ.data ?? []);
   const activeListLoading = showingSuggestedFreeIps
-    ? suggestedData.length === 0 && suggestedPending
+    ? suggested.isLoading
     : listQ.isLoading;
   const activeListError = showingSuggestedFreeIps
-    ? (suggestedData.length === 0 ? suggestedError : undefined)
+    ? suggested.error
     : listQ.error;
   const hideLegacyNetworksByDefault = networkId === undefined && !qText.trim() && !addr.trim() && prefixNum === undefined && versionNum === undefined;
   const pageData = useMemo(
@@ -568,7 +525,7 @@ export function IpAddressesPage() {
           error={locationsQ.error ?? activeListError}
           onRetry={() => {
             void locationsQ.refetch();
-            if (showingSuggestedFreeIps) retrySuggestedQueries();
+            if (showingSuggestedFreeIps) suggested.retryErrors();
             else void listQ.refetch();
           }}
           actions={{
@@ -576,7 +533,7 @@ export function IpAddressesPage() {
               label: t('common.retry'),
               onClick: () => {
                 void locationsQ.refetch();
-                if (showingSuggestedFreeIps) retrySuggestedQueries();
+                if (showingSuggestedFreeIps) suggested.retryErrors();
                 else void listQ.refetch();
               },
             },
@@ -596,6 +553,29 @@ export function IpAddressesPage() {
         />
       ) : (
         <>
+          {suggested.partialError ? (
+            <Alert
+              className="mb-3"
+              variant="warn"
+              title={t('admin.ip_addresses.suggested_partial_error')}
+              testId="admin.ip_addresses.suggested.partial_error"
+            >
+              <Button
+                className="mt-2"
+                variant="secondary"
+                size="sm"
+                onClick={suggested.retryErrors}
+                testId="admin.ip_addresses.suggested.retry"
+              >
+                {t('common.retry')}
+              </Button>
+            </Alert>
+          ) : null}
+          {suggested.isLoadingMore ? (
+            <div className="mb-3 text-xs text-faint" data-testid="admin.ip_addresses.suggested.loading">
+              {t('admin.ip_addresses.suggested_loading')}
+            </div>
+          ) : null}
           <IpAddressesListMobile
             pageData={pageData}
             ipDetailBasePath={ipDetailBasePath}

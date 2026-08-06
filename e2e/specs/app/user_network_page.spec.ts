@@ -165,6 +165,8 @@ test('@pr-smoke @pr-smoke-mobile user network page lists only own addresses and 
   await expect(page.getByTestId('network.user.tab.addresses')).toHaveAttribute('aria-selected', 'true');
   await expect(visibleAddressItem(page, 101)).toBeVisible();
   await expect(visibleAddressItem(page, 102)).toBeVisible();
+  const screenshot = process.env.E2E_NETWORK_USER_SCREENSHOT?.trim();
+  if (screenshot) await page.screenshot({ path: screenshot, fullPage: true });
   await expect(page.getByTestId('network.user.traffic')).toHaveCount(0);
   expect(accountingRequests).toHaveLength(0);
   expect(monitorRequests).toHaveLength(0);

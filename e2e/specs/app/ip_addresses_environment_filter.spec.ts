@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
 test.describe('IP address environment filter', () => {
-  test('offers a type-major free-address sample from each active location', async ({ page }, testInfo) => {
+  test('offers a location-major free-address sample from each active location', async ({ page }, testInfo) => {
     const requestedLocations: string[] = [];
     const requestedAssigned: string[] = [];
     const requestedOwners: Array<string | null> = [];
@@ -100,13 +100,13 @@ test.describe('IP address environment filter', () => {
       }));
     expect(renderedIds).toEqual([
       501, 502, 503,
-      601, 602, 603,
-      701, 702, 703,
       511, 512, 513,
-      611, 612, 613,
-      711, 712, 713,
       521, 522, 523,
+      601, 602, 603,
+      611, 612, 613,
       621, 622, 623,
+      701, 702, 703,
+      711, 712, 713,
       721, 722, 723,
     ]);
 

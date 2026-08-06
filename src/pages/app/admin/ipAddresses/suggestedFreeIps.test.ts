@@ -8,6 +8,7 @@ import {
   sampleSuggestedIps,
   sampleSuggestedIpsByLocationAndType,
   selectSuggestedIpLocations,
+  SUGGESTED_LOCATION_LIMIT,
   SUGGESTED_IP_QUERY_LIMIT,
 } from './suggestedFreeIps';
 
@@ -61,7 +62,7 @@ describe('suggested free IP helpers', () => {
     expect(selectSuggestedIpLocations(locations).map((item) => item.id)).toEqual([3, 1, 2, 4]);
   });
 
-  it('keeps only Prague and Brno plus one location per remaining environment', () => {
+  it('keeps Prague and Brno plus a bounded representative set of other environments', () => {
     const locations = [
       location(1, 'Brno', 'Production'),
       location(2, 'Playground lab', 'Playground'),
@@ -73,6 +74,33 @@ describe('suggested free IP helpers', () => {
     ];
 
     expect(selectSuggestedIpLocations(locations).map((item) => item.id)).toEqual([3, 1, 2, 7]);
+    expect(SUGGESTED_LOCATION_LIMIT).toBe(6);
+  });
+
+  it('caps the representative query plan at eighteen exact location/type requests', () => {
+    const locations = [
+      location(1, 'Brno', 'Production'),
+      location(2, 'Playground lab', 'Playground'),
+      location(3, 'Praha 2', 'Production'),
+      location(4, 'Staging', 'Staging'),
+      location(5, 'Testing', 'Testing'),
+      location(6, 'Development', 'Development'),
+      location(7, 'Integration', 'Integration'),
+      location(8, 'Overflow', 'Overflow'),
+    ];
+
+    const selected = selectSuggestedIpLocations(locations);
+    const plan = buildSuggestedIpQueryPlan(selected);
+
+    expect(selected).toHaveLength(SUGGESTED_LOCATION_LIMIT);
+    expect(plan).toHaveLength(18);
+    selected.forEach((item) => {
+      expect(plan.filter((query) => query.locationId === item.id)).toEqual([
+        { locationId: item.id, version: 4, role: 'public_access' },
+        { locationId: item.id, version: 4, role: 'private_access' },
+        { locationId: item.id, version: 6 },
+      ]);
+    });
   });
 
   it('keeps each location sample scoped to the network primary location', () => {
@@ -109,7 +137,7 @@ describe('suggested free IP helpers', () => {
     ]);
   });
 
-  it('orders the combined sample by type and then by prioritized location', () => {
+  it('orders the combined sample by prioritized location and then by type', () => {
     const locationItems = (locationId: number, base: number): IpAddress[] => [
       ...[1, 2, 3, 4].map((offset) => locatedIp(base + offset, `198.51.${locationId}.${offset}`, locationId)),
       ...[11, 12, 13, 14].map((offset) => locatedIp(base + offset, `10.${locationId}.0.${offset}`, locationId)),
@@ -124,13 +152,13 @@ describe('suggested free IP helpers', () => {
 
     expect(result.map((item) => item.id)).toEqual([
       101, 102, 103,
-      201, 202, 203,
-      301, 302, 303,
       111, 112, 113,
-      211, 212, 213,
-      311, 312, 313,
       121, 122, 123,
+      201, 202, 203,
+      211, 212, 213,
       221, 222, 223,
+      301, 302, 303,
+      311, 312, 313,
       321, 322, 323,
     ]);
   });

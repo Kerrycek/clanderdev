@@ -72,6 +72,16 @@ describe('network address API wrappers', () => {
     expect(parsed.searchParams.get('ip_address[order]')).toBe('asc');
   });
 
+  test('fetchIpAddresses forwards cancellation to the HaveAPI request', async () => {
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
+    const controller = new AbortController();
+
+    await fetchIpAddresses({ signal: controller.signal });
+
+    const [, init] = lastFetchCall();
+    expect(init?.signal).toBe(controller.signal);
+  });
+
   test('fetchIpAddressesForVps forwards the VPS scope and custom includes', async () => {
     globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
 

@@ -10,7 +10,8 @@ import {
 
 export const SUGGESTED_IPS_PER_TYPE = 3;
 export const SUGGESTED_IP_QUERY_LIMIT = 50;
-export const SUGGESTED_LOCATION_LIMIT = 12;
+export const SUGGESTED_LOCATION_LIMIT = 6;
+export const PRIORITY_LOCATION_COUNT = 2;
 
 type SuggestedIpBucket = 'public4' | 'private4' | 'ipv6';
 
@@ -157,8 +158,8 @@ export function sampleSuggestedIpsByLocationAndType(
 ): IpAddress[] {
   const seenIds = new Set<number>();
 
-  return (['public4', 'private4', 'ipv6'] as const).flatMap((bucket) =>
-    locations.flatMap(({ locationId, items }) =>
+  return locations.flatMap(({ locationId, items }) =>
+    (['public4', 'private4', 'ipv6'] as const).flatMap((bucket) =>
       eligibleSuggestedIps(items, locationId)
         .filter((ip) => suggestedIpBucket(ip) === bucket)
         .slice(0, SUGGESTED_IPS_PER_TYPE)
