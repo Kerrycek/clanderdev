@@ -3,6 +3,7 @@ import { Alert } from '../../components/ui/Alert';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Spinner } from '../../components/ui/Spinner';
+import { CompactOutageSummary } from '../../components/outages/CompactOutageSummary';
 import type { NewsLog, Outage } from '../../lib/api/public';
 import type { SecurityAdvisory } from '../../lib/api/securityAdvisories';
 import {
@@ -17,7 +18,6 @@ import { useI18n } from '../../app/i18n';
 import {
   ClusterHealthCard,
   DashboardNewsItem,
-  DashboardOutageSummary,
   SecurityAdvisoriesCard,
   summarizeNodes,
 } from './DashboardOperationalCards';
@@ -130,7 +130,7 @@ export function DashboardWidgetGrid(props: {
             ) : (
               <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
                 {props.outages.highlighted.slice(0, itemLimit).map((o) => (
-                  <DashboardOutageSummary key={o.id} outage={o} to={props.outages.detailPath(o.id)} />
+                  <CompactOutageSummary key={o.id} outage={o} to={props.outages.detailPath(o.id)} />
                 ))}
               </div>
             )}

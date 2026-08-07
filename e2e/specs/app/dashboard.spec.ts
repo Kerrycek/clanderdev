@@ -100,11 +100,15 @@ test.describe("Dashboard", () => {
               state: "announced",
               type: "maintenance",
               impact: "network",
+              duration: 30,
               begins_at: new Date(Date.now() - 60_000).toISOString(),
               en_summary: "Network maintenance in DC1",
               cs_summary: "Údržba sítě v DC1",
             },
           ],
+        }),
+        "GET outages/55/entities": () => ({
+          entities: [{ id: 501, name: "Node", entity_id: 2, label: "node-b.prg" }],
         }),
         "GET news_logs": () => ({
           news_logs: [
@@ -163,6 +167,10 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("app.dashboard.outages.card")).toContainText(
       "Network maintenance in DC1",
     );
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("Maintenance");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("Network");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("30 min");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("node-b.prg");
     await expect(page.getByTestId("app.dashboard.security.card")).toContainText(
       "OpenSSL advisory",
     );

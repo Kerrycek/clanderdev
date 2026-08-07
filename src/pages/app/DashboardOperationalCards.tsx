@@ -12,40 +12,14 @@ import { NewsMessage } from "../../components/ui/NewsMessage";
 import { Spinner } from "../../components/ui/Spinner";
 import { StatusDot } from "../../components/ui/StatusDot";
 import { Table } from "../../components/ui/Table";
-import type { NewsLog, Outage, PublicNodeStatus } from "../../lib/api/public";
-import { outageBadges } from "../../lib/outageBadges";
+import type { NewsLog, PublicNodeStatus } from "../../lib/api/public";
 import { compareClusterLocationLabels } from "../../lib/clusterLocations";
 import { type BadgeVariant } from "../../lib/taskStatus";
 import { formatDateTime } from "../../lib/time";
-import { pickLocalizedFieldFrom, pickTranslation } from "../../lib/translations";
-import { dotVariantFromBadgeVariant } from "../../lib/variantMap";
+import { pickLocalizedFieldFrom } from "../../lib/translations";
 import { isMaintenanceLocked } from "../../lib/nodeMaintenance";
 type NodeHealth = "up" | "maintenance" | "down" | "unknown";
 interface NodeLocationGroup { ok: number; maintenance: number; down: number; unknown: number; total: number; vps: number; nodes: PublicNodeStatus[]; }
-export function DashboardOutageSummary(props: { outage: Outage; to: string }) {
-  const i18n = useI18n();
-  const summary = pickTranslation(props.outage, "summary", i18n.preferredLanguageCodes);
-  const badges = outageBadges(props.outage, i18n.t);
-  const dotVariant = dotVariantFromBadgeVariant(badges.primaryVariant);
-  return (
-    <div className="bg-surface-2 px-3 py-2.5" data-testid="app.dashboard.outage.item">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <StatusDot variant={dotVariant} ariaLabel={badges.lifecycle.label} />
-        <Link to={props.to} className="font-medium hover:underline">
-          {summary ?? i18n.t("public.outage.fallback_title", { id: props.outage.id })}
-        </Link>
-        <Badge variant={badges.lifecycle.variant}>{badges.lifecycle.label}</Badge>
-        {badges.impact ? <Badge variant={badges.impact.variant}>{badges.impact.label}</Badge> : null}
-      </div>
-      <div className="mt-0.5 text-xs text-muted">
-        {i18n.t("public.outage.field.begins")}: {formatDateTime(props.outage.begins_at)}
-        {props.outage.finished_at
-          ? ` · ${i18n.t("public.outage.field.finished")}: ${formatDateTime(props.outage.finished_at)}`
-          : null}
-      </div>
-    </div>
-  );
-}
 export function DashboardNewsItem(props: { news: NewsLog }) {
   const i18n = useI18n();
   const newsRecord: Record<string, unknown> = { ...props.news };
