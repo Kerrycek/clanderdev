@@ -24,6 +24,7 @@ export const csCommon_navigation = {
   'nav.vps': 'VPS',
   'nav.datasets': 'Datasety',
   'nav.nas': 'NAS',
+  'nav.backups': 'Zálohy',
   'nav.storage': 'Úložiště',
   'nav.dns': 'DNS',
   'nav.transactions': 'Transakce',

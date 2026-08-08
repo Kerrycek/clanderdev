@@ -1,7 +1,9 @@
 // Storage / datasets / exports / NAS
 import { csStorageExports } from "./storage/exports";
 import { csDatasetExpansion } from './storage/dataset_expansion';
+import { csBackups } from './storage/backups';
 export const csStorage = {
+  ...csBackups,
   "datasets.list.title": "Datasety",
   "datasets.list.description":
     "Procházej storage datasety, snapshoty a downloady.",

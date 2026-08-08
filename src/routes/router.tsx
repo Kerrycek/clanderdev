@@ -22,6 +22,7 @@ const DatasetPlansPage = lazyRoute(() => import('../pages/app/datasets/DatasetPl
 const DatasetExpansionPage = lazyRoute(() => import('../pages/app/datasets/DatasetExpansionPage'), 'DatasetExpansionPage');
 const NasDatasetsPage = lazyRoute(() => import('../pages/app/datasets/NasDatasetsPage'), 'NasDatasetsPage');
 const NasDatasetCreatePage = lazyRoute(() => import('../pages/app/datasets/NasDatasetCreatePage'), 'NasDatasetCreatePage');
+const BackupCenterPage = lazyRoute(() => import('../pages/app/backups/BackupCenterPage'), 'BackupCenterPage');
 const DatasetExportsPage = lazyRoute(() => import('../pages/app/exports/DatasetExportsPage'), 'DatasetExportsPage');
 const ExportsListPage = lazyRoute(() => import('../pages/app/exports/ExportsListPage'), 'ExportsListPage');
 const ExportDetailPage = lazyRoute(() => import('../pages/app/exports/ExportDetailPage'), 'ExportDetailPage');
@@ -182,6 +183,7 @@ export const router = createBrowserRouter([
             { path: 'datasets', element: <DatasetsListPage /> },
             { path: 'nas', element: <NasDatasetsPage /> },
             { path: 'nas/new', element: <NasDatasetCreatePage /> },
+            { path: 'backups', element: <BackupCenterPage /> },
             { path: 'exports', element: <ExportsListPage /> },
             { path: 'exports/:exportId', element: <ExportDetailPage /> },
             {

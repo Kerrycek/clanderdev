@@ -5,6 +5,7 @@ import {
   ClipboardList,
   CreditCard,
   Cpu,
+  DatabaseBackup,
   FileText,
   Globe,
   GitMerge,
@@ -100,6 +101,9 @@ export function buildSidebarNavItems(opts: {
     { id: 'vps', to: `${basePath}/vps`, label: t('nav.vps'), icon: <Server size={18} />, ...adminGroup('services') },
     { id: 'datasets', to: `${basePath}/datasets`, label: t('nav.datasets'), icon: <HardDrive size={18} />, ...adminGroup('services') },
     { id: 'nas', to: `${basePath}/nas`, label: t('nav.nas'), icon: <Server size={18} />, ...adminGroup('services') },
+    ...(appMode === 'user'
+      ? [{ id: 'backups', to: `${basePath}/backups`, label: t('nav.backups'), icon: <DatabaseBackup size={18} /> }]
+      : []),
     { id: 'exports', to: `${basePath}/exports`, label: t('nav.exports'), icon: <Share2 size={18} />, ...adminGroup('services') },
     { id: 'dns', to: `${basePath}/dns`, label: t('nav.dns'), icon: <Globe size={18} />, ...adminGroup('services') },
     ...(appMode === 'user'

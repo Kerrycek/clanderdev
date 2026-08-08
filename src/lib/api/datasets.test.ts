@@ -150,7 +150,7 @@ describe('datasets API wrappers', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchSnapshotDownloads({ dataset: 123, q: 'archive', limit: 5 });
+    await fetchSnapshotDownloads({ dataset: 123, q: 'archive', limit: 5, includes: 'snapshot__dataset' });
 
     const [url] = firstFetchCall(fetchMock);
     const u = new URL(String(url));
@@ -159,5 +159,6 @@ describe('datasets API wrappers', () => {
     expect(u.searchParams.get('snapshot_download[dataset]')).toBe('123');
     expect(u.searchParams.get('snapshot_download[q]')).toBe('archive');
     expect(u.searchParams.get('snapshot_download[limit]')).toBe('5');
+    expect(u.searchParams.get('_meta[includes]')).toBe('snapshot__dataset');
   });
 });

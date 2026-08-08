@@ -1,7 +1,9 @@
 // Storage / datasets / exports / NAS
 import { enStorageExports } from "./storage/exports";
 import { enDatasetExpansion } from './storage/dataset_expansion';
+import { enBackups } from './storage/backups';
 export const enStorage = {
+  ...enBackups,
   "datasets.list.title": "Datasets",
   "datasets.list.description":
     "Browse storage datasets, snapshots and downloads.",

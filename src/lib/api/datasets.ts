@@ -252,6 +252,7 @@ export async function fetchSnapshotDownloads(opts?: {
   dataset?: number;
   snapshot?: number;
   q?: string;
+  includes?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
@@ -265,6 +266,7 @@ export async function fetchSnapshotDownloads(opts?: {
     path: '/snapshot_downloads',
     namespace: 'snapshot_download',
     params,
+    meta: opts?.includes ? { includes: opts.includes } : undefined,
   });
 
   return { ...res, data: expectArray<SnapshotDownload>(res.data, 'snapshot_downloads#index') };
