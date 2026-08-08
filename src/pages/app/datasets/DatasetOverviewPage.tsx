@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 
-import { useAppMode } from '../../../app/appMode';
 import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
 import { useObjectScope } from '../../../app/objectScope';
@@ -14,13 +13,10 @@ import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { Checkbox } from '../../../components/ui/Checkbox';
-import { ChipLink } from '../../../components/ui/ChipLink';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { Input } from '../../../components/ui/Input';
 import { Modal } from '../../../components/ui/Modal';
 import { Select } from '../../../components/ui/Select';
-import { Spinner } from '../../../components/ui/Spinner';
-import { StackedBar } from '../../../components/ui/StackedBar';
 
 import {
   createDataset,
@@ -30,21 +26,15 @@ import {
   type DatasetEditablePayload,
 } from '../../../lib/api/datasets';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
-import { type TransactionChain } from '../../../lib/api/transactions';
-import { formatDateTime, formatMiB } from '../../../lib/format';
 import { datasetCapabilities, gateDatasetAction } from '../../../lib/gates/dataset';
-import { usageSeverityFromRatio } from '../../../lib/usage';
 
 import { useDatasetContext } from './DatasetContext';
+import { DatasetSpaceCard, DatasetTemporaryExpansionCard } from './DatasetOverviewSummaryCards';
+import { DatasetTransactionsCard } from './DatasetTransactionsCard';
 
 function asNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
-function positive(v: unknown): number | undefined {
-  const n = asNumber(v);
-  return n !== undefined && n > 0 ? n : undefined;
-}
-
 function datasetLabel(ds: any): string {
   return String(ds?.full_name ?? ds?.name ?? ds?.label ?? `#${ds?.id ?? '?'}`);
 }
@@ -81,163 +71,6 @@ function recordsizeToKiBInput(value: unknown): string {
   const n = asNumber(value);
   if (n === undefined || n <= 0) return '';
   return String(Math.round(n / 1024));
-}
-
-function chainBadgeFromState(
-  state: string | null | undefined,
-  t: (k: any) => string
-): { label: string; variant: React.ComponentProps<typeof Badge>['variant'] } {
-  const st = String(state ?? '').trim();
-  const norm = st.toLowerCase();
-  if (norm === 'done' || norm === 'completed' || norm === 'resolved') return { label: t('state.done'), variant: 'ok' };
-  if (norm === 'running') return { label: t('state.running'), variant: 'warn' };
-  if (norm === 'failed' || norm === 'fatal') return { label: t('state.failed'), variant: 'danger' };
-  if (norm === 'canceled' || norm === 'cancelled') return { label: t('state.canceled'), variant: 'neutral' };
-
-  // Anything else that is not a finished state is treated as “working”.
-  if (st) return { label: st, variant: 'warn' };
-  return { label: t('state.unknown'), variant: 'neutral' };
-}
-
-function isFailedChainState(state: string | null | undefined): boolean {
-  const st = String(state ?? '').trim().toLowerCase();
-  return st === 'failed' || st === 'fatal';
-}
-
-function chainProgressLabel(c: TransactionChain, t: (k: any, vars?: any) => string): string | null {
-  const prog = asNumber((c as any).progress);
-  if (prog === undefined) return null;
-
-  // Some backends report percent as 0..1, some as 0..100.
-  const pct = prog <= 1 ? Math.round(prog * 100) : Math.round(prog);
-  const clamped = Math.max(0, Math.min(100, pct));
-  return t('common.progress_percent', { percent: clamped });
-}
-
-function SpaceCard(props: { dataset: any }) {
-  const { t } = useI18n();
-
-  const used = Math.max(0, asNumber(props.dataset.used) ?? 0);
-  const avail = Math.max(0, asNumber(props.dataset.avail) ?? 0);
-
-  const refquota = positive(props.dataset.refquota);
-  const quota = positive(props.dataset.quota);
-  const referenced = asNumber(props.dataset.referenced);
-
-  const total = used + avail;
-  const usageRatio = total > 0 ? used / total : 0;
-  const usageVariant = usageSeverityFromRatio(usageRatio);
-
-  const pctQuota = refquota ? Math.round((used / refquota) * 100) : null;
-  const pctQuotaClamped = pctQuota !== null ? Math.max(0, Math.min(999, pctQuota)) : null;
-  const pctVariant = pctQuotaClamped !== null ? usageSeverityFromRatio(pctQuotaClamped / 100) : undefined;
-
-  const segs = useMemo(() => {
-    if (total <= 0) return [{ value: 1, variant: 'neutral' as const, title: t('datasets.usage.no_data') }];
-    return [
-      { value: used, variant: usageVariant, title: t('datasets.usage.used_mib', { mib: used.toFixed(0) }) },
-      {
-        value: avail,
-        variant: 'neutral' as const,
-        title: t('datasets.usage.free_mib', { mib: avail.toFixed(0) }),
-      },
-    ];
-  }, [avail, t, total, usageVariant, used]);
-
-
-  return (
-    <Card testId="dataset.overview.space">
-      <CardHeader
-        title={t('dataset.overview.space.title')}
-        subtitle={t('dataset.overview.space.subtitle')}
-        actions={
-          pctQuotaClamped !== null ? (
-            <Badge variant={pctVariant as any} title={t('dataset.overview.space.badge.title')}>
-              {pctQuotaClamped}%
-            </Badge>
-          ) : (
-            <Badge variant="neutral" title={t('dataset.overview.space.badge.infinity_title')}>
-              ∞
-            </Badge>
-          )
-        }
-      />
-
-      <CardBody>
-        <StackedBar ariaLabel={t('datasets.usage.aria_label')} segments={segs} />
-
-        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <div className="text-xs text-faint">{t('dataset.field.used')}</div>
-            <div className="font-medium text-fg">{formatMiB(used)}</div>
-          </div>
-          <div>
-            <div className="text-xs text-faint">{t('dataset.field.available')}</div>
-            <div className="font-medium text-fg">{formatMiB(avail)}</div>
-          </div>
-
-          <div>
-            <div className="text-xs text-faint">{t('dataset.field.reference_quota')}</div>
-            <div className="font-medium text-fg">{refquota !== undefined ? formatMiB(refquota) : '∞'}</div>
-          </div>
-
-          <>
-              <div>
-                <div className="text-xs text-faint">{t('dataset.field.quota')}</div>
-                <div className="font-medium text-fg">{quota !== undefined ? formatMiB(quota) : t('common.na')}</div>
-              </div>
-              <div>
-                <div className="text-xs text-faint">{t('dataset.field.referenced')}</div>
-                <div className="font-medium text-fg">
-                  {referenced !== undefined ? formatMiB(referenced) : t('common.na')}
-                </div>
-              </div>
-            </>
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-function TemporaryExpansionCard(props: { dataset: any }) {
-  const { t } = useI18n();
-  const { basePath } = useAppMode();
-
-  const ds = props.dataset;
-  const expansionId =
-    typeof (ds as any).dataset_expansion?.id === 'number' ? Number((ds as any).dataset_expansion.id) : null;
-  const to = `${basePath}/datasets/${ds.id}/expansion`;
-
-  return (
-    <Card testId="dataset.overview.expansion">
-      <CardHeader
-        title={t('dataset.overview.expansion.title')}
-        subtitle={
-          expansionId
-            ? t('dataset.overview.expansion.subtitle_active')
-            : t('dataset.overview.expansion.subtitle')
-        }
-        actions={
-          <Button to={to} size="sm" testId="dataset.overview.expansion.open">
-            {expansionId ? t('dataset.overview.expansion.open') : t('dataset.overview.expansion.create')}
-          </Button>
-        }
-      />
-      <CardBody>
-        <div className="space-y-3 text-sm text-muted">
-          <p>{t('dataset.overview.expansion.body')}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={expansionId ? 'warn' : 'neutral'}>
-              {expansionId
-                ? t('dataset.overview.expansion.active')
-                : t('dataset.overview.expansion.none')}
-            </Badge>
-            {expansionId ? <span className="text-xs text-faint">#{expansionId}</span> : null}
-          </div>
-        </div>
-      </CardBody>
-    </Card>
-  );
 }
 
 type DatasetEditForm = {
@@ -959,87 +792,6 @@ function DatasetManagementCard() {
   );
 }
 
-function TransactionsCard(props: {
-  chainsLoading: boolean;
-  chainsError: unknown | null;
-  chains: TransactionChain[];
-}) {
-  const { t } = useI18n();
-  const { basePath } = useAppMode();
-
-  const sorted = useMemo(() => {
-    const list = [...(props.chains ?? [])];
-    list.sort((a, b) => Number(b.id) - Number(a.id));
-    return list;
-  }, [props.chains]);
-
-  return (
-    <Card testId="dataset.overview.transactions">
-      <CardHeader
-        title={t('dataset.overview.transactions.title')}
-        subtitle={t('dataset.overview.transactions.subtitle')}
-        actions={
-          <ChipLink to={`${basePath}/transactions`} title={t('dataset.overview.transactions.open_chains_title')}>
-            {t('dataset.overview.transactions.open_chains')}
-          </ChipLink>
-        }
-      />
-      <CardBody>
-        {props.chainsLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <Spinner /> {t('common.loading')}
-          </div>
-        ) : props.chainsError ? (
-          <Alert title={t('dataset.overview.transactions.load_error.title')} variant="danger">
-            {t('dataset.overview.transactions.load_error.body')}
-          </Alert>
-        ) : sorted.length === 0 ? (
-          <div className="text-sm text-muted">{t('dataset.overview.transactions.empty')}</div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {sorted.map((c) => {
-              const b = chainBadgeFromState(c.state, t);
-              const label = c.label ? String(c.label) : `#${c.id}`;
-              const isError = isFailedChainState(c.state);
-              const prog = chainProgressLabel(c, t);
-              return (
-                <li
-                  key={c.id}
-                  className={
-                    'flex flex-wrap items-center justify-between gap-3 py-3 ' +
-                    (isError ? 'rounded-md bg-danger-bg px-2 -mx-2' : '')
-                  }
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-fg">
-                      <Link className="text-accent hover:underline" to={`${basePath}/transactions/${c.id}`}>
-                        {label}
-                      </Link>
-                    </div>
-                    <div className="mt-1 text-xs text-faint">
-                      #{c.id} · {formatDateTime((c as any).created_at)}
-                      {prog ? <> · {prog}</> : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ChipLink
-                      to={`${basePath}/transactions/items?transaction_chain=${c.id}`}
-                      title={t('dataset.overview.transactions.open_items_title', { id: c.id })}
-                    >
-                      {t('dataset.overview.transactions.open_items')}
-                    </ChipLink>
-                    <Badge variant={b.variant}>{b.label}</Badge>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CardBody>
-    </Card>
-  );
-}
-
 export function DatasetOverviewPage() {
   const { dataset, chains, chainsLoading, chainsError } = useDatasetContext();
 
@@ -1047,15 +799,15 @@ export function DatasetOverviewPage() {
     <div className="space-y-6" data-testid="dataset.overview">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          <SpaceCard dataset={dataset as any} />
+          <DatasetSpaceCard dataset={dataset} />
           <DatasetManagementCard />
         </div>
         <div className="space-y-6">
-          <TemporaryExpansionCard dataset={dataset as any} />
+          <DatasetTemporaryExpansionCard dataset={dataset} />
         </div>
       </div>
 
-      <TransactionsCard chains={chains} chainsLoading={chainsLoading} chainsError={chainsError} />
+      <DatasetTransactionsCard chains={chains} chainsLoading={chainsLoading} chainsError={chainsError} />
     </div>
   );
 }

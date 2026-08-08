@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
 
+import type { Dataset } from '../../../lib/api/datasets';
 import { DatasetOverviewPage } from './DatasetOverviewPage';
 import { DatasetContextProvider } from './DatasetContext';
 
@@ -67,7 +68,7 @@ function renderPage() {
               relatime: false,
               recordsize: 128 * 1024,
               sync: 'standard',
-            } as any,
+            } satisfies Dataset,
             refetch: vi.fn(),
             section: 'datasets',
             listPath: '/datasets',
