@@ -126,6 +126,7 @@ export async function fetchRegistrationRequests(opts?: {
   apiIpAddr?: string;
   clientIpAddr?: string;
   clientIpPtr?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -143,6 +144,7 @@ export async function fetchRegistrationRequests(opts?: {
     path: '/user_request/registrations',
     namespace: 'registration',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return {
@@ -231,6 +233,7 @@ export async function fetchChangeRequests(opts?: {
   apiIpAddr?: string;
   clientIpAddr?: string;
   clientIpPtr?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -248,6 +251,7 @@ export async function fetchChangeRequests(opts?: {
     path: '/user_request/changes',
     namespace: 'change',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return {

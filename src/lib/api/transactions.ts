@@ -44,6 +44,7 @@ export async function fetchTransactionChains(opts?: {
   rowId?: number;
   userId?: number;
   userSessionId?: number;
+  count?: boolean;
 }) {
   const params: Record<string, string | number | boolean> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -60,6 +61,7 @@ export async function fetchTransactionChains(opts?: {
     path: '/transaction_chains',
     namespace: 'transaction_chain',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
   return { ...res, data: expectArray<TransactionChain>(res.data, 'transaction_chains') };
 }

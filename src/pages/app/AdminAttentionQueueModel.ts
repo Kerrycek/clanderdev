@@ -1,4 +1,3 @@
-import type { IncidentReport } from '../../lib/api/incidents';
 import type { IncomingPayment } from '../../lib/api/payments';
 import type { ChangeRequest, RegistrationRequest } from '../../lib/api/requests';
 import type { TransactionChain } from '../../lib/api/transactions';
@@ -8,10 +7,7 @@ export type AdminAttentionKind =
   | 'registration-request'
   | 'change-request'
   | 'unmatched-payment'
-  | 'queued-payment'
-  | 'failed-transaction'
-  | 'rollbacking-transaction'
-  | 'incident';
+  | 'failed-transaction';
 
 export type AdminAttentionTone = 'danger' | 'warn' | 'info';
 
@@ -30,18 +26,14 @@ export interface AdminAttentionSources {
   registrations?: RegistrationRequest[];
   changes?: ChangeRequest[];
   unmatchedPayments?: IncomingPayment[];
-  queuedPayments?: IncomingPayment[];
   failedTransactions?: TransactionChain[];
   fatalTransactions?: TransactionChain[];
-  rollbackingTransactions?: TransactionChain[];
-  incidents?: IncidentReport[];
 }
 
 export interface AdminAttentionSourcePermissions {
   requests: boolean;
   payments: boolean;
   transactions: boolean;
-  incidents: boolean;
 }
 
 const PRIORITY: Record<AdminAttentionKind, number> = {
@@ -49,21 +41,18 @@ const PRIORITY: Record<AdminAttentionKind, number> = {
   'failed-transaction': 20,
   'registration-request': 30,
   'change-request': 31,
-  'queued-payment': 40,
-  'rollbacking-transaction': 45,
-  incident: 50,
 };
 
 export function adminAttentionSourcePermissions(role: UserRole): AdminAttentionSourcePermissions {
   if (role === 'admin') {
-    return { requests: true, payments: true, transactions: true, incidents: true };
+    return { requests: true, payments: true, transactions: true };
   }
 
   if (role === 'support') {
-    return { requests: true, payments: false, transactions: true, incidents: true };
+    return { requests: true, payments: false, transactions: true };
   }
 
-  return { requests: false, payments: false, transactions: false, incidents: false };
+  return { requests: false, payments: false, transactions: false };
 }
 
 function validId(value: unknown): number | undefined {
@@ -112,19 +101,6 @@ function transactionLabel(chain: TransactionChain): string {
   return firstText(chain.label) ?? `#${chain.id}`;
 }
 
-function incidentLabel(report: IncidentReport): string {
-  return firstText(report.subject, report.codename) ?? `#${report.id}`;
-}
-
-export function isOpenIncident(report: IncidentReport): boolean {
-  const raw = report as Record<string, unknown>;
-  if (raw['closed_at'] || raw['resolved_at']) return false;
-
-  const state = firstText(raw['state'])?.toLowerCase();
-  if (!state) return true;
-  return !['closed', 'resolved', 'ignored', 'done'].includes(state);
-}
-
 function item(input: Omit<AdminAttentionItem, 'key' | 'priority'>): AdminAttentionItem {
   return {
     ...input,
@@ -151,16 +127,15 @@ function requestItems(basePath: string, requests: Array<RegistrationRequest | Ch
   });
 }
 
-function paymentItems(basePath: string, payments: IncomingPayment[], kind: 'unmatched-payment' | 'queued-payment') {
-  const expectedState = kind === 'unmatched-payment' ? 'unmatched' : 'queued';
+function paymentItems(basePath: string, payments: IncomingPayment[]) {
   return payments.flatMap((payment) => {
     const id = validId(payment.id);
-    if (!id || payment.state !== expectedState) return [];
+    if (!id || payment.state !== 'unmatched') return [];
     return [
       item({
         id,
-        kind,
-        tone: kind === 'unmatched-payment' ? 'danger' : 'warn',
+        kind: 'unmatched-payment',
+        tone: 'danger',
         label: paymentLabel(payment),
         createdAt: payment.date ?? payment.created_at,
         to: `${basePath}/payments/incoming/${id}`,
@@ -172,40 +147,19 @@ function paymentItems(basePath: string, payments: IncomingPayment[], kind: 'unma
 function transactionItems(
   basePath: string,
   chains: TransactionChain[],
-  kind: 'failed-transaction' | 'rollbacking-transaction',
 ) {
   return chains.flatMap((chain) => {
     const id = validId(chain.id);
     const state = firstText(chain.state)?.toLowerCase();
-    const validState = kind === 'failed-transaction'
-      ? state === 'failed' || state === 'fatal'
-      : state === 'rollbacking';
-    if (!id || !validState) return [];
+    if (!id || (state !== 'failed' && state !== 'fatal')) return [];
     return [
       item({
         id,
-        kind,
-        tone: kind === 'failed-transaction' ? 'danger' : 'warn',
+        kind: 'failed-transaction',
+        tone: 'danger',
         label: transactionLabel(chain),
         createdAt: chain.created_at,
         to: `${basePath}/transactions/${id}`,
-      }),
-    ];
-  });
-}
-
-function incidentItems(basePath: string, incidents: IncidentReport[]) {
-  return incidents.flatMap((report) => {
-    const id = validId(report.id);
-    if (!id || !isOpenIncident(report)) return [];
-    return [
-      item({
-        id,
-        kind: 'incident',
-        tone: 'info',
-        label: incidentLabel(report),
-        createdAt: report.detected_at ?? report.reported_at ?? report.created_at,
-        to: `${basePath}/incidents/${id}`,
       }),
     ];
   });
@@ -227,15 +181,11 @@ export function selectAdminAttentionItems(
   const items = [
     ...requestItems(basePath, sources.registrations ?? [], 'registration-request'),
     ...requestItems(basePath, sources.changes ?? [], 'change-request'),
-    ...paymentItems(basePath, sources.unmatchedPayments ?? [], 'unmatched-payment'),
-    ...paymentItems(basePath, sources.queuedPayments ?? [], 'queued-payment'),
+    ...paymentItems(basePath, sources.unmatchedPayments ?? []),
     ...transactionItems(
       basePath,
       [...(sources.failedTransactions ?? []), ...(sources.fatalTransactions ?? [])],
-      'failed-transaction',
     ),
-    ...transactionItems(basePath, sources.rollbackingTransactions ?? [], 'rollbacking-transaction'),
-    ...incidentItems(basePath, sources.incidents ?? []),
   ];
 
   const unique = new Map<string, AdminAttentionItem>();

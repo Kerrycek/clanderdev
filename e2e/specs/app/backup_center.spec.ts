@@ -19,9 +19,8 @@ test.describe('Backup center', () => {
                 name: 'root',
                 full_name: 'mail.example/root',
                 vps: { id: 20, hostname: 'mail.example' },
-                snapshots_count: 3,
               },
-              { id: 11, name: 'archive', full_name: 'nas/archive', snapshots_count: 1 },
+              { id: 11, name: 'archive', full_name: 'nas/archive' },
             ],
             _meta: { total_count: 2 },
           };
@@ -33,7 +32,7 @@ test.describe('Backup center', () => {
               {
                 id: 41,
                 state: 'ready',
-                format: 'tar',
+                format: 'archive',
                 url: '/download/41',
                 snapshot: {
                   id: 31,
@@ -52,7 +51,8 @@ test.describe('Backup center', () => {
 
     await expect(page.getByTestId('backups.page')).toBeVisible();
     await expect(page.getByTestId('nav.sidebar.backups')).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByTestId('backups.overview')).toContainText('4');
+    await expect(page.getByTestId('backups.stats.datasets')).toContainText('2');
+    await expect(page.getByTestId('backups.stats.downloads')).toContainText('1');
     await expect(page.getByTestId('backups.downloads.row.41')).toContainText('root');
     expect(requests).toHaveLength(2);
 

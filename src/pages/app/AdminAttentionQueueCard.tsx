@@ -9,27 +9,27 @@ import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
-import { fetchIncidentReports } from '../../lib/api/incidents';
+import { getMetaTotalCount } from '../../lib/api/haveapi';
 import { fetchIncomingPayments } from '../../lib/api/payments';
 import { fetchChangeRequests, fetchRegistrationRequests } from '../../lib/api/requests';
 import { fetchTransactionChains } from '../../lib/api/transactions';
 import { formatDateTime } from '../../lib/time';
-import { useTierSlowIntervalMs } from '../../lib/refreshTiers';
 
 import {
   adminAttentionSourcePermissions,
-  isOpenIncident,
   selectAdminAttentionItems,
   type AdminAttentionKind,
   type AdminAttentionTone,
 } from './AdminAttentionQueueModel';
 
-const SOURCE_LIMIT = 5;
+const SOURCE_LIMIT = 10;
 const QUEUE_LIMIT = 5;
+const STALE_TIME_MS = 60_000;
 
 function badgeVariant(tone: AdminAttentionTone): 'danger' | 'warn' | 'info' {
   return tone;
 }
+
 function kindLabel(t: ReturnType<typeof useI18n>['t'], kind: AdminAttentionKind): string {
   switch (kind) {
     case 'registration-request':
@@ -38,14 +38,8 @@ function kindLabel(t: ReturnType<typeof useI18n>['t'], kind: AdminAttentionKind)
       return t('dashboard.attention.kind.change_request');
     case 'unmatched-payment':
       return t('dashboard.attention.kind.unmatched_payment');
-    case 'queued-payment':
-      return t('dashboard.attention.kind.queued_payment');
     case 'failed-transaction':
       return t('dashboard.attention.kind.failed_transaction');
-    case 'rollbacking-transaction':
-      return t('dashboard.attention.kind.rollbacking_transaction');
-    case 'incident':
-      return t('dashboard.attention.kind.incident');
   }
 }
 
@@ -53,8 +47,14 @@ function countLabel(count: number, truncated: boolean): string {
   return truncated ? `${count}+` : String(count);
 }
 
-function uniqueCount(rows: Array<{ id: number }>): number {
-  return new Set(rows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)).size;
+function responseCount(response: { data: unknown[]; meta?: unknown } | undefined): {
+  count: number;
+  truncated: boolean;
+} {
+  if (!response) return { count: 0, truncated: false };
+  const exact = getMetaTotalCount(response.meta);
+  if (exact !== undefined) return { count: exact, truncated: false };
+  return { count: response.data.length, truncated: response.data.length >= SOURCE_LIMIT };
 }
 
 interface Metric {
@@ -85,141 +85,95 @@ export function AdminAttentionQueueCard() {
   const auth = useAuth();
   const { basePath, mode } = useAppMode();
   const { t } = useI18n();
-  const tierSlowRefetchMs = useTierSlowIntervalMs();
   const enabled = mode === 'admin' && auth.canUseAdminUi;
   const permissions = adminAttentionSourcePermissions(auth.role);
 
-  const requestsQ = useQuery({
-    queryKey: ['dashboard', 'admin_attention', 'requests'],
+  const registrationsQ = useQuery({
+    queryKey: ['user_request', 'registrations', 'index', { scope: 'dashboard-attention', state: 'awaiting' }],
     enabled: enabled && permissions.requests,
-    queryFn: async () => {
-      const [registrations, changes] = await Promise.allSettled([
-        fetchRegistrationRequests({ limit: SOURCE_LIMIT, state: 'awaiting' }),
-        fetchChangeRequests({ limit: SOURCE_LIMIT, state: 'awaiting' }),
-      ]);
-      return {
-        registrations: registrations.status === 'fulfilled' ? registrations.value.data : [],
-        changes: changes.status === 'fulfilled' ? changes.value.data : [],
-        failures: Number(registrations.status === 'rejected') + Number(changes.status === 'rejected'),
-      };
-    },
-    staleTime: 30_000,
-    refetchInterval: tierSlowRefetchMs,
+    queryFn: () => fetchRegistrationRequests({ limit: SOURCE_LIMIT, state: 'awaiting', count: true }),
+    staleTime: STALE_TIME_MS,
+    retry: 1,
   });
 
-  const paymentsQ = useQuery({
-    queryKey: ['dashboard', 'admin_attention', 'payments'],
+  const changesQ = useQuery({
+    queryKey: ['user_request', 'changes', 'index', { scope: 'dashboard-attention', state: 'awaiting' }],
+    enabled: enabled && permissions.requests,
+    queryFn: () => fetchChangeRequests({ limit: SOURCE_LIMIT, state: 'awaiting', count: true }),
+    staleTime: STALE_TIME_MS,
+    retry: 1,
+  });
+
+  const unmatchedPaymentsQ = useQuery({
+    queryKey: ['incoming_payments', 'index', { scope: 'dashboard-attention', state: 'unmatched' }],
     enabled: enabled && permissions.payments,
-    queryFn: async () => {
-      const [unmatched, queued] = await Promise.allSettled([
-        fetchIncomingPayments({ limit: SOURCE_LIMIT, state: 'unmatched' }),
-        fetchIncomingPayments({ limit: SOURCE_LIMIT, state: 'queued' }),
-      ]);
-      return {
-        unmatched: unmatched.status === 'fulfilled' ? unmatched.value.data : [],
-        queued: queued.status === 'fulfilled' ? queued.value.data : [],
-        failures: Number(unmatched.status === 'rejected') + Number(queued.status === 'rejected'),
-      };
-    },
-    staleTime: 30_000,
-    refetchInterval: tierSlowRefetchMs,
+    queryFn: () => fetchIncomingPayments({ limit: SOURCE_LIMIT, state: 'unmatched', count: true }),
+    staleTime: STALE_TIME_MS,
+    retry: 1,
   });
 
-  const transactionsQ = useQuery({
-    queryKey: ['dashboard', 'admin_attention', 'transactions'],
+  const failedTransactionsQ = useQuery({
+    queryKey: ['transaction_chains', 'list', { scope: 'dashboard-attention', state: 'failed' }],
     enabled: enabled && permissions.transactions,
-    queryFn: async () => {
-      const [failed, fatal, rollbacking] = await Promise.allSettled([
-        fetchTransactionChains({ limit: SOURCE_LIMIT, state: 'failed' }),
-        fetchTransactionChains({ limit: SOURCE_LIMIT, state: 'fatal' }),
-        fetchTransactionChains({ limit: SOURCE_LIMIT, state: 'rollbacking' }),
-      ]);
-      return {
-        failed: failed.status === 'fulfilled' ? failed.value.data : [],
-        fatal: fatal.status === 'fulfilled' ? fatal.value.data : [],
-        rollbacking: rollbacking.status === 'fulfilled' ? rollbacking.value.data : [],
-        failures:
-          Number(failed.status === 'rejected') +
-          Number(fatal.status === 'rejected') +
-          Number(rollbacking.status === 'rejected'),
-      };
-    },
-    staleTime: 30_000,
-    refetchInterval: tierSlowRefetchMs,
+    queryFn: () => fetchTransactionChains({ limit: SOURCE_LIMIT, state: 'failed', count: true }),
+    staleTime: STALE_TIME_MS,
+    retry: 1,
   });
 
-  const incidentsQ = useQuery({
-    queryKey: ['dashboard', 'admin_attention', 'incidents'],
-    enabled: enabled && permissions.incidents,
-    queryFn: async () => {
-      try {
-        return {
-          incidents: (await fetchIncidentReports({ limit: SOURCE_LIMIT, includes: 'user,vps' })).data,
-          failures: 0,
-        };
-      } catch {
-        return { incidents: [], failures: 1 };
-      }
-    },
-    staleTime: 30_000,
-    refetchInterval: tierSlowRefetchMs,
+  const fatalTransactionsQ = useQuery({
+    queryKey: ['transaction_chains', 'list', { scope: 'dashboard-attention', state: 'fatal' }],
+    enabled: enabled && permissions.transactions,
+    queryFn: () => fetchTransactionChains({ limit: SOURCE_LIMIT, state: 'fatal', count: true }),
+    staleTime: STALE_TIME_MS,
+    retry: 1,
   });
 
   const allItems = useMemo(
     () =>
       selectAdminAttentionItems(
         {
-          registrations: requestsQ.data?.registrations,
-          changes: requestsQ.data?.changes,
-          unmatchedPayments: paymentsQ.data?.unmatched,
-          queuedPayments: paymentsQ.data?.queued,
-          failedTransactions: transactionsQ.data?.failed,
-          fatalTransactions: transactionsQ.data?.fatal,
-          rollbackingTransactions: transactionsQ.data?.rollbacking,
-          incidents: incidentsQ.data?.incidents,
+          registrations: registrationsQ.data?.data,
+          changes: changesQ.data?.data,
+          unmatchedPayments: unmatchedPaymentsQ.data?.data,
+          failedTransactions: failedTransactionsQ.data?.data,
+          fatalTransactions: fatalTransactionsQ.data?.data,
         },
         { basePath, limit: Number.MAX_SAFE_INTEGER },
       ),
     [
       basePath,
-      incidentsQ.data?.incidents,
-      paymentsQ.data?.queued,
-      paymentsQ.data?.unmatched,
-      requestsQ.data?.changes,
-      requestsQ.data?.registrations,
-      transactionsQ.data?.failed,
-      transactionsQ.data?.fatal,
-      transactionsQ.data?.rollbacking,
+      changesQ.data?.data,
+      failedTransactionsQ.data?.data,
+      fatalTransactionsQ.data?.data,
+      registrationsQ.data?.data,
+      unmatchedPaymentsQ.data?.data,
     ],
   );
 
   if (!enabled) return null;
 
-  const visibleItems = allItems.slice(0, QUEUE_LIMIT);
-  const expectedCalls =
-    (permissions.requests ? 2 : 0) +
-    (permissions.payments ? 2 : 0) +
-    (permissions.transactions ? 3 : 0) +
-    (permissions.incidents ? 1 : 0);
-  const failedCalls =
-    (requestsQ.data?.failures ?? 0) +
-    (paymentsQ.data?.failures ?? 0) +
-    (transactionsQ.data?.failures ?? 0) +
-    (incidentsQ.data?.failures ?? 0);
-  const isLoading = [requestsQ, paymentsQ, transactionsQ, incidentsQ].some(
-    (query) => query.isLoading && query.fetchStatus !== 'idle',
-  );
-  const allUnavailable = !isLoading && expectedCalls > 0 && failedCalls >= expectedCalls;
+  const activeQueries = [
+    ...(permissions.requests ? [registrationsQ, changesQ] : []),
+    ...(permissions.payments ? [unmatchedPaymentsQ] : []),
+    ...(permissions.transactions ? [failedTransactionsQ, fatalTransactionsQ] : []),
+  ];
+  const isLoading = activeQueries.some((query) => query.isLoading);
+  const failedCalls = activeQueries.filter((query) => query.isError).length;
+  const allUnavailable = !isLoading && activeQueries.length > 0 && failedCalls === activeQueries.length;
   const hasPartialFailure = failedCalls > 0 && !allUnavailable;
-  const truncated =
-    (requestsQ.data?.registrations.length ?? 0) >= SOURCE_LIMIT ||
-    (requestsQ.data?.changes.length ?? 0) >= SOURCE_LIMIT ||
-    (paymentsQ.data?.unmatched.length ?? 0) >= SOURCE_LIMIT ||
-    (paymentsQ.data?.queued.length ?? 0) >= SOURCE_LIMIT ||
-    (transactionsQ.data?.failed.length ?? 0) >= SOURCE_LIMIT ||
-    (transactionsQ.data?.fatal.length ?? 0) >= SOURCE_LIMIT ||
-    (transactionsQ.data?.rollbacking.length ?? 0) >= SOURCE_LIMIT ||
-    (incidentsQ.data?.incidents.length ?? 0) >= SOURCE_LIMIT;
+
+  const registrationCount = responseCount(registrationsQ.data);
+  const changeCount = responseCount(changesQ.data);
+  const unmatchedPaymentCount = responseCount(unmatchedPaymentsQ.data);
+  const failedTransactionCount = responseCount(failedTransactionsQ.data);
+  const fatalTransactionCount = responseCount(fatalTransactionsQ.data);
+
+  const requestCount = registrationCount.count + changeCount.count;
+  const requestTruncated = registrationCount.truncated || changeCount.truncated;
+  const transactionCount = failedTransactionCount.count + fatalTransactionCount.count;
+  const transactionTruncated = failedTransactionCount.truncated || fatalTransactionCount.truncated;
+  const totalCount = requestCount + unmatchedPaymentCount.count + transactionCount;
+  const totalTruncated = requestTruncated || unmatchedPaymentCount.truncated || transactionTruncated;
 
   if (isLoading && allItems.length === 0) {
     return (
@@ -260,68 +214,36 @@ export function AdminAttentionQueueCard() {
     );
   }
 
-  const requestCount = (requestsQ.data?.registrations.length ?? 0) + (requestsQ.data?.changes.length ?? 0);
-  const paymentCount = (paymentsQ.data?.unmatched.length ?? 0) + (paymentsQ.data?.queued.length ?? 0);
-  const transactionRows = [
-    ...(transactionsQ.data?.failed ?? []),
-    ...(transactionsQ.data?.fatal ?? []),
-    ...(transactionsQ.data?.rollbacking ?? []),
-  ];
-  const transactionCount = uniqueCount(transactionRows);
-  const incidentCount = (incidentsQ.data?.incidents ?? []).filter(isOpenIncident).length;
-
+  const visibleItems = allItems.slice(0, QUEUE_LIMIT);
   const metrics: Metric[] = [
     ...(permissions.requests
       ? [{
           id: 'requests',
           label: t('dashboard.attention.category.requests'),
-          count: countLabel(
-            requestCount,
-            (requestsQ.data?.registrations.length ?? 0) >= SOURCE_LIMIT ||
-              (requestsQ.data?.changes.length ?? 0) >= SOURCE_LIMIT,
-          ),
+          count: countLabel(requestCount, requestTruncated),
           to: `${basePath}/requests?state=awaiting`,
-          loading: requestsQ.isLoading,
-          unavailable: (requestsQ.data?.failures ?? 0) >= 2,
+          loading: registrationsQ.isLoading || changesQ.isLoading,
+          unavailable: registrationsQ.isError && changesQ.isError,
         }]
       : []),
     ...(permissions.payments
       ? [{
           id: 'payments',
           label: t('dashboard.attention.category.payments'),
-          count: countLabel(
-            paymentCount,
-            (paymentsQ.data?.unmatched.length ?? 0) >= SOURCE_LIMIT ||
-              (paymentsQ.data?.queued.length ?? 0) >= SOURCE_LIMIT,
-          ),
+          count: countLabel(unmatchedPaymentCount.count, unmatchedPaymentCount.truncated),
           to: `${basePath}/payments/incoming?state=unmatched`,
-          loading: paymentsQ.isLoading,
-          unavailable: (paymentsQ.data?.failures ?? 0) >= 2,
+          loading: unmatchedPaymentsQ.isLoading,
+          unavailable: unmatchedPaymentsQ.isError,
         }]
       : []),
     ...(permissions.transactions
       ? [{
           id: 'transactions',
           label: t('dashboard.attention.category.transactions'),
-          count: countLabel(
-            transactionCount,
-            (transactionsQ.data?.failed.length ?? 0) >= SOURCE_LIMIT ||
-              (transactionsQ.data?.fatal.length ?? 0) >= SOURCE_LIMIT ||
-              (transactionsQ.data?.rollbacking.length ?? 0) >= SOURCE_LIMIT,
-          ),
+          count: countLabel(transactionCount, transactionTruncated),
           to: `${basePath}/transactions?errors=1`,
-          loading: transactionsQ.isLoading,
-          unavailable: (transactionsQ.data?.failures ?? 0) >= 3,
-        }]
-      : []),
-    ...(permissions.incidents
-      ? [{
-          id: 'incidents',
-          label: t('dashboard.attention.category.incidents'),
-          count: countLabel(incidentCount, (incidentsQ.data?.incidents.length ?? 0) >= SOURCE_LIMIT),
-          to: `${basePath}/incidents`,
-          loading: incidentsQ.isLoading,
-          unavailable: (incidentsQ.data?.failures ?? 0) >= 1,
+          loading: failedTransactionsQ.isLoading || fatalTransactionsQ.isLoading,
+          unavailable: failedTransactionsQ.isError && fatalTransactionsQ.isError,
         }]
       : []),
   ];
@@ -332,12 +254,12 @@ export function AdminAttentionQueueCard() {
         className="p-3"
         title={t('dashboard.attention.title')}
         subtitle={t('dashboard.attention.subtitle', {
-          count: countLabel(allItems.length, truncated),
+          count: countLabel(totalCount || allItems.length, totalTruncated),
         })}
       />
 
       <CardBody className="p-0">
-        <div className="grid divide-y divide-border border-b border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+        <div className="grid divide-y divide-border border-b border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {metrics.map((metric) => <AttentionMetric key={metric.id} {...metric} />)}
         </div>
 

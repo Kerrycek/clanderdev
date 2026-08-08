@@ -18,23 +18,27 @@ test.describe('Admin attention queue', () => {
         'GET security_advisories': () => ({ security_advisories: [], _meta: { total_count: 0 } }),
         'GET user_request/registrations': () => ({
           registrations: [{ id: 101, state: 'awaiting', login: 'new-member', created_at: '2026-08-01T09:00:00Z' }],
+          _meta: { total_count: 1 },
         }),
-        'GET user_request/changes': () => ({ changes: [] }),
+        'GET user_request/changes': () => ({ changes: [], _meta: { total_count: 0 } }),
         'GET incoming_payments': (ctx) => {
           const state = ctx.searchParams.get('incoming_payment[state]');
           return state === 'unmatched'
-            ? { incoming_payments: [{ id: 202, state: 'unmatched', account_name: 'Missing variable symbol', date: '2026-08-02' }] }
-            : { incoming_payments: [] };
+            ? {
+                incoming_payments: [{ id: 202, state: 'unmatched', account_name: 'Missing variable symbol', date: '2026-08-02' }],
+                _meta: { total_count: 1 },
+              }
+            : { incoming_payments: [], _meta: { total_count: 0 } };
         },
         'GET transaction_chains': (ctx) => {
           const state = ctx.searchParams.get('transaction_chain[state]');
           return state === 'failed'
-            ? { transaction_chains: [{ id: 303, state: 'failed', label: 'Create VPS', created_at: '2026-08-03T09:00:00Z' }] }
-            : { transaction_chains: [] };
+            ? {
+                transaction_chains: [{ id: 303, state: 'failed', label: 'Create VPS', created_at: '2026-08-03T09:00:00Z' }],
+                _meta: { total_count: 1 },
+              }
+            : { transaction_chains: [], _meta: { total_count: 0 } };
         },
-        'GET incident_reports': () => ({
-          incident_reports: [{ id: 404, state: 'open', subject: 'Network abuse report', created_at: '2026-08-04T09:00:00Z' }],
-        }),
       },
     });
 
@@ -44,7 +48,6 @@ test.describe('Admin attention queue', () => {
     await expect(page.getByTestId('admin.attention.item.unmatched-payment:202')).toContainText('Missing variable symbol');
     await expect(page.getByTestId('admin.attention.item.failed-transaction:303')).toContainText('Create VPS');
     await expect(page.getByTestId('admin.attention.item.registration-request:101')).toContainText('new-member');
-    await expect(page.getByTestId('admin.attention.item.incident:404')).toContainText('Network abuse report');
     if ((page.viewportSize()?.width ?? 0) < 768) {
       await page.getByRole('button', { name: 'Open navigation', exact: true }).click();
       await expect(page.getByTestId('nav.drawer.group.services')).toBeVisible();

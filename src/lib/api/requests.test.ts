@@ -32,6 +32,7 @@ describe('requests API wrappers', () => {
       apiIpAddr: '192.0.2.10',
       clientIpAddr: '198.51.100.5',
       clientIpPtr: 'ptr.example.test',
+      count: true,
     });
 
     const [url] = lastFetchCall();
@@ -47,6 +48,7 @@ describe('requests API wrappers', () => {
     expect(u.searchParams.get('registration[api_ip_addr]')).toBe('192.0.2.10');
     expect(u.searchParams.get('registration[client_ip_addr]')).toBe('198.51.100.5');
     expect(u.searchParams.get('registration[client_ip_ptr]')).toBe('ptr.example.test');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchChangeRequests forwards q and structured filters', async () => {
@@ -62,6 +64,7 @@ describe('requests API wrappers', () => {
       apiIpAddr: '192.0.2.20',
       clientIpAddr: '198.51.100.8',
       clientIpPtr: 'ptr2.example.test',
+      count: true,
     });
 
     const [url] = lastFetchCall();
@@ -77,6 +80,7 @@ describe('requests API wrappers', () => {
     expect(u.searchParams.get('change[api_ip_addr]')).toBe('192.0.2.20');
     expect(u.searchParams.get('change[client_ip_addr]')).toBe('198.51.100.8');
     expect(u.searchParams.get('change[client_ip_ptr]')).toBe('ptr2.example.test');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('previewRegistrationRequest encodes the token in the path', async () => {

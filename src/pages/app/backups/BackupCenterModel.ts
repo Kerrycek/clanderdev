@@ -1,5 +1,9 @@
 import type { Dataset, ResourceRef, SnapshotDownload } from '../../../lib/api/datasets';
-import { snapshotDownloadHref, snapshotDownloadStatus } from '../datasets/DatasetDownloadModel';
+import {
+  snapshotDownloadHref,
+  snapshotDownloadStatus,
+  type SnapshotDownloadHrefOptions,
+} from '../datasets/DatasetDownloadModel';
 
 export const BACKUP_CENTER_TABS = ['overview', 'snapshots', 'downloads', 'plans'] as const;
 export type BackupCenterTab = (typeof BACKUP_CENTER_TABS)[number];
@@ -46,18 +50,6 @@ export function datasetBackupPath(dataset: Dataset, section?: 'snapshots' | 'dow
   return `${root}/${dataset.id}${section ? `/${section}` : ''}`;
 }
 
-export function datasetSnapshotCount(dataset: Dataset): number | undefined {
-  return positiveNumber(dataset.snapshots_count);
-}
-
-export function datasetPlanCount(dataset: Dataset): number | undefined {
-  for (const key of ['plans_count', 'dataset_plans_count', 'plan_count']) {
-    const count = positiveNumber(dataset[key]);
-    if (count !== undefined) return count;
-  }
-  return undefined;
-}
-
 export function filterBackupDatasets(datasets: Dataset[], query: string): Dataset[] {
   const needle = query.trim().toLocaleLowerCase();
   if (!needle) return datasets;
@@ -93,20 +85,15 @@ export function snapshotDownloadDatasetPath(download: SnapshotDownload): string 
   return `/app/${kind}/${id}/downloads`;
 }
 
-export function summarizeBackupCenter(datasets: Dataset[], downloads: SnapshotDownload[]) {
-  let snapshots = 0;
-  let snapshotCountsKnown = 0;
-  for (const dataset of datasets) {
-    const count = datasetSnapshotCount(dataset);
-    if (count === undefined) continue;
-    snapshots += count;
-    snapshotCountsKnown += 1;
-  }
-
+export function summarizeBackupCenter(
+  datasets: Dataset[],
+  downloads: SnapshotDownload[],
+  hrefOptions: SnapshotDownloadHrefOptions = {},
+) {
   let readyDownloads = 0;
   let pendingDownloads = 0;
   for (const download of downloads) {
-    const href = snapshotDownloadHref(download);
+    const href = snapshotDownloadHref(download, hrefOptions);
     const status = snapshotDownloadStatus(download, { href });
     if (status === 'ready') readyDownloads += 1;
     else if (status === 'pending') pendingDownloads += 1;
@@ -114,9 +101,7 @@ export function summarizeBackupCenter(datasets: Dataset[], downloads: SnapshotDo
 
   return {
     datasets: datasets.length,
-    snapshots,
-    snapshotCountsComplete: snapshotCountsKnown === datasets.length,
-    datasetsWithoutSnapshots: datasets.filter((dataset) => datasetSnapshotCount(dataset) === 0).length,
+    downloads: downloads.length,
     readyDownloads,
     pendingDownloads,
   };

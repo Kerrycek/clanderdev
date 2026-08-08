@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 
 import { useI18n } from '../../../app/i18n';
+import { getRuntimeConfig } from '../../../app/config';
+import { useObjectScope } from '../../../app/objectScope';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 import { Badge } from '../../../components/ui/Badge';
@@ -28,8 +30,6 @@ import {
   datasetBackupKind,
   datasetBackupLabel,
   datasetBackupPath,
-  datasetPlanCount,
-  datasetSnapshotCount,
   filterBackupDatasets,
   parseBackupCenterTab,
   resourceLabel,
@@ -44,14 +44,44 @@ const DOWNLOAD_LIMIT = 100;
 
 function BackupTabs(props: { active: BackupCenterTab; onChange: (tab: BackupCenterTab) => void }) {
   const { t } = useI18n();
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const currentIndex = BACKUP_CENTER_TABS.indexOf(props.active);
+    let nextIndex: number | undefined;
+
+    if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % BACKUP_CENTER_TABS.length;
+    if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + BACKUP_CENTER_TABS.length) % BACKUP_CENTER_TABS.length;
+    }
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = BACKUP_CENTER_TABS.length - 1;
+    if (nextIndex === undefined) return;
+
+    event.preventDefault();
+    const nextTab = BACKUP_CENTER_TABS[nextIndex];
+    if (!nextTab) return;
+    props.onChange(nextTab);
+    document.getElementById(`backups-tab-${nextTab}`)?.focus();
+  }
+
   return (
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label={t('backups.tabs.aria')}>
+    <div
+      className="flex flex-wrap gap-2"
+      role="tablist"
+      aria-label={t('backups.tabs.aria')}
+      onKeyDown={handleKeyDown}
+    >
       {BACKUP_CENTER_TABS.map((tab) => (
         <Button
           key={tab}
+          id={`backups-tab-${tab}`}
           variant={props.active === tab ? 'secondary' : 'ghost'}
           onClick={() => props.onChange(tab)}
           ariaLabel={t(`backups.tabs.${tab}`)}
+          role="tab"
+          aria-selected={props.active === tab}
+          aria-controls="backups-tab-panel"
+          tabIndex={props.active === tab ? 0 : -1}
           testId={`backups.tab.${tab}`}
         >
           {t(`backups.tabs.${tab}`)}
@@ -70,13 +100,11 @@ function DatasetRows(props: { datasets: Dataset[]; section: 'snapshots' | 'plans
           <th className="px-3 py-2 text-left">{t('backups.dataset')}</th>
           <th className="px-3 py-2 text-left">{t('backups.kind')}</th>
           <th className="px-3 py-2 text-left">{t('backups.vps')}</th>
-          <th className="px-3 py-2 text-right">{t(`backups.${props.section}.count`)}</th>
           <th className="px-3 py-2 text-right">{t('backups.actions')}</th>
         </tr>
       </thead>
       <tbody>
         {props.datasets.map((dataset) => {
-          const count = props.section === 'snapshots' ? datasetSnapshotCount(dataset) : datasetPlanCount(dataset);
           return (
             <tr key={dataset.id} data-testid={`backups.${props.section}.row.${dataset.id}`}>
               <td className="px-3 py-2">
@@ -87,9 +115,6 @@ function DatasetRows(props: { datasets: Dataset[]; section: 'snapshots' | 'plans
                 <Badge variant="neutral">{t(`backups.kind.${datasetBackupKind(dataset)}`)}</Badge>
               </td>
               <td className="px-3 py-2 text-muted">{resourceLabel(dataset.vps)}</td>
-              <td className="px-3 py-2 text-right font-medium">
-                {count === undefined ? t('backups.count.on_detail') : count}
-              </td>
               <td className="px-3 py-2 text-right">
                 <Button to={datasetBackupPath(dataset, props.section)} size="sm" variant="secondary">
                   {t(`backups.${props.section}.open`)}
@@ -103,7 +128,11 @@ function DatasetRows(props: { datasets: Dataset[]; section: 'snapshots' | 'plans
   );
 }
 
-function DownloadRows(props: { downloads: SnapshotDownload[]; compact?: boolean }) {
+function DownloadRows(props: {
+  downloads: SnapshotDownload[];
+  compact?: boolean;
+  hrefOptions: { webuiUrl?: string; origin?: string };
+}) {
   const { t } = useI18n();
   const rows = props.compact ? props.downloads.slice(0, 5) : props.downloads;
   return (
@@ -120,7 +149,7 @@ function DownloadRows(props: { downloads: SnapshotDownload[]; compact?: boolean 
       </thead>
       <tbody>
         {rows.map((download) => {
-          const href = snapshotDownloadHref(download);
+          const href = snapshotDownloadHref(download, props.hrefOptions);
           const status = snapshotDownloadStatus(download, { href });
           const dataset = snapshotDownloadDataset(download);
           const detailPath = snapshotDownloadDatasetPath(download);
@@ -159,21 +188,40 @@ function DownloadRows(props: { downloads: SnapshotDownload[]; compact?: boolean 
 
 export function BackupCenterPage() {
   const { t } = useI18n();
+  const scope = useObjectScope();
+  const runtime = useMemo(() => getRuntimeConfig(), []);
+  const hrefOptions = useMemo(
+    () => ({
+      webuiUrl: runtime.webuiUrl,
+      origin: typeof window !== 'undefined' ? window.location.origin : undefined,
+    }),
+    [runtime.webuiUrl],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = parseBackupCenterTab(searchParams.get('tab'));
   const [query, setQuery] = useState(() => searchParams.get('q') ?? '');
+  const canLoadGlobalDownloads = scope.mineUserId === undefined;
 
   const datasetsQ = useQuery({
-    queryKey: ['backup-center', 'datasets'],
-    queryFn: () => fetchDatasets({ limit: DATASET_LIMIT, includes: 'vps,parent' }),
+    queryKey: ['backup-center', 'datasets', { user: scope.mineUserId }],
+    queryFn: () => fetchDatasets({
+      limit: DATASET_LIMIT,
+      includes: 'vps,parent',
+      user: scope.mineUserId,
+      count: true,
+    }),
     staleTime: 30_000,
     enabled: tab !== 'downloads',
   });
   const downloadsQ = useQuery({
-    queryKey: ['backup-center', 'downloads'],
-    queryFn: () => fetchSnapshotDownloads({ limit: DOWNLOAD_LIMIT, includes: 'snapshot__dataset' }),
+    queryKey: ['backup-center', 'downloads', { userScope: scope.scope }],
+    queryFn: () => fetchSnapshotDownloads({
+      limit: DOWNLOAD_LIMIT,
+      includes: 'snapshot__dataset',
+      count: true,
+    }),
     staleTime: 15_000,
-    enabled: tab === 'overview' || tab === 'downloads',
+    enabled: canLoadGlobalDownloads && (tab === 'overview' || tab === 'downloads'),
   });
 
   const datasets = datasetsQ.data?.data ?? [];
@@ -189,7 +237,10 @@ export function BackupCenterPage() {
       download.format,
     ].filter(Boolean).join(' ').toLocaleLowerCase().includes(needle));
   }, [downloads, query]);
-  const summary = useMemo(() => summarizeBackupCenter(datasets, downloads), [datasets, downloads]);
+  const summary = useMemo(
+    () => summarizeBackupCenter(datasets, downloads, hrefOptions),
+    [datasets, downloads, hrefOptions],
+  );
 
   function changeTab(nextTab: BackupCenterTab) {
     const next = new URLSearchParams(searchParams);
@@ -198,13 +249,36 @@ export function BackupCenterPage() {
     setSearchParams(next, { replace: true });
   }
 
+  function changeQuery(nextQuery: string) {
+    setQuery(nextQuery);
+    const next = new URLSearchParams(searchParams);
+    if (nextQuery.trim()) next.set('q', nextQuery);
+    else next.delete('q');
+    setSearchParams(next, { replace: true });
+  }
+
   const datasetTotal = getMetaTotalCount(datasetsQ.data?.meta);
   const downloadTotal = getMetaTotalCount(downloadsQ.data?.meta);
-  const scopeLimited = (datasetTotal ?? 0) > datasets.length || (downloadTotal ?? 0) > downloads.length;
-  const loading = (tab === 'overview' && (datasetsQ.isPending || downloadsQ.isPending))
+  const datasetScopeLimited = (datasetTotal ?? 0) > datasets.length;
+  const downloadScopeLimited = canLoadGlobalDownloads && (downloadTotal ?? 0) > downloads.length;
+  const scopeLimited = datasetScopeLimited || downloadScopeLimited;
+  const loading = (tab === 'overview' && (datasetsQ.isPending || (canLoadGlobalDownloads && downloadsQ.isPending)))
     || ((tab === 'snapshots' || tab === 'plans') && datasetsQ.isPending)
-    || (tab === 'downloads' && downloadsQ.isPending);
-  const error = datasetsQ.error ?? downloadsQ.error;
+    || (tab === 'downloads' && canLoadGlobalDownloads && downloadsQ.isPending);
+  const error = tab === 'downloads'
+    ? (canLoadGlobalDownloads ? downloadsQ.error : null)
+    : tab === 'overview'
+      ? datasetsQ.error ?? (canLoadGlobalDownloads ? downloadsQ.error : null)
+      : datasetsQ.error;
+
+  function retryActiveTab() {
+    if (tab === 'downloads') {
+      if (canLoadGlobalDownloads) void downloadsQ.refetch();
+      return;
+    }
+    void datasetsQ.refetch();
+    if (tab === 'overview' && canLoadGlobalDownloads) void downloadsQ.refetch();
+  }
 
   return (
     <ListShell
@@ -217,7 +291,7 @@ export function BackupCenterPage() {
           {tab !== 'overview' ? (
             <Input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => changeQuery(event.target.value)}
               placeholder={t(`backups.${tab}.filter`)}
               ariaLabel={t(`backups.${tab}.filter`)}
               testId="backups.filter"
@@ -226,52 +300,131 @@ export function BackupCenterPage() {
         </div>
       }
     >
-      {loading ? <LoadingState testId="backups.loading" /> : null}
-      {!loading && error ? <ErrorState error={error} onRetry={() => void (datasetsQ.refetch(), downloadsQ.refetch())} testId="backups.error" /> : null}
-      {!loading && !error && scopeLimited ? (
-        <Card><CardBody className="text-sm text-muted">{t('backups.scope_limited', { datasets: datasets.length, downloads: downloads.length })}</CardBody></Card>
-      ) : null}
-
-      {!loading && !error && tab === 'overview' ? (
-        <div className="space-y-6" data-testid="backups.overview">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard title={t('backups.stats.datasets')} value={datasetTotal ?? summary.datasets} subtitle={t('backups.stats.datasets.help')} />
-            <StatCard title={t('backups.stats.snapshots')} value={`${summary.snapshots}${summary.snapshotCountsComplete ? '' : '+'}`} subtitle={t('backups.stats.snapshots.help')} />
-            <StatCard title={t('backups.stats.ready')} value={summary.readyDownloads} subtitle={t('backups.stats.ready.help')} />
-            <StatCard title={t('backups.stats.pending')} value={summary.pendingDownloads} subtitle={t('backups.stats.pending.help')} />
-          </div>
+      <div
+        id="backups-tab-panel"
+        role="tabpanel"
+        aria-labelledby={`backups-tab-${tab}`}
+        className="space-y-6"
+      >
+        {loading ? <LoadingState testId="backups.loading" /> : null}
+        {!loading && error ? (
+          <ErrorState error={error} onRetry={retryActiveTab} testId="backups.error" />
+        ) : null}
+        {!loading && !error && scopeLimited ? (
           <Card>
-            <CardHeader title={t('backups.quick.title')} subtitle={t('backups.quick.subtitle')} />
-            <CardBody className="grid gap-3 md:grid-cols-3">
-              <Button onClick={() => changeTab('snapshots')} variant="secondary">{t('backups.quick.snapshots')}</Button>
-              <Button onClick={() => changeTab('downloads')} variant="secondary">{t('backups.quick.downloads')}</Button>
-              <Button onClick={() => changeTab('plans')} variant="secondary">{t('backups.quick.plans')}</Button>
+            <CardBody className="text-sm text-muted">
+              {t('backups.scope_limited', {
+                datasets: datasets.length,
+                downloads: downloads.length,
+              })}
             </CardBody>
           </Card>
-          <div>
-            <h2 className="mb-3 text-base font-semibold">{t('backups.recent_downloads')}</h2>
-            {downloads.length ? <DownloadRows downloads={downloads} compact /> : <EmptyState title={t('backups.downloads.empty.title')} body={t('backups.downloads.empty.body')} />}
+        ) : null}
+
+        {!loading && !error && tab === 'overview' ? (
+          <div className="space-y-6" data-testid="backups.overview">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard
+                testId="backups.stats.datasets"
+                title={t('backups.stats.datasets')}
+                value={datasetTotal ?? summary.datasets}
+                subtitle={t('backups.stats.datasets.help')}
+              />
+              <StatCard
+                testId="backups.stats.downloads"
+                title={t('backups.stats.downloads')}
+                value={canLoadGlobalDownloads ? (downloadTotal ?? summary.downloads) : '—'}
+                subtitle={
+                  canLoadGlobalDownloads
+                    ? t('backups.stats.downloads.help')
+                    : t('backups.downloads.mine_scope.help')
+                }
+              />
+              <StatCard
+                testId="backups.stats.ready"
+                title={t('backups.stats.ready')}
+                value={canLoadGlobalDownloads ? summary.readyDownloads : '—'}
+                subtitle={t('backups.stats.ready.help')}
+              />
+              <StatCard
+                testId="backups.stats.pending"
+                title={t('backups.stats.pending')}
+                value={canLoadGlobalDownloads ? summary.pendingDownloads : '—'}
+                subtitle={t('backups.stats.pending.help')}
+              />
+            </div>
+            <Card>
+              <CardHeader title={t('backups.quick.title')} subtitle={t('backups.quick.subtitle')} />
+              <CardBody className="grid gap-3 md:grid-cols-3">
+                <Button onClick={() => changeTab('snapshots')} variant="secondary">
+                  {t('backups.quick.snapshots')}
+                </Button>
+                <Button onClick={() => changeTab('downloads')} variant="secondary">
+                  {t('backups.quick.downloads')}
+                </Button>
+                <Button onClick={() => changeTab('plans')} variant="secondary">
+                  {t('backups.quick.plans')}
+                </Button>
+              </CardBody>
+            </Card>
+            <div>
+              <h2 className="mb-3 text-base font-semibold">{t('backups.recent_downloads')}</h2>
+              {!canLoadGlobalDownloads ? (
+                <Card>
+                  <CardBody className="text-sm text-muted">
+                    {t('backups.downloads.mine_scope.body')}
+                  </CardBody>
+                </Card>
+              ) : downloads.length ? (
+                <DownloadRows downloads={downloads} compact hrefOptions={hrefOptions} />
+              ) : (
+                <EmptyState
+                  title={t('backups.downloads.empty.title')}
+                  body={t('backups.downloads.empty.body')}
+                />
+              )}
+            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {!loading && !error && (tab === 'snapshots' || tab === 'plans') ? (
-        <div className="space-y-4" data-testid={`backups.${tab}`}>
-          <Card>
-            <CardBody>
-              <div className="font-semibold">{t(`backups.${tab}.scope.title`)}</div>
-              <p className="mt-1 text-sm text-muted">{t(`backups.${tab}.scope.body`)}</p>
-            </CardBody>
-          </Card>
-          {filteredDatasets.length ? <DatasetRows datasets={filteredDatasets} section={tab} /> : <EmptyState title={t(`backups.${tab}.empty.title`)} body={t(`backups.${tab}.empty.body`)} />}
-        </div>
-      ) : null}
+        {!loading && !error && (tab === 'snapshots' || tab === 'plans') ? (
+          <div className="space-y-4" data-testid={`backups.${tab}`}>
+            <Card>
+              <CardBody>
+                <div className="font-semibold">{t(`backups.${tab}.scope.title`)}</div>
+                <p className="mt-1 text-sm text-muted">{t(`backups.${tab}.scope.body`)}</p>
+              </CardBody>
+            </Card>
+            {filteredDatasets.length ? (
+              <DatasetRows datasets={filteredDatasets} section={tab} />
+            ) : (
+              <EmptyState
+                title={t(`backups.${tab}.empty.title`)}
+                body={t(`backups.${tab}.empty.body`)}
+              />
+            )}
+          </div>
+        ) : null}
 
-      {!loading && !error && tab === 'downloads' ? (
-        <div data-testid="backups.downloads">
-          {filteredDownloads.length ? <DownloadRows downloads={filteredDownloads} /> : <EmptyState title={t('backups.downloads.empty.title')} body={t('backups.downloads.empty.body')} />}
-        </div>
-      ) : null}
+        {!loading && !error && tab === 'downloads' ? (
+          <div data-testid="backups.downloads">
+            {!canLoadGlobalDownloads ? (
+              <Card>
+                <CardBody className="text-sm text-muted">
+                  {t('backups.downloads.mine_scope.body')}
+                </CardBody>
+              </Card>
+            ) : filteredDownloads.length ? (
+              <DownloadRows downloads={filteredDownloads} hrefOptions={hrefOptions} />
+            ) : (
+              <EmptyState
+                title={t('backups.downloads.empty.title')}
+                body={t('backups.downloads.empty.body')}
+              />
+            )}
+          </div>
+        ) : null}
+      </div>
     </ListShell>
   );
 }

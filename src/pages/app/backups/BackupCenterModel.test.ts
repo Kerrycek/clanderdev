@@ -16,9 +16,8 @@ describe('BackupCenterModel', () => {
     name: 'root',
     full_name: 'mail.example/root',
     vps: { id: 20, hostname: 'mail.example' },
-    snapshots_count: 3,
   } satisfies Dataset;
-  const nasDataset = { id: 11, name: 'archive', snapshots_count: 0 } satisfies Dataset;
+  const nasDataset = { id: 11, name: 'archive' } satisfies Dataset;
 
   it('keeps invalid tab values on the safe overview tab', () => {
     expect(parseBackupCenterTab('downloads')).toBe('downloads');
@@ -45,7 +44,7 @@ describe('BackupCenterModel', () => {
     expect(snapshotDownloadDatasetPath(download)).toBe('/app/datasets/10/downloads');
   });
 
-  it('summarizes snapshot counts and download readiness', () => {
+  it('summarizes only values supported by the index responses', () => {
     const summary = summarizeBackupCenter(
       [vpsDataset, nasDataset],
       [
@@ -55,9 +54,7 @@ describe('BackupCenterModel', () => {
     );
     expect(summary).toMatchObject({
       datasets: 2,
-      snapshots: 3,
-      snapshotCountsComplete: true,
-      datasetsWithoutSnapshots: 1,
+      downloads: 2,
       readyDownloads: 1,
       pendingDownloads: 1,
     });

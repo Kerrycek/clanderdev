@@ -45,7 +45,7 @@ describe('datasets API wrappers', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchDatasets({ limit: 42, includes: 'vps' });
+    await fetchDatasets({ limit: 42, includes: 'vps', count: true });
 
     const [url] = firstFetchCall(fetchMock);
     const u = new URL(String(url));
@@ -53,6 +53,7 @@ describe('datasets API wrappers', () => {
     expect(u.pathname).toBe('/v7.0/datasets');
     expect(u.searchParams.get('dataset[limit]')).toBe('42');
     expect(u.searchParams.get('_meta[includes]')).toBe('vps');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchDatasetSnapshots uses snapshot namespace and dataset-scoped endpoint', async () => {
@@ -150,7 +151,13 @@ describe('datasets API wrappers', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchSnapshotDownloads({ dataset: 123, q: 'archive', limit: 5, includes: 'snapshot__dataset' });
+    await fetchSnapshotDownloads({
+      dataset: 123,
+      q: 'archive',
+      limit: 5,
+      includes: 'snapshot__dataset',
+      count: true,
+    });
 
     const [url] = firstFetchCall(fetchMock);
     const u = new URL(String(url));
@@ -160,5 +167,6 @@ describe('datasets API wrappers', () => {
     expect(u.searchParams.get('snapshot_download[q]')).toBe('archive');
     expect(u.searchParams.get('snapshot_download[limit]')).toBe('5');
     expect(u.searchParams.get('_meta[includes]')).toBe('snapshot__dataset');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 });
