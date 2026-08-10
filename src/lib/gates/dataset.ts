@@ -47,10 +47,12 @@ function blocksWhenInactive(action: DatasetAction): boolean {
 
 function requiresAdmin(action: DatasetAction): boolean {
   switch (action) {
-    case 'snapshot.rollback':
-    case 'snapshot.delete':
     case 'download.delete':
       return true;
+    // Snapshot mutations are owner-or-admin in the API. Dataset reads are
+    // owner-scoped for regular users and the API remains authoritative.
+    case 'snapshot.rollback':
+    case 'snapshot.delete':
     case 'snapshot.create':
     case 'download.create':
       return false;
@@ -124,14 +126,18 @@ export function gateDatasetAction(
     return deny({ titleKey: 'gate.blocked.permission.title', descriptionKey: 'gate.blocked.permission.body' });
   }
 
-  // Dataset create/delete are user capabilities on owned objects. Callers
-  // must pass the object-scoped decision; keep the old fail-closed behavior
-  // when they do not.
+  // These mutations are user capabilities only on owned objects. Callers
+  // must pass the object-scoped decision; fail closed when they do not.
   if (
     ctx.permission === undefined &&
     ctx.role &&
     ctx.role !== 'admin' &&
-    (action === 'dataset.create' || action === 'dataset.delete')
+    (
+      action === 'dataset.create' ||
+      action === 'dataset.delete' ||
+      action === 'snapshot.rollback' ||
+      action === 'snapshot.delete'
+    )
   ) {
     return deny({ titleKey: 'gate.blocked.permission.title', descriptionKey: 'gate.blocked.permission.body' });
   }

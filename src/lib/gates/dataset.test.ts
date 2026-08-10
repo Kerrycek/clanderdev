@@ -40,25 +40,53 @@ describe('gateDatasetAction', () => {
     expect(r.allowed).toBe(true);
   });
 
-  it('keeps user-safe snapshot and backup actions available to regular users', () => {
+  it('keeps owner-scoped snapshot and backup actions available to regular users', () => {
     expect(gateDatasetAction('snapshot.create', { dataset: baseDataset, role: 'user' }).allowed).toBe(true);
+    expect(
+      gateDatasetAction('snapshot.rollback', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: true,
+      }).allowed
+    ).toBe(true);
+    expect(
+      gateDatasetAction('snapshot.delete', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: true,
+      }).allowed
+    ).toBe(true);
     expect(gateDatasetAction('download.create', { dataset: baseDataset, role: 'user' }).allowed).toBe(true);
   });
 
-  it('blocks privileged snapshot and download actions for regular users', () => {
-    const actions = [
-      'snapshot.rollback',
-      'snapshot.delete',
-      'download.delete',
-    ] as const;
+  it('fails closed for owner-only snapshot actions without an object permission decision', () => {
+    expect(gateDatasetAction('snapshot.rollback', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
+    expect(gateDatasetAction('snapshot.delete', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
+  });
 
-    for (const action of actions) {
-      const r = gateDatasetAction(action, { dataset: baseDataset, role: 'user' });
-      expect(r.allowed, action).toBe(false);
-      if (!r.allowed) {
-        expect(r.reason.titleKey).toBe('gate.admin_only.title');
-      }
+  it('keeps download deletion admin-only', () => {
+    const r = gateDatasetAction('download.delete', { dataset: baseDataset, role: 'user' });
+    expect(r.allowed).toBe(false);
+    if (!r.allowed) {
+      expect(r.reason.titleKey).toBe('gate.admin_only.title');
     }
+  });
+
+  it('honors an explicit object permission denial for snapshot mutations', () => {
+    expect(
+      gateDatasetAction('snapshot.rollback', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: false,
+      }).allowed
+    ).toBe(false);
+    expect(
+      gateDatasetAction('snapshot.delete', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: false,
+      }).allowed
+    ).toBe(false);
   });
 
   it('allows regular users to request dataset updates', () => {

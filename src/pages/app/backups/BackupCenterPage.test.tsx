@@ -41,6 +41,22 @@ vi.mock('../../../lib/api/datasets', async (importOriginal) => {
   };
 });
 
+vi.mock('./BackupCenterDatasetWorkspace', () => ({
+  BackupCenterDatasetWorkspace: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="backups.workspace.provider">{children}</div>
+  ),
+}));
+
+vi.mock('../datasets/DatasetSnapshotsPage', () => ({
+  DatasetSnapshotsPage: ({ queryParamPrefix }: { queryParamPrefix?: string }) => (
+    <div data-testid="backups.workspace.snapshots">{queryParamPrefix}</div>
+  ),
+}));
+
+vi.mock('../datasets/DatasetPlansPage', () => ({
+  DatasetPlansPage: () => <div data-testid="backups.workspace.plans" />,
+}));
+
 const datasetsMock = vi.mocked(fetchDatasets);
 const downloadsMock = vi.mocked(fetchSnapshotDownloads);
 
@@ -87,7 +103,7 @@ describe('BackupCenterPage', () => {
     expect(screen.getByTestId('backups.downloads.row.1')).toBeVisible();
     expect(datasetsMock).toHaveBeenCalledWith({
       limit: 100,
-      includes: 'vps,parent',
+      includes: 'vps,parent,environment,user',
       user: undefined,
       count: true,
     });
@@ -98,7 +114,7 @@ describe('BackupCenterPage', () => {
     });
   });
 
-  it('opens the snapshot inventory without calling every nested snapshots endpoint', async () => {
+  it('loads snapshot tools only after selecting one dataset', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByTestId('backups.overview');
@@ -108,8 +124,23 @@ describe('BackupCenterPage', () => {
     expect(await screen.findByTestId('backups.snapshots')).toBeVisible();
     expect(screen.getByTestId('backups.snapshots.row.10')).toBeVisible();
     expect(screen.getByTestId('backups.snapshots.row.11')).toBeVisible();
+    expect(screen.getByTestId('backups.workspace.empty')).toBeVisible();
+    expect(screen.queryByTestId('backups.workspace.snapshots')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('backups.snapshots.row.10'));
+
+    expect(await screen.findByTestId('backups.workspace.snapshots')).toHaveTextContent('backup_snapshot_');
+    expect(screen.getByTestId('backups.snapshots.row.10')).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(datasetsMock).toHaveBeenCalledTimes(1));
     expect(downloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not render tools for a dataset outside the loaded account scope', async () => {
+    renderPage('/app/backups?tab=snapshots&dataset=999');
+
+    expect(await screen.findByTestId('backups.workspace.invalid')).toBeVisible();
+    expect(screen.queryByTestId('backups.workspace.provider')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('backups.workspace.snapshots')).not.toBeInTheDocument();
   });
 
   it('supports the standard keyboard model for its tabs', async () => {
@@ -145,7 +176,7 @@ describe('BackupCenterPage', () => {
     expect(await screen.findByTestId('backups.overview')).toBeVisible();
     expect(datasetsMock).toHaveBeenCalledWith({
       limit: 100,
-      includes: 'vps,parent',
+      includes: 'vps,parent,environment,user',
       user: 42,
       count: true,
     });

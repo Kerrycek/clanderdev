@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 
@@ -7,7 +7,6 @@ import { getRuntimeConfig } from '../../../app/config';
 import { useObjectScope } from '../../../app/objectScope';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
-import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -27,9 +26,6 @@ import {
 import { DatasetDownloadOpenButton, DatasetDownloadStateBadge } from '../datasets/DatasetDownloadStatusView';
 import {
   BACKUP_CENTER_TABS,
-  datasetBackupKind,
-  datasetBackupLabel,
-  datasetBackupPath,
   filterBackupDatasets,
   parseBackupCenterTab,
   resourceLabel,
@@ -38,6 +34,7 @@ import {
   summarizeBackupCenter,
   type BackupCenterTab,
 } from './BackupCenterModel';
+import { BackupCenterDatasetWorkspaceView } from './BackupCenterDatasetWorkspaceView';
 
 const DATASET_LIMIT = 100;
 const DOWNLOAD_LIMIT = 100;
@@ -88,43 +85,6 @@ function BackupTabs(props: { active: BackupCenterTab; onChange: (tab: BackupCent
         </Button>
       ))}
     </div>
-  );
-}
-
-function DatasetRows(props: { datasets: Dataset[]; section: 'snapshots' | 'plans' }) {
-  const { t } = useI18n();
-  return (
-    <TableCard minWidth="md" testId={`backups.${props.section}.table`}>
-      <thead>
-        <tr>
-          <th className="px-3 py-2 text-left">{t('backups.dataset')}</th>
-          <th className="px-3 py-2 text-left">{t('backups.kind')}</th>
-          <th className="px-3 py-2 text-left">{t('backups.vps')}</th>
-          <th className="px-3 py-2 text-right">{t('backups.actions')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {props.datasets.map((dataset) => {
-          return (
-            <tr key={dataset.id} data-testid={`backups.${props.section}.row.${dataset.id}`}>
-              <td className="px-3 py-2">
-                <div className="font-medium text-fg">{datasetBackupLabel(dataset)}</div>
-                <div className="text-xs text-faint">#{dataset.id}</div>
-              </td>
-              <td className="px-3 py-2">
-                <Badge variant="neutral">{t(`backups.kind.${datasetBackupKind(dataset)}`)}</Badge>
-              </td>
-              <td className="px-3 py-2 text-muted">{resourceLabel(dataset.vps)}</td>
-              <td className="px-3 py-2 text-right">
-                <Button to={datasetBackupPath(dataset, props.section)} size="sm" variant="secondary">
-                  {t(`backups.${props.section}.open`)}
-                </Button>
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </TableCard>
   );
 }
 
@@ -199,14 +159,15 @@ export function BackupCenterPage() {
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = parseBackupCenterTab(searchParams.get('tab'));
-  const [query, setQuery] = useState(() => searchParams.get('q') ?? '');
+  const query = searchParams.get('q') ?? '';
+  const selectedDatasetParam = searchParams.get('dataset');
   const canLoadGlobalDownloads = scope.mineUserId === undefined;
 
   const datasetsQ = useQuery({
     queryKey: ['backup-center', 'datasets', { user: scope.mineUserId }],
     queryFn: () => fetchDatasets({
       limit: DATASET_LIMIT,
-      includes: 'vps,parent',
+      includes: 'vps,parent,environment,user',
       user: scope.mineUserId,
       count: true,
     }),
@@ -226,6 +187,13 @@ export function BackupCenterPage() {
 
   const datasets = datasetsQ.data?.data ?? [];
   const downloads = downloadsQ.data?.data ?? [];
+  const selectedDatasetId = selectedDatasetParam && /^\d+$/.test(selectedDatasetParam)
+    ? Number(selectedDatasetParam)
+    : undefined;
+  const selectedDataset = selectedDatasetId !== undefined
+    ? datasets.find((dataset) => dataset.id === selectedDatasetId)
+    : undefined;
+  const invalidDatasetSelection = Boolean(selectedDatasetParam && !selectedDataset);
   const filteredDatasets = useMemo(() => filterBackupDatasets(datasets, query), [datasets, query]);
   const filteredDownloads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -250,10 +218,29 @@ export function BackupCenterPage() {
   }
 
   function changeQuery(nextQuery: string) {
-    setQuery(nextQuery);
     const next = new URLSearchParams(searchParams);
     if (nextQuery.trim()) next.set('q', nextQuery);
     else next.delete('q');
+    setSearchParams(next, { replace: true });
+  }
+
+  function clearEmbeddedSnapshotParams(next: URLSearchParams) {
+    for (const key of [...next.keys()]) {
+      if (key.startsWith('backup_snapshot_')) next.delete(key);
+    }
+  }
+
+  function selectDataset(dataset: Dataset) {
+    const next = new URLSearchParams(searchParams);
+    next.set('dataset', String(dataset.id));
+    clearEmbeddedSnapshotParams(next);
+    setSearchParams(next, { replace: true });
+  }
+
+  function clearDatasetSelection() {
+    const next = new URLSearchParams(searchParams);
+    next.delete('dataset');
+    clearEmbeddedSnapshotParams(next);
     setSearchParams(next, { replace: true });
   }
 
@@ -395,8 +382,16 @@ export function BackupCenterPage() {
                 <p className="mt-1 text-sm text-muted">{t(`backups.${tab}.scope.body`)}</p>
               </CardBody>
             </Card>
-            {filteredDatasets.length ? (
-              <DatasetRows datasets={filteredDatasets} section={tab} />
+            {filteredDatasets.length || selectedDataset || invalidDatasetSelection ? (
+              <BackupCenterDatasetWorkspaceView
+                datasets={filteredDatasets}
+                selectedDataset={selectedDataset}
+                invalidSelection={invalidDatasetSelection}
+                section={tab}
+                onSelect={selectDataset}
+                onClear={clearDatasetSelection}
+                onRefetch={() => void datasetsQ.refetch()}
+              />
             ) : (
               <EmptyState
                 title={t(`backups.${tab}.empty.title`)}
