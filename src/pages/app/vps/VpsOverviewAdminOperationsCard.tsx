@@ -86,7 +86,7 @@ export function VpsOverviewAdminOperationsCard(props: {
       : { label: t('vps.overview.admin_ops.action_state_idle'), variant: 'ok' as const, hint: undefined };
 
   return (
-    <Card className="lg:col-span-2" testId="vps.overview.admin_ops.card">
+    <Card className="lg:col-span-12" testId="vps.overview.admin_ops.card">
       <CardHeader
         title={t('vps.overview.admin_ops.title')}
         subtitle={t('vps.overview.admin_ops.subtitle')}

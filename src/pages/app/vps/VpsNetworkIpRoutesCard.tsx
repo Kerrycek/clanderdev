@@ -44,6 +44,7 @@ function routeTypeKey(ip: IpAddress) {
 
 export function VpsNetworkIpRoutesCard(props: {
   canAdmin: boolean;
+  canMutate: boolean;
   adminBasePath: string;
   gate: GateDecision;
   isLoading: boolean;
@@ -79,7 +80,7 @@ export function VpsNetworkIpRoutesCard(props: {
             <Button variant="secondary" size="sm" onClick={props.onRefresh}>
               {t('common.refresh')}
             </Button>
-            <ActionButton
+            {props.canMutate ? <ActionButton
               variant="primary"
               size="sm"
               testId="vps.network.ip_addresses.add"
@@ -88,7 +89,7 @@ export function VpsNetworkIpRoutesCard(props: {
               onClick={props.onAddRoute}
             >
               {t('vps.network.routing.add')}
-            </ActionButton>
+            </ActionButton> : null}
           </div>
         }
       />
@@ -147,7 +148,7 @@ export function VpsNetworkIpRoutesCard(props: {
                           >
                             {t('vps.network.ip_addresses.action.detail')}
                           </Button>
-                          <ActionButton
+                          {props.canMutate ? <ActionButton
                             variant="secondary"
                             size="sm"
                             testId={`vps.network.ip_addresses.item.${ip.id}.owner`}
@@ -156,10 +157,10 @@ export function VpsNetworkIpRoutesCard(props: {
                             onClick={() => props.onEditOwner(ip)}
                           >
                             {t('vps.network.ip_addresses.action.owner')}
-                          </ActionButton>
+                          </ActionButton> : null}
                         </>
                       ) : null}
-                      <ActionButton
+                      {props.canMutate ? <ActionButton
                         variant="danger"
                         size="sm"
                         testId={`vps.network.ip_addresses.item.${ip.id}.free_route`}
@@ -169,7 +170,7 @@ export function VpsNetworkIpRoutesCard(props: {
                         onClick={() => props.onFreeRoute(ip)}
                       >
                         {t('vps.network.ip_addresses.action.free_route')}
-                      </ActionButton>
+                      </ActionButton> : null}
                     </div>
                   </div>
                 </div>
@@ -187,7 +188,7 @@ export function VpsNetworkIpRoutesCard(props: {
                         <span className="font-mono">{routeAddressLabel(ip)}</span>
                         <Badge variant="info">{t(routeTypeKey(ip))}</Badge>
                       </div>
-                      <ActionButton
+                      {props.canMutate ? <ActionButton
                         variant="primary"
                         size="sm"
                         testId={`vps.network.ip_addresses.unassigned.${ip.id}.assign`}
@@ -196,7 +197,7 @@ export function VpsNetworkIpRoutesCard(props: {
                         onClick={() => props.onAssignRoute(ip)}
                       >
                         {t('vps.network.ip_addresses.action.assign_route')}
-                      </ActionButton>
+                      </ActionButton> : null}
                     </div>
                   ))}
                 </div>

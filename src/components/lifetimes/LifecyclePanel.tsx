@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { useAuth } from '../../app/auth';
 import { useAppMode } from '../../app/appMode';
 import { useI18n } from '../../app/i18n';
 import { useToasts } from '../../app/toasts';
@@ -51,12 +52,15 @@ export function LifecyclePanel(props: {
   testId?: string;
 }) {
   const { t } = useI18n();
+  const auth = useAuth();
   const { mode } = useAppMode();
   const toasts = useToasts();
   const chrome = useChrome();
   const qc = useQueryClient();
 
-  const isAdminUi = mode === 'admin';
+  const isAdminView = mode === 'admin';
+  const canAdministerLifetime = isAdminView && auth.role === 'admin';
+  const canUseSelfServiceLifetime = !isAdminView;
   const st = String(props.objectState ?? '').trim() || 'unknown';
 
   const lifetimeObjectRef = useMemo(() => objectRef(props.kind === 'vps' ? 'Vps' : 'User', props.id), [props.id, props.kind]);
@@ -71,7 +75,7 @@ export function LifecyclePanel(props: {
   // User: Snooze reminders
   // ----------------------
 
-  const userCanSnooze = !isAdminUi && Boolean(expIso) && st === 'active';
+  const userCanSnooze = canUseSelfServiceLifetime && props.kind === 'vps' && Boolean(expIso) && st === 'active';
 
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozePreset, setSnoozePreset] = useState<SnoozePreset>('1w');
@@ -135,7 +139,7 @@ export function LifecyclePanel(props: {
   const remindParsed = useMemo(() => adminDateTimeInputToIso(adminRemindLocal), [adminRemindLocal]);
 
   const adminPayload = useMemo(() => {
-    if (!isAdminUi) return null;
+    if (!canAdministerLifetime) return null;
 
     const payload: Record<string, unknown> = {};
 
@@ -193,7 +197,7 @@ export function LifecyclePanel(props: {
     }
 
     return payload;
-  }, [adminReason, adminState, expIso, expParsed.iso, expParsed.valid, isAdminUi, remindIso, remindParsed.iso, remindParsed.valid, st]);
+  }, [adminReason, adminState, canAdministerLifetime, expIso, expParsed.iso, expParsed.valid, remindIso, remindParsed.iso, remindParsed.valid, st]);
 
   const adminPayloadHasChanges = Boolean(
     adminPayload &&
@@ -301,7 +305,7 @@ export function LifecyclePanel(props: {
       if (props.kind === 'vps') return (await fetchVpsStateLogs(props.id, { limit: logLimit, offset: logOffset })).data;
       return (await fetchUserStateLogs(props.id, { limit: logLimit, offset: logOffset })).data;
     },
-    enabled: isAdminUi && logOpen,
+    enabled: canAdministerLifetime && logOpen,
     staleTime: 10_000,
   });
 
@@ -329,7 +333,7 @@ export function LifecyclePanel(props: {
         <CardHeader
           title={t('lifetimes.panel.title')}
           actions={
-            isAdminUi ? (
+            canAdministerLifetime ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="secondary" onClick={openAdminEditor} testId="lifetimes.admin.edit">
                   {t('lifetimes.action.set_state')}
@@ -369,7 +373,7 @@ export function LifecyclePanel(props: {
             {helpKey ? t(helpKey) : t('lifetimes.help.unknown', { state: st })}
           </div>
 
-          {!isAdminUi && Boolean(expIso) && st !== 'active' ? (
+          {canUseSelfServiceLifetime && Boolean(expIso) && st !== 'active' ? (
             <div className="mt-2 text-xs text-faint">{t('lifetimes.user.snooze.disabled')}</div>
           ) : null}
         </CardBody>

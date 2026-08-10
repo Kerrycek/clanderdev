@@ -45,6 +45,7 @@ import {
   type PendingPublicKeyDeployment,
 } from './VpsAccessPrimitives';
 import { buildVpsAccessChecklist, findDuplicatePublicKeyGroups } from './VpsAccessModel';
+import { VpsAccessMutationGuardAlerts } from './VpsAccessMutationGuardAlerts';
 import { VpsAccessChecklistCard, VpsAccessStatusCard } from './VpsAccessSummary';
 import { VpsSshHostKeysCard } from './VpsSshHostKeysCard';
 
@@ -54,7 +55,7 @@ export function VpsAccessPage() {
   const qc = useQueryClient();
   const fastPollMs = useFastPollIntervalMs();
   const { t } = useI18n();
-  const { vps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
   const vpsId = Number(vps.id);
   const vpsData = vps as Record<string, unknown>;
   const objectLabel = String(vpsData['hostname'] ?? '') || `#${vpsId}`;
@@ -76,7 +77,7 @@ export function VpsAccessPage() {
   const currentUserQ = useQuery<ApiResult<UserIdentity>>({
     queryKey: ['user', 'current'],
     queryFn: getCurrentUser,
-    enabled: ownerUserId === null,
+    enabled: canMutateVps && ownerUserId === null,
   });
   const fallbackUserId = resourceId(currentUserQ.data?.data);
   const publicKeyUserId = ownerUserId ?? fallbackUserId;
@@ -84,7 +85,7 @@ export function VpsAccessPage() {
   const publicKeysQ = useQuery<ApiResult<VpsPublicKey[]>>({
     queryKey: ['user', 'public_keys', { userId: publicKeyUserId }],
     queryFn: () => listUserPublicKeys(publicKeyUserId as number),
-    enabled: publicKeyUserId !== null,
+    enabled: canMutateVps && publicKeyUserId !== null,
   });
 
   const hostKeysQ = useQuery<ApiResult<VpsSshHostKey[]>>({
@@ -95,7 +96,7 @@ export function VpsAccessPage() {
   const passwordStateQ = useQuery({
     queryKey: ['action_state', 'show', { id: pendingGenerated?.asId ?? -1 }],
     queryFn: async () => (await fetchActionState(pendingGenerated!.asId)).data,
-    enabled: pendingGenerated !== null,
+    enabled: canMutateVps && pendingGenerated !== null,
     refetchInterval: (query) => {
       const state = query.state.data;
       if (!state) return fastPollMs;
@@ -106,7 +107,7 @@ export function VpsAccessPage() {
   const keyDeploymentStateQ = useQuery({
     queryKey: ['action_state', 'show', { id: pendingKeyDeployment?.asId ?? -1 }],
     queryFn: async () => (await fetchActionState(pendingKeyDeployment!.asId)).data,
-    enabled: pendingKeyDeployment !== null,
+    enabled: canMutateVps && pendingKeyDeployment !== null,
     refetchInterval: (query) => {
       const state = query.state.data;
       if (!state) return fastPollMs;
@@ -173,6 +174,7 @@ export function VpsAccessPage() {
 
   const passwdM = useMutation({
     mutationFn: async (type: VpsPasswordType) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return resetVpsRootPassword(vpsId, { type });
     },
@@ -217,6 +219,7 @@ export function VpsAccessPage() {
 
   const deployKeyM = useMutation({
     mutationFn: async (publicKeyId: number) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return deployVpsPublicKey(vpsId, publicKeyId);
     },
@@ -257,8 +260,8 @@ export function VpsAccessPage() {
 
   const busyLocal = busyLocalLock || passwdM.isPending || deployKeyM.isPending || pendingGenerated !== null || pendingKeyDeployment !== null;
   const gate = gateVpsMutation({ vps, busyLocal, busyTransaction });
-  const canGenerate = gate.allowed && !passwdM.isPending && pendingGenerated === null;
-  const canDeployKey = gate.allowed && !deployKeyM.isPending && pendingKeyDeployment === null && selectedPublicKeyId !== null && publicKeys.length > 0;
+  const canGenerate = canMutateVps && gate.allowed && !passwdM.isPending && pendingGenerated === null;
+  const canDeployKey = canMutateVps && gate.allowed && !deployKeyM.isPending && pendingKeyDeployment === null && selectedPublicKeyId !== null && publicKeys.length > 0;
   const selectedTypeLabel = t(passwordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple');
   const pendingTypeLabel = pendingPasswordType
     ? t(pendingPasswordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple')
@@ -277,9 +280,9 @@ export function VpsAccessPage() {
         duplicatePublicKeyGroupCount: duplicatePublicKeyGroups.length,
         hostKeysLoaded,
         hostKeyCount: hostKeys.length,
-        mutationAllowed: gate.allowed,
+        mutationAllowed: canMutateVps && gate.allowed,
       }),
-    [duplicatePublicKeyGroups.length, gate.allowed, hostKeys.length, hostKeysLoaded, publicKeys.length, publicKeysLoaded]
+    [canMutateVps, duplicatePublicKeyGroups.length, gate.allowed, hostKeys.length, hostKeysLoaded, publicKeys.length, publicKeysLoaded]
   );
 
   return (
@@ -293,14 +296,7 @@ export function VpsAccessPage() {
       />
       <VpsAccessChecklistCard items={checklistItems} />
 
-      {!gate.allowed ? (
-        <Alert variant="warn" title={t(gate.reason.titleKey)}>
-          {gate.reason.descriptionKey ? <p>{t(gate.reason.descriptionKey)}</p> : null}
-          <Button variant="secondary" onClick={() => chrome.openTasks()}>
-            {t('common.open_tasks')}
-          </Button>
-        </Alert>
-      ) : null}
+      <VpsAccessMutationGuardAlerts canMutateVps={canMutateVps} gate={gate} onOpenTasks={() => chrome.openTasks()} />
 
       {passwdM.error ? <Alert variant="danger">{errorMessage(passwdM.error)}</Alert> : null}
       {deployKeyM.error ? <Alert variant="danger">{errorMessage(deployKeyM.error)}</Alert> : null}
@@ -334,7 +330,7 @@ export function VpsAccessPage() {
       ) : null}
       {keyDeployMessage ? <Alert variant="info">{t('vps.access.ssh.deployed', { key: keyDeployMessage })}</Alert> : null}
 
-      <Card>
+      {canMutateVps ? <Card>
         <CardHeader title={t('vps.access.reset.title')} subtitle={t('vps.access.reset.subtitle')} />
         <CardBody className="space-y-4">
           <div className="space-y-2">
@@ -363,7 +359,7 @@ export function VpsAccessPage() {
             {t('vps.access.safety.description')}
           </Alert>
         </CardBody>
-      </Card>
+      </Card> : null}
 
       {generated ? (
         <Card>
@@ -381,7 +377,7 @@ export function VpsAccessPage() {
 
       <VpsSshHostKeysCard hostKeys={hostKeys} loading={hostKeysQ.isPending} error={hostKeysQ.error} onRefresh={() => void hostKeysQ.refetch()} />
 
-      <Card>
+      {canMutateVps ? <Card>
         <CardHeader title={t('vps.access.ssh.title')} subtitle={t('vps.access.ssh.subtitle')} />
         <CardBody className="space-y-4">
           {publicKeyUserId === null && currentUserQ.isPending ? <Alert variant="info">{t('vps.access.ssh.loading_user')}</Alert> : null}
@@ -467,9 +463,9 @@ export function VpsAccessPage() {
             {t('vps.access.ssh.safety.description')}
           </Alert>
         </CardBody>
-      </Card>
+      </Card> : null}
 
-      <ConfirmDialog
+      {canMutateVps ? <ConfirmDialog
         open={pendingPasswordType !== null}
         testId="vps.access.password.confirm"
         title={t('vps.access.confirm.title')}
@@ -479,9 +475,9 @@ export function VpsAccessPage() {
         confirmDisabled={!pendingPasswordType || passwdM.isPending}
         onCancel={() => setPendingPasswordType(null)}
         onConfirm={() => (pendingPasswordType ? passwdM.mutate(pendingPasswordType) : undefined)}
-      />
+      /> : null}
 
-      <ConfirmDialog
+      {canMutateVps ? <ConfirmDialog
         open={pendingPublicKeyId !== null}
         testId="vps.access.ssh.confirm"
         title={t('vps.access.ssh.confirm.title')}
@@ -491,7 +487,7 @@ export function VpsAccessPage() {
         confirmDisabled={!pendingPublicKeyId || deployKeyM.isPending}
         onCancel={() => setPendingPublicKeyId(null)}
         onConfirm={() => (pendingPublicKeyId ? deployKeyM.mutate(pendingPublicKeyId) : undefined)}
-      />
+      /> : null}
     </div>
   );
 }

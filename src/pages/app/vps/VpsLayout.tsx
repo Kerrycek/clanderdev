@@ -1,13 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Camera, RotateCw } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { fetchActionState } from '../../../lib/api/actionStates';
-import { fetchIpAddressesForVps, type IpAddress } from '../../../lib/api/ipAddresses';
+import { fetchIpAddressesForVps } from '../../../lib/api/ipAddresses';
 import { fetchTransactionChains } from '../../../lib/api/transactions';
 import { fetchVps, vpsPasswd, vpsRestart, vpsStart, vpsStop } from '../../../lib/api/vps';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
+import { useAuth } from '../../../app/auth';
 import { useObjectScope } from '../../../app/objectScope';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -42,67 +44,12 @@ import { ScopeMismatchCard } from '../../../components/layout/ScopeMismatchCard'
 import { useFastPollIntervalMs, useTierAIntervalMs } from '../../../lib/refreshTiers';
 import { useNetworkStatus } from '../../../lib/useNetworkStatus';
 import { deriveChainLockState } from '../../../lib/lockState';
-
-function isPrivateIpv4(ip: string): boolean {
-  const parts = ip.split('.');
-  if (parts.length != 4) return false;
-  const nums = parts.map((p) => Number(p));
-  if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
-
-  const a = nums[0];
-  const b = nums[1];
-  if (a === undefined || b === undefined) return false;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-
-  return false;
-}
-
-function isPrivateIp(addr: string): boolean {
-  const a = addr.trim();
-  if (!a) return true;
-
-  // IPv6
-  if (a.includes(':')) {
-    const lower = a.toLowerCase();
-    if (lower === '::1') return true;
-    if (lower.startsWith('fe80:')) return true; // link-local
-    if (lower.startsWith('fd') || lower.startsWith('fc')) return true; // ULA
-    return false;
-  }
-
-  return isPrivateIpv4(a);
-}
-
-function pickPrimarySshIp(ips: IpAddress[] | undefined): string | null {
-  const list = (ips ?? [])
-    .map((ip) => String(ip.addr ?? '').trim())
-    .filter((addr) => addr.length > 0);
-
-  if (list.length === 0) return null;
-
-  // Prefer public networks when the metadata is available
-  for (const ip of ips ?? []) {
-    const addr = String(ip.addr ?? '').trim();
-    if (!addr) continue;
-    const role = String(ip.network?.role ?? '');
-    const purpose = String(ip.network?.purpose ?? '');
-    if (role === 'public' || purpose === 'public') return addr;
-  }
-
-  // Otherwise pick the first non-private address
-  const publicCandidate = list.find((addr) => !isPrivateIp(addr));
-  if (publicCandidate) return publicCandidate;
-
-  // Fallback: at least show *something* usable (private SSH via VPN, etc.)
-  return list[0] ?? null;
-}
+import { primarySshIpAddress } from './VpsOverviewModel';
 
 export function VpsLayout() {
   const { basePath, mode } = useAppMode();
+  const auth = useAuth();
+  const canMutateVps = mode !== 'admin' || auth.role === 'admin';
   const scope = useObjectScope();
   const chrome = useChrome();
   const { t } = useI18n();
@@ -129,9 +76,11 @@ export function VpsLayout() {
   });
 
   const ipsQ = useQuery({
-    queryKey: ['ip_address', 'list', { vpsId }],
-    queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 100 })).data,
+    queryKey: ['ip_address', 'list', { vpsId, limit: 250 }],
+    queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 250 })).data,
     enabled: Number.isFinite(vpsId) && vpsId > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const chainsQ = useQuery({
@@ -159,6 +108,7 @@ export function VpsLayout() {
 
   const startM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return vpsStart(vpsId);
     },
@@ -193,6 +143,7 @@ export function VpsLayout() {
 
   const stopM = useMutation({
     mutationFn: async (force: boolean) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return vpsStop(vpsId, { force });
     },
@@ -227,6 +178,7 @@ export function VpsLayout() {
 
   const restartM = useMutation({
     mutationFn: async (force: boolean) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return vpsRestart(vpsId, { force });
     },
@@ -261,6 +213,7 @@ export function VpsLayout() {
 
   const passwdM = useMutation({
     mutationFn: async (type: 'secure' | 'simple') => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return vpsPasswd(vpsId, type);
     },
@@ -312,11 +265,9 @@ export function VpsLayout() {
   const nav = useMemo(
     () => [
       { label: t('vps.tabs.overview'), to: `${basePath}/vps/${vpsId}`, end: true },
-      { label: t('vps.tabs.config'), to: `${basePath}/vps/${vpsId}/config`, end: true },
       { label: t('vps.tabs.access'), to: `${basePath}/vps/${vpsId}/access`, end: true },
       { label: t('vps.tabs.network'), to: `${basePath}/vps/${vpsId}/network`, end: true },
       { label: t('vps.tabs.storage'), to: `${basePath}/vps/${vpsId}/storage`, end: true },
-      { label: t('vps.tabs.features'), to: `${basePath}/vps/${vpsId}/features`, end: true },
       { label: t('vps.tabs.maintenance'), to: `${basePath}/vps/${vpsId}/maintenance`, end: true },
       { label: t('vps.tabs.console'), to: `${basePath}/vps/${vpsId}/console`, end: true },
     ],
@@ -384,7 +335,7 @@ export function VpsLayout() {
   const locationLabel = (vps as any).node?.location?.label ?? t('common.na');
   const nodeLabel = (vps as any).node?.domain_name ?? (vps as any).node?.name ?? t('common.na');
 
-  const sshIp = pickPrimarySshIp(ipsQ.data);
+  const sshIp = primarySshIpAddress(ipsQ.data);
   const sshCommand = sshIp ? `ssh root@${sshIp}` : null;
 
   const chainLock = deriveChainLockState({
@@ -439,6 +390,7 @@ export function VpsLayout() {
     <VpsContextProvider
       value={{
         vps,
+        canMutateVps,
         refetch: () => void vpsQ.refetch(),
         refetchChains: () => void chainsQ.refetch(),
         vpsRef: vpsRef ?? objectRef('Vps', vpsId),
@@ -446,7 +398,12 @@ export function VpsLayout() {
         chainsStale,
         busyLocalLock,
         activeChainIds,
-        ipAddresses: ipsQ.data ?? [], ipAddressesLoading: ipsQ.isLoading, ipAddressesError: ipsQ.isError,
+        transactionChains: chainsQ.data ?? [],
+        transactionChainsLoading: chainsQ.isLoading,
+        transactionChainsError: chainsQ.isError,
+        ipAddresses: ipsQ.data ?? [],
+        ipAddressesLoading: ipsQ.isLoading,
+        ipAddressesError: ipsQ.isError,
         sshCommand,
       }}
     >
@@ -518,7 +475,7 @@ export function VpsLayout() {
           }
           actions={
             <>
-              {primaryHeaderAction === 'start' ? (
+              {canMutateVps && primaryHeaderAction === 'start' ? (
                 <ActionButton
                   variant="primary"
                   testId="vps.action.start"
@@ -539,15 +496,41 @@ export function VpsLayout() {
                 </LinkButton>
               )}
 
+              {canMutateVps && typeof vps.dataset?.id === 'number' ? (
+                <LinkButton
+                  to={`${basePath}/datasets/${vps.dataset.id}/snapshots?action=create`}
+                  variant="secondary"
+                  testId="vps.action.snapshot"
+                  title={t('vps.control.snapshot.title')}
+                >
+                  <Camera className="h-4 w-4" aria-hidden="true" />
+                  {t('vps.control.snapshot')}
+                </LinkButton>
+              ) : null}
+
+              {canMutateVps && vps.is_running === true ? (
+                <ActionButton
+                  variant="secondary"
+                  testId="vps.action.restart.header"
+                  disabled={!restartGate.allowed}
+                  disabledReason={!restartGate.allowed ? restartGate.reason : undefined}
+                  onClick={() => setConfirm({ kind: 'restart', force: false })}
+                  title={t('action.vps.restart.label')}
+                >
+                  <RotateCw className="h-4 w-4" aria-hidden="true" />
+                  {t('action.vps.restart.label')}
+                </ActionButton>
+              ) : null}
+
               <Select
                 value=""
                 ariaLabel={t('vps.actions.menu.label')}
                 testId="vps.actions.menu"
-                className="w-48"
+                className="w-full sm:!w-48"
                 onChange={(e) => handleHeaderMoreAction(e.target.value)}
               >
                 <option value="">{t('vps.actions.more.placeholder')}</option>
-                <optgroup label={t('vps.actions.more.group.daily')}>
+                {canMutateVps ? <optgroup label={t('vps.actions.more.group.daily')}>
                   {primaryHeaderAction !== 'start' ? (
                     <option value="action:start" disabled={!startGate.allowed}>
                       {t('action.vps.start.label')}
@@ -563,7 +546,7 @@ export function VpsLayout() {
                     {t('vps.power.root_password.button')}
                   </option>
                   {busyTransaction || busyLocal ? <option value="tasks">{t('common.open_tasks')}</option> : null}
-                </optgroup>
+                </optgroup> : null}
                 <optgroup label={t('vps.actions.more.group.sections')}>
                   <option value={`${basePath}/vps/${vps.id}/access`}>{t('vps.tabs.access')}</option>
                   <option value={`${basePath}/vps/${vps.id}/config`}>{t('vps.tabs.config')}</option>
@@ -573,13 +556,13 @@ export function VpsLayout() {
                   <option value={`${basePath}/vps/${vps.id}/maintenance`}>{t('vps.tabs.maintenance')}</option>
                   <option value={`${basePath}/transactions/items?vps=${vps.id}`}>{t('vps.overview.admin_actions.transaction_log')}</option>
                 </optgroup>
-                <optgroup label={t('vps.actions.more.group.lifecycle')}>
+                {canMutateVps ? <optgroup label={t('vps.actions.more.group.lifecycle')}>
                   <option value={`${basePath}/vps/${vps.id}/lifecycle/reinstall`}>{t('action.vps.reinstall.label')}</option>
                   <option value={`${basePath}/vps/${vps.id}/lifecycle/clone`}>{t('action.vps.clone.label')}</option>
                   <option value={`${basePath}/vps/${vps.id}/lifecycle/swap`}>{t('action.vps.swap.label')}</option>
                   <option value={`${basePath}/vps/${vps.id}/lifecycle/delete`}>{t('action.vps.delete.label')}</option>
-                </optgroup>
-                {mode === 'admin' ? (
+                </optgroup> : null}
+                {mode === 'admin' && auth.role === 'admin' ? (
                   <optgroup label={t('vps.actions.more.group.admin')}>
                     <option value={`${basePath}/vps/${vps.id}/lifecycle/lifetime`}>{t('action.vps.lifecycle.label')}</option>
                     <option value={`${basePath}/vps/${vps.id}/lifecycle/template`}>{t('action.vps.template.label')}</option>

@@ -1,27 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 
 import { useI18n } from '../../../app/i18n';
-import { fetchTransactionChains } from '../../../lib/api/transactions';
 import type { Vps } from '../../../lib/api/vps';
 import { Badge } from '../../../components/ui/Badge';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { Alert } from '../../../components/ui/Alert';
 import { ChipLink } from '../../../components/ui/ChipLink';
 import { CopyButton } from '../../../components/ui/CopyButton';
-import { Spinner } from '../../../components/ui/Spinner';
 import { UsageBar } from '../../../components/ui/UsageBar';
 import { formatDateTime, formatDurationSeconds, formatMiB } from '../../../lib/format';
 import {
-  chainBadgeFromState,
-  chainProgressLabel,
-  chainProgressPercent,
   objectStateBadge,
   runtimeStateBadge,
-  isFailedChainState,
 } from '../../../lib/taskStatus';
-import { useTierBIntervalMs } from '../../../lib/refreshTiers';
 import {
   formatLoadavg,
   locationLabel,
@@ -31,7 +23,6 @@ import {
   resourceId,
   resourceLabel,
   shouldShowVpsOwner,
-  sortChainsForOverview,
   usageValue,
   type ManagementAction,
 } from './VpsOverviewModel';
@@ -333,7 +324,7 @@ export function OverviewAdminContextCard(props: { vps: Vps; basePath: string }) 
   const id = ownerId(props.vps);
 
   return (
-    <Card className="lg:col-span-2" testId="vps.overview.management.admin_context">
+    <Card className="lg:col-span-12" testId="vps.overview.management.admin_context">
       <CardHeader
         title={t('vps.overview.management.admin_context_group')}
         subtitle={t('vps.overview.management.admin_context_hint')}
@@ -379,7 +370,7 @@ export function OverviewDiagnosticsCard(props: { vps: Vps; basePath: string }) {
   const { t } = useI18n();
 
   return (
-    <Card className="lg:col-span-2" testId="vps.overview.diagnostics.card">
+    <Card className="lg:col-span-12" testId="vps.overview.diagnostics.card">
       <CardHeader title={t('vps.overview.diagnostics.title')} subtitle={t('vps.overview.diagnostics.subtitle')} />
       <CardBody>
         <div className="flex flex-wrap items-center gap-2">
@@ -394,91 +385,6 @@ export function OverviewDiagnosticsCard(props: { vps: Vps; basePath: string }) {
           </ChipLink>
         </div>
         <div className="mt-2 text-xs text-faint">{t('vps.overview.diagnostics.hint')}</div>
-      </CardBody>
-    </Card>
-  );
-}
-
-export function RecentTransactionChainsCard(props: { vps: Vps; basePath: string }) {
-  const { t } = useI18n();
-  const tierBRefetchMs = useTierBIntervalMs();
-
-  const chainsQ = useQuery({
-    queryKey: ['transaction_chains', 'list', { className: 'Vps', rowId: props.vps.id, limit: 5 }],
-    queryFn: async () => (await fetchTransactionChains({ limit: 5, className: 'Vps', rowId: props.vps.id })).data,
-    refetchInterval: tierBRefetchMs,
-  });
-
-  const chainsSorted = React.useMemo(() => sortChainsForOverview(chainsQ.data ?? []), [chainsQ.data]);
-
-  return (
-    <Card className="lg:col-span-2" testId="vps.overview.tx.card">
-      <CardHeader
-        title={t('vps.overview.tx.title')}
-        subtitle={t('vps.overview.tx.subtitle')}
-        actions={(
-          <>
-            <ChipLink to={`${props.basePath}/transactions/items?vps=${props.vps.id}`} title={t('vps.overview.tx.tx_items_title')}>
-              {t('vps.overview.tx.tx_items')}
-            </ChipLink>
-            <ChipLink to={`${props.basePath}/transactions?class_name=Vps&row_id=${props.vps.id}`} title={t('vps.overview.tx.chains_title')}>
-              {t('vps.overview.tx.chains')}
-            </ChipLink>
-          </>
-        )}
-      />
-      <CardBody>
-        {chainsQ.isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted">
-            <Spinner /> {t('common.loading')}
-          </div>
-        ) : chainsQ.isError ? (
-          <div className="text-sm text-muted">{t('vps.overview.tx.error')}</div>
-        ) : chainsSorted.length === 0 ? (
-          <div className="text-sm text-muted">{t('vps.overview.tx.empty')}</div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {chainsSorted.map((c) => {
-              const b = chainBadgeFromState(c.state, t);
-              const label = c.label ? String(c.label) : `#${c.id}`;
-              const isError = isFailedChainState(c.state);
-              const pct = chainProgressPercent(c);
-              const lbl = chainProgressLabel(c);
-
-              return (
-                <li
-                  key={c.id}
-                  className={
-                    'flex flex-wrap items-center justify-between gap-3 py-3 ' +
-                    (isError ? 'bg-danger-row px-2 -mx-2 rounded-md' : '')
-                  }
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">
-                      <Link className="underline" to={`${props.basePath}/transactions/${c.id}`}>
-                        {label}
-                      </Link>
-                    </div>
-                    <div className="mt-1 text-xs text-faint">
-                      #{c.id} · {formatDateTime(c.created_at)}
-                      {lbl ? <> · {lbl}</> : null}
-                      {pct != null ? <> · {pct}%</> : null}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <ChipLink
-                      to={`${props.basePath}/transactions/items?transaction_chain=${c.id}&vps=${props.vps.id}`}
-                      title={t('vps.overview.tx.tx_items_for_chain_title', { id: c.id })}
-                    >
-                      {t('vps.overview.tx.tx_items')}
-                    </ChipLink>
-                    <Badge variant={b.variant}>{b.label}</Badge>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </CardBody>
     </Card>
   );

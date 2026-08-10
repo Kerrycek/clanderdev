@@ -43,7 +43,7 @@ export function VpsFeaturesPage() {
   const qc = useQueryClient();
   const { t } = useI18n();
 
-  const { vps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
   const vpsId = vps.id;
   const objectLabel = String((vps as any).hostname ?? '') || `#${vpsId}`;
 
@@ -81,6 +81,7 @@ export function VpsFeaturesPage() {
 
   const m = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return updateVpsFeaturesAll(vpsId, effective);
     },
@@ -122,7 +123,7 @@ export function VpsFeaturesPage() {
         <CardHeader
           title={t('vps.features.title')}
           subtitle={t('vps.features.subtitle_basic')}
-          actions={
+          actions={canMutateVps ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 testId="vps.features.reset"
@@ -144,11 +145,17 @@ export function VpsFeaturesPage() {
                 {dirty ? t('vps.features.save_changes', { n: dirtyCount }) : t('vps.features.save_changes_empty')}
               </ActionButton>
             </div>
-          }
+          ) : null}
         />
 
         <CardBody>
-          {!gate.allowed ? (
+          {!canMutateVps ? (
+            <Alert title={t('gate.blocked.permission.title')} variant="warn" className="mb-4">
+              <div data-testid="vps.features.read_only">{t('gate.blocked.permission.body')}</div>
+            </Alert>
+          ) : null}
+
+          {canMutateVps && !gate.allowed ? (
             <Alert title={t(gate.reason.titleKey)} variant="warn">
               <div className="space-y-2">
                 {gate.reason.descriptionKey ? <div>{t(gate.reason.descriptionKey)}</div> : null}
@@ -178,7 +185,7 @@ export function VpsFeaturesPage() {
               {list.map((f) => {
                 const name = String(f.name ?? '');
                 const enabled = Boolean(effective[name]);
-                return (
+                return canMutateVps ? (
                   <Checkbox
                     key={f.id}
                     testId={`vps.features.item.${f.id}`}
@@ -190,6 +197,20 @@ export function VpsFeaturesPage() {
                     label={featureLabel(f)}
                     description={name}
                   />
+                ) : (
+                  <div
+                    key={f.id}
+                    data-testid={`vps.features.item.${f.id}`}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <div className="font-medium text-fg">{featureLabel(f)}</div>
+                      <div className="text-xs text-muted">{name}</div>
+                    </div>
+                    <span className="text-xs font-medium text-muted">
+                      {enabled ? t('common.enabled') : t('common.disabled')}
+                    </span>
+                  </div>
                 );
               })}
             </div>
@@ -204,7 +225,7 @@ export function VpsFeaturesPage() {
         </CardBody>
       </Card>
 
-      <ConfirmDialog
+      {canMutateVps ? <ConfirmDialog
         testId="vps.features.confirm"
         open={confirmOpen}
         title={t('vps.features.confirm.title')}
@@ -220,7 +241,7 @@ export function VpsFeaturesPage() {
             {t('vps.features.confirm.summary', { n: dirtyCount })}
           </div>
         ) : null}
-      </ConfirmDialog>
+      </ConfirmDialog> : null}
     </div>
   );
 }
