@@ -20,7 +20,6 @@ import { categorizeOutage, sortOutagesNewestFirst } from "../../lib/outage";
 import { useTierBIntervalMs, useTierSlowIntervalMs } from "../../lib/refreshTiers";
 
 import { countDashboardRows } from "./DashboardCounts";
-import { AdminAttentionQueueCard } from "./AdminAttentionQueueCard";
 import { DashboardOperationalSummary } from "./DashboardPageStatus";
 import { DashboardPreferencesCard } from "./DashboardPreferencesCard";
 import { DashboardSummaryCards } from "./DashboardSummaryCards";
@@ -196,8 +195,6 @@ export function DashboardPage() {
             </span>
           ) : null}
         </Alert>
-
-        <AdminAttentionQueueCard />
 
         <DashboardPreferencesCard />
 
