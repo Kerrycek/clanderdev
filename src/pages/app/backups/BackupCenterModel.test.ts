@@ -6,6 +6,7 @@ import {
   datasetBackupPath,
   filterBackupDatasets,
   parseBackupCenterTab,
+  resolveSnapshotDownloadDataset,
   snapshotDownloadDatasetPath,
   summarizeBackupCenter,
 } from './BackupCenterModel';
@@ -42,6 +43,17 @@ describe('BackupCenterModel', () => {
       snapshot: { id: 9, dataset: { id: 10, vps: { id: 20 } } },
     } as SnapshotDownload;
     expect(snapshotDownloadDatasetPath(download)).toBe('/app/datasets/10/downloads');
+    expect(resolveSnapshotDownloadDataset(download, [vpsDataset, nasDataset])).toBe(vpsDataset);
+  });
+
+  it('uses the known owned dataset to build a reliable download detail path', () => {
+    const download = {
+      id: 2,
+      snapshot: { id: 10, dataset: { id: 11 } },
+    } as SnapshotDownload;
+
+    const dataset = resolveSnapshotDownloadDataset(download, [vpsDataset, nasDataset]);
+    expect(snapshotDownloadDatasetPath(download, dataset)).toBe('/app/nas/11/downloads');
   });
 
   it('summarizes only values supported by the index responses', () => {
@@ -50,13 +62,15 @@ describe('BackupCenterModel', () => {
       [
         { id: 1, state: 'ready', url: '/download/1' },
         { id: 2, state: 'pending' },
+        { id: 3, state: 'failed' },
       ] as SnapshotDownload[],
     );
     expect(summary).toMatchObject({
       datasets: 2,
-      downloads: 2,
+      downloads: 3,
       readyDownloads: 1,
       pendingDownloads: 1,
+      unavailableDownloads: 1,
     });
   });
 });

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import { bootstrapVpsAdminWindow, failEnvelope, installHaveApiMock } from '../../fixtures';
 
 test.describe('Backup center', () => {
   test('@smoke shows the bounded overview and opens dataset backup tools', async ({ page }) => {
@@ -167,5 +167,99 @@ test.describe('Backup center', () => {
       plan: { environment_dataset_plan: 13 },
     });
     await expect(page.getByTestId('dataset.plans.assign.modal')).toBeHidden();
+  });
+
+  test('keeps an administrator My view on explicit owned dataset requests', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    const requestedDatasetIds: Array<string | null> = [];
+
+    await installHaveApiMock(page, {
+      user: { id: 42, login: 'admin', level: 100 },
+      handlers: {
+        'GET datasets': ({ searchParams }) => {
+          expect(searchParams.get('dataset[user]')).toBe('42');
+          return {
+            datasets: [
+              {
+                id: 10,
+                name: 'root',
+                full_name: 'mail.example/root',
+                vps: { id: 20, hostname: 'mail.example' },
+              },
+              { id: 11, name: 'archive', full_name: 'nas/archive' },
+            ],
+            _meta: { total_count: 2 },
+          };
+        },
+        'GET snapshot_downloads': ({ searchParams }) => {
+          const datasetId = searchParams.get('snapshot_download[dataset]');
+          requestedDatasetIds.push(datasetId);
+          if (datasetId === '10') {
+            return {
+              snapshot_downloads: [
+                {
+                  id: 51,
+                  state: 'ready',
+                  format: 'archive',
+                  url: '/download/51',
+                  snapshot: { id: 31, name: 'owned', dataset: { id: 10 } },
+                },
+                {
+                  id: 999,
+                  state: 'ready',
+                  url: '/download/999',
+                  snapshot: { id: 999, name: 'foreign', dataset: { id: 999 } },
+                },
+              ],
+              _meta: { total_count: 1 },
+            };
+          }
+          return { snapshot_downloads: [], _meta: { total_count: 0 } };
+        },
+      },
+    });
+
+    await page.goto('/app/backups');
+
+    await expect(page.getByTestId('backups.downloads.row.51')).toContainText('mail.example/root');
+    await expect(page.getByTestId('backups.downloads.row.999')).toHaveCount(0);
+    await expect(page.getByTestId('backups.downloads.row.51.detail')).toHaveAttribute(
+      'href',
+      '/app/datasets/10/downloads',
+    );
+    expect(requestedDatasetIds.sort()).toEqual(['10', '11']);
+    expect(requestedDatasetIds).not.toContain(null);
+  });
+
+  test('keeps backend-authorized user downloads available without dataset metadata', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'backup-user', level: 1 },
+      handlers: {
+        'GET datasets': () => failEnvelope('Dataset metadata temporarily unavailable'),
+        'GET snapshot_downloads': ({ searchParams }) => {
+          expect(searchParams.get('snapshot_download[dataset]')).toBeNull();
+          return {
+            snapshot_downloads: [
+              {
+                id: 61,
+                state: 'ready',
+                format: 'archive',
+                url: '/download/61',
+                snapshot: { id: 32, name: 'authorized download', dataset: { id: 10 } },
+              },
+            ],
+            _meta: { total_count: 1 },
+          };
+        },
+      },
+    });
+
+    await page.goto('/app/backups?tab=downloads');
+
+    await expect(page.getByTestId('backups.downloads.row.61')).toBeVisible();
+    await expect(page.getByTestId('backups.error')).toHaveCount(0);
+    await expect(page.getByTestId('backups.datasets.metadata_partial')).toBeVisible();
   });
 });

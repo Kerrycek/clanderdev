@@ -45,9 +45,17 @@ export function ExportsListResults(props: {
   return (
     <>
       <div className="hidden md:block">
-        <TableCard testId={`${prefix}.table`} tableClassName="table-fixed">
+        <TableCard
+          testId={`${prefix}.table`}
+          tableClassName="table-fixed"
+          footer={
+            props.canPaginate ? (
+              <KeysetPagination {...props.pagination} testId={`${prefix}.pagination.desktop`} />
+            ) : null
+          }
+        >
               <thead>
-                <tr className="border-b border-border bg-surface-2 text-left text-xs uppercase tracking-wide text-faint">
+                <tr className="border-b border-border text-left text-xs text-muted">
                   <th className="w-8 px-3 py-2" />
                   <th className="w-24 px-3 py-2">{t('common.id')}</th>
                   <th className="px-3 py-2">{t('common.dataset')}</th>
@@ -110,7 +118,9 @@ export function ExportsListResults(props: {
       </div>
 
       {props.canPaginate ? (
-        <KeysetPagination {...props.pagination} testId={`${prefix}.pagination`} />
+        <Card className="md:hidden">
+          <KeysetPagination {...props.pagination} testId={`${prefix}.pagination.mobile`} />
+        </Card>
       ) : null}
     </>
   );

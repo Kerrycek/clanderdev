@@ -759,13 +759,13 @@ export function AuditPage() {
           >
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="w-8 px-4 py-2" aria-label={t('common.state')} />
-                <th className="px-4 py-2">{t('audit.table.time')}</th>
-                <th className="px-4 py-2">{t('audit.table.user')}</th>
-                <th className="px-4 py-2">{t('audit.table.session')}</th>
-                <th className="px-4 py-2">{t('audit.table.object')}</th>
-                <th className="px-4 py-2">{t('audit.table.event')}</th>
-                <th className="px-4 py-2">{t('audit.table.data')}</th>
+                <th className="w-8 px-2 py-2" aria-label={t('common.state')} />
+                <th className="px-3 py-2">{t('audit.table.time')}</th>
+                <th className="px-3 py-2">{t('audit.table.user')}</th>
+                <th className="px-3 py-2">{t('audit.table.session')}</th>
+                <th className="px-3 py-2">{t('audit.table.object')}</th>
+                <th className="px-3 py-2">{t('audit.table.event')}</th>
+                <th className="px-3 py-2">{t('audit.table.data')}</th>
               </tr>
             </thead>
             <tbody>
@@ -783,19 +783,19 @@ export function AuditPage() {
                     variant={variant}
                     testId={`admin.audit.row.${ev.id}`}
                   >
-                    <td className="px-4 py-2">
+                    <td className="px-2 py-2">
                       <StatusDot variant={dotVariant} testId={`admin.audit.row.${ev.id}.dot`} ariaLabel={label} />
                     </td>
-                    <td className="px-4 py-2 text-xs text-muted tabular-nums">
+                    <td className="px-3 py-2 text-xs text-muted tabular-nums">
                       {ev.created_at ? formatDateTime(ev.created_at) : na}
                     </td>
-                    <td className="px-4 py-2 text-sm text-fg">{userLabel(ev, na)}</td>
-                    <td className="px-4 py-2 text-xs text-muted">{sessionLabel(ev, na)}</td>
-                    <td className="px-4 py-2 text-xs text-muted">{trackedObjectLabel(ev, na)}</td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2 text-sm text-fg">{userLabel(ev, na)}</td>
+                    <td className="px-3 py-2 text-xs text-muted">{sessionLabel(ev, na)}</td>
+                    <td className="px-3 py-2 text-xs text-muted">{trackedObjectLabel(ev, na)}</td>
+                    <td className="px-3 py-2">
                       <Badge variant={eventBadgeVariant(ev.event_type)}>{label}</Badge>
                     </td>
-                    <td className="px-4 py-2 text-xs text-faint">{summary || na}</td>
+                    <td className="px-3 py-2 text-xs text-faint">{summary || na}</td>
                   </TableRowLink>
                 );
               })}

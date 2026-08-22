@@ -76,8 +76,21 @@ export function snapshotDownloadDataset(download: SnapshotDownload): ResourceRef
   return undefined;
 }
 
-export function snapshotDownloadDatasetPath(download: SnapshotDownload): string | undefined {
-  const dataset = snapshotDownloadDataset(download);
+export function resolveSnapshotDownloadDataset(
+  download: SnapshotDownload,
+  datasets: Dataset[],
+): Dataset | ResourceRef | undefined {
+  const referenced = snapshotDownloadDataset(download);
+  const referencedId = positiveNumber(referenced?.id);
+  if (referencedId === undefined) return undefined;
+  return datasets.find((dataset) => Number(dataset.id) === referencedId) ?? referenced;
+}
+
+export function snapshotDownloadDatasetPath(
+  download: SnapshotDownload,
+  knownDataset?: Dataset | ResourceRef,
+): string | undefined {
+  const dataset = knownDataset ?? snapshotDownloadDataset(download);
   if (!dataset) return undefined;
   const id = positiveNumber(dataset.id);
   if (id === undefined) return undefined;
@@ -92,11 +105,13 @@ export function summarizeBackupCenter(
 ) {
   let readyDownloads = 0;
   let pendingDownloads = 0;
+  let unavailableDownloads = 0;
   for (const download of downloads) {
     const href = snapshotDownloadHref(download, hrefOptions);
     const status = snapshotDownloadStatus(download, { href });
     if (status === 'ready') readyDownloads += 1;
     else if (status === 'pending') pendingDownloads += 1;
+    else unavailableDownloads += 1;
   }
 
   return {
@@ -104,5 +119,6 @@ export function summarizeBackupCenter(
     downloads: downloads.length,
     readyDownloads,
     pendingDownloads,
+    unavailableDownloads,
   };
 }

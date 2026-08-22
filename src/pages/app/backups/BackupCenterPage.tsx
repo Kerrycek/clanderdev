@@ -7,6 +7,7 @@ import { getRuntimeConfig } from '../../../app/config';
 import { useObjectScope } from '../../../app/objectScope';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
+import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -15,8 +16,7 @@ import { Input } from '../../../components/ui/Input';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { StatCard } from '../../../components/ui/StatCard';
 import { TableCard } from '../../../components/ui/TableCard';
-import { fetchDatasets, fetchSnapshotDownloads, type Dataset, type SnapshotDownload } from '../../../lib/api/datasets';
-import { getMetaTotalCount } from '../../../lib/api/haveapi';
+import { type Dataset, type SnapshotDownload } from '../../../lib/api/datasets';
 import { formatDateTime, formatMiB } from '../../../lib/format';
 import {
   snapshotDownloadCanOpen,
@@ -29,15 +29,25 @@ import {
   filterBackupDatasets,
   parseBackupCenterTab,
   resourceLabel,
-  snapshotDownloadDataset,
+  resolveSnapshotDownloadDataset,
   snapshotDownloadDatasetPath,
   summarizeBackupCenter,
   type BackupCenterTab,
 } from './BackupCenterModel';
+import {
+  fetchAllBackupDatasets,
+  fetchAuthorizedSnapshotDownloads,
+  fetchOwnDatasetDownloads,
+} from './BackupCenterDownloads';
 import { BackupCenterDatasetWorkspaceView } from './BackupCenterDatasetWorkspaceView';
 
 const DATASET_LIMIT = 100;
 const DOWNLOAD_LIMIT = 100;
+
+function completeCount(value: number, complete: boolean): React.ReactNode {
+  if (complete) return value;
+  return value > 0 ? `≥ ${value}` : '—';
+}
 
 function BackupTabs(props: { active: BackupCenterTab; onChange: (tab: BackupCenterTab) => void }) {
   const { t } = useI18n();
@@ -90,6 +100,7 @@ function BackupTabs(props: { active: BackupCenterTab; onChange: (tab: BackupCent
 
 function DownloadRows(props: {
   downloads: SnapshotDownload[];
+  datasets: Dataset[];
   compact?: boolean;
   hrefOptions: { webuiUrl?: string; origin?: string };
 }) {
@@ -111,8 +122,8 @@ function DownloadRows(props: {
         {rows.map((download) => {
           const href = snapshotDownloadHref(download, props.hrefOptions);
           const status = snapshotDownloadStatus(download, { href });
-          const dataset = snapshotDownloadDataset(download);
-          const detailPath = snapshotDownloadDatasetPath(download);
+          const dataset = resolveSnapshotDownloadDataset(download, props.datasets);
+          const detailPath = snapshotDownloadDatasetPath(download, dataset);
           const expiration = String(download.expiration_date ?? download.expires_at ?? '');
           return (
             <tr key={download.id} data-testid={`backups.downloads.row.${download.id}`}>
@@ -129,7 +140,16 @@ function DownloadRows(props: {
               <td className="px-3 py-2 text-muted">{expiration ? formatDateTime(expiration) : '—'}</td>
               <td className="px-3 py-2">
                 <div className="flex justify-end gap-2">
-                  {detailPath ? <Button to={detailPath} size="sm" variant="ghost">{t('backups.open')}</Button> : null}
+                  {detailPath ? (
+                    <Button
+                      to={detailPath}
+                      size="sm"
+                      variant="ghost"
+                      testId={`backups.downloads.row.${download.id}.detail`}
+                    >
+                      {t('backups.open')}
+                    </Button>
+                  ) : null}
                   <DatasetDownloadOpenButton
                     href={href}
                     canOpen={snapshotDownloadCanOpen(status, href)}
@@ -161,31 +181,43 @@ export function BackupCenterPage() {
   const tab = parseBackupCenterTab(searchParams.get('tab'));
   const query = searchParams.get('q') ?? '';
   const selectedDatasetParam = searchParams.get('dataset');
-  const canLoadGlobalDownloads = scope.mineUserId === undefined;
+  const needsDatasetScopedDownloads = scope.mineUserId !== undefined;
+  const shouldLoadDownloads = tab === 'overview' || tab === 'downloads';
 
   const datasetsQ = useQuery({
     queryKey: ['backup-center', 'datasets', { user: scope.mineUserId }],
-    queryFn: () => fetchDatasets({
+    queryFn: () => fetchAllBackupDatasets({
       limit: DATASET_LIMIT,
       includes: 'vps,parent,environment,user',
       user: scope.mineUserId,
-      count: true,
     }),
     staleTime: 30_000,
-    enabled: tab !== 'downloads',
+    enabled: true,
   });
+  const datasets = datasetsQ.data?.data ?? [];
+  const scopedDatasetIds = needsDatasetScopedDownloads
+    ? datasets.map((dataset) => Number(dataset.id)).filter(Number.isFinite)
+    : [];
+  const downloadsEnabled = shouldLoadDownloads
+    && (!needsDatasetScopedDownloads || datasetsQ.isSuccess);
   const downloadsQ = useQuery({
-    queryKey: ['backup-center', 'downloads', { userScope: scope.scope }],
-    queryFn: () => fetchSnapshotDownloads({
-      limit: DOWNLOAD_LIMIT,
-      includes: 'snapshot__dataset',
-      count: true,
-    }),
+    queryKey: [
+      'backup-center',
+      'downloads',
+      needsDatasetScopedDownloads
+        ? { user: scope.mineUserId, datasets: scopedDatasetIds }
+        : { scope: 'api-authorized-user' },
+    ],
+    queryFn: async () => {
+      if (needsDatasetScopedDownloads) {
+        return fetchOwnDatasetDownloads(datasets, { limit: DOWNLOAD_LIMIT });
+      }
+      return fetchAuthorizedSnapshotDownloads({ limit: DOWNLOAD_LIMIT });
+    },
     staleTime: 15_000,
-    enabled: canLoadGlobalDownloads && (tab === 'overview' || tab === 'downloads'),
+    enabled: downloadsEnabled,
   });
 
-  const datasets = datasetsQ.data?.data ?? [];
   const downloads = downloadsQ.data?.data ?? [];
   const selectedDatasetId = selectedDatasetParam && /^\d+$/.test(selectedDatasetParam)
     ? Number(selectedDatasetParam)
@@ -201,10 +233,10 @@ export function BackupCenterPage() {
     return downloads.filter((download) => [
       download.id,
       resourceLabel(download.snapshot, ''),
-      resourceLabel(snapshotDownloadDataset(download), ''),
+      resourceLabel(resolveSnapshotDownloadDataset(download, datasets), ''),
       download.format,
     ].filter(Boolean).join(' ').toLocaleLowerCase().includes(needle));
-  }, [downloads, query]);
+  }, [datasets, downloads, query]);
   const summary = useMemo(
     () => summarizeBackupCenter(datasets, downloads, hrefOptions),
     [datasets, downloads, hrefOptions],
@@ -244,27 +276,41 @@ export function BackupCenterPage() {
     setSearchParams(next, { replace: true });
   }
 
-  const datasetTotal = getMetaTotalCount(datasetsQ.data?.meta);
-  const downloadTotal = getMetaTotalCount(downloadsQ.data?.meta);
-  const datasetScopeLimited = (datasetTotal ?? 0) > datasets.length;
-  const downloadScopeLimited = canLoadGlobalDownloads && (downloadTotal ?? 0) > downloads.length;
-  const scopeLimited = datasetScopeLimited || downloadScopeLimited;
-  const loading = (tab === 'overview' && (datasetsQ.isPending || (canLoadGlobalDownloads && downloadsQ.isPending)))
+  const datasetTotal = datasetsQ.data?.totalCount;
+  const downloadTotal = downloadsQ.data?.totalCount;
+  const datasetsComplete = datasetsQ.data?.complete === true;
+  const downloadsComplete = downloadsQ.data?.complete === true
+    && (!needsDatasetScopedDownloads || datasetsComplete);
+  const datasetScopeLimited = datasetsQ.isSuccess && !datasetsComplete;
+  const downloadScopeLimited = downloadsQ.isSuccess && !downloadsComplete;
+  const datasetScopeIsRequired = needsDatasetScopedDownloads
+    || tab === 'snapshots'
+    || tab === 'plans';
+  const scopeLimited = (datasetScopeIsRequired && datasetScopeLimited)
+    || (shouldLoadDownloads && downloadScopeLimited);
+  const datasetMetadataLimited = !needsDatasetScopedDownloads
+    && shouldLoadDownloads
+    && (datasetsQ.isError || datasetScopeLimited);
+  const partialDownloadDatasetCount = downloadsQ.data?.failedDatasetIds.length ?? 0;
+  const downloadsLoading = (downloadsEnabled && downloadsQ.isPending)
+    || (needsDatasetScopedDownloads && datasetsQ.isPending);
+  const loading = (tab === 'overview' && downloadsLoading)
     || ((tab === 'snapshots' || tab === 'plans') && datasetsQ.isPending)
-    || (tab === 'downloads' && canLoadGlobalDownloads && downloadsQ.isPending);
+    || (tab === 'downloads' && downloadsLoading);
   const error = tab === 'downloads'
-    ? (canLoadGlobalDownloads ? downloadsQ.error : null)
+    ? downloadsQ.error ?? (needsDatasetScopedDownloads ? datasetsQ.error : null)
     : tab === 'overview'
-      ? datasetsQ.error ?? (canLoadGlobalDownloads ? downloadsQ.error : null)
+      ? downloadsQ.error ?? (needsDatasetScopedDownloads ? datasetsQ.error : null)
       : datasetsQ.error;
 
   function retryActiveTab() {
     if (tab === 'downloads') {
-      if (canLoadGlobalDownloads) void downloadsQ.refetch();
+      void datasetsQ.refetch();
+      void downloadsQ.refetch();
       return;
     }
     void datasetsQ.refetch();
-    if (tab === 'overview' && canLoadGlobalDownloads) void downloadsQ.refetch();
+    if (tab === 'overview') void downloadsQ.refetch();
   }
 
   return (
@@ -307,37 +353,59 @@ export function BackupCenterPage() {
             </CardBody>
           </Card>
         ) : null}
+        {!loading && !error && datasetMetadataLimited ? (
+          <Alert
+            variant="warn"
+            title={t('backups.datasets.metadata_partial.title')}
+            testId="backups.datasets.metadata_partial"
+          >
+            {t('backups.datasets.metadata_partial.body')}
+          </Alert>
+        ) : null}
+        {!loading && !error && shouldLoadDownloads && partialDownloadDatasetCount > 0 ? (
+          <Alert
+            variant="warn"
+            title={t('backups.downloads.partial.title')}
+            testId="backups.downloads.partial"
+          >
+            {t('backups.downloads.partial.body', { count: partialDownloadDatasetCount })}
+          </Alert>
+        ) : null}
 
         {!loading && !error && tab === 'overview' ? (
           <div className="space-y-6" data-testid="backups.overview">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <StatCard
                 testId="backups.stats.datasets"
                 title={t('backups.stats.datasets')}
-                value={datasetTotal ?? summary.datasets}
+                value={datasetsQ.isPending
+                  ? '…'
+                  : completeCount(datasetTotal ?? summary.datasets, datasetsComplete)}
                 subtitle={t('backups.stats.datasets.help')}
               />
               <StatCard
                 testId="backups.stats.downloads"
                 title={t('backups.stats.downloads')}
-                value={canLoadGlobalDownloads ? (downloadTotal ?? summary.downloads) : '—'}
-                subtitle={
-                  canLoadGlobalDownloads
-                    ? t('backups.stats.downloads.help')
-                    : t('backups.downloads.mine_scope.help')
-                }
+                value={completeCount(downloadTotal ?? summary.downloads, downloadsComplete)}
+                subtitle={t('backups.stats.downloads.help')}
               />
               <StatCard
                 testId="backups.stats.ready"
                 title={t('backups.stats.ready')}
-                value={canLoadGlobalDownloads ? summary.readyDownloads : '—'}
+                value={completeCount(summary.readyDownloads, downloadsComplete)}
                 subtitle={t('backups.stats.ready.help')}
               />
               <StatCard
                 testId="backups.stats.pending"
                 title={t('backups.stats.pending')}
-                value={canLoadGlobalDownloads ? summary.pendingDownloads : '—'}
+                value={completeCount(summary.pendingDownloads, downloadsComplete)}
                 subtitle={t('backups.stats.pending.help')}
+              />
+              <StatCard
+                testId="backups.stats.unavailable"
+                title={t('backups.stats.unavailable')}
+                value={completeCount(summary.unavailableDownloads, downloadsComplete)}
+                subtitle={t('backups.stats.unavailable.help')}
               />
             </div>
             <Card>
@@ -356,14 +424,13 @@ export function BackupCenterPage() {
             </Card>
             <div>
               <h2 className="mb-3 text-base font-semibold">{t('backups.recent_downloads')}</h2>
-              {!canLoadGlobalDownloads ? (
-                <Card>
-                  <CardBody className="text-sm text-muted">
-                    {t('backups.downloads.mine_scope.body')}
-                  </CardBody>
-                </Card>
-              ) : downloads.length ? (
-                <DownloadRows downloads={downloads} compact hrefOptions={hrefOptions} />
+              {downloads.length ? (
+                <DownloadRows
+                  downloads={downloads}
+                  datasets={datasets}
+                  compact
+                  hrefOptions={hrefOptions}
+                />
               ) : (
                 <EmptyState
                   title={t('backups.downloads.empty.title')}
@@ -403,14 +470,12 @@ export function BackupCenterPage() {
 
         {!loading && !error && tab === 'downloads' ? (
           <div data-testid="backups.downloads">
-            {!canLoadGlobalDownloads ? (
-              <Card>
-                <CardBody className="text-sm text-muted">
-                  {t('backups.downloads.mine_scope.body')}
-                </CardBody>
-              </Card>
-            ) : filteredDownloads.length ? (
-              <DownloadRows downloads={filteredDownloads} hrefOptions={hrefOptions} />
+            {filteredDownloads.length ? (
+              <DownloadRows
+                downloads={filteredDownloads}
+                datasets={datasets}
+                hrefOptions={hrefOptions}
+              />
             ) : (
               <EmptyState
                 title={t('backups.downloads.empty.title')}

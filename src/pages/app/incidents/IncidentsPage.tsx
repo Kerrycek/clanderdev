@@ -37,6 +37,7 @@ import { Select } from '../../../components/ui/Select';
 import { type SmartFilterSuggestion, SmartFilterInput } from '../../../components/ui/SmartFilterInput';
 import { SmartInputHelp } from '../../../components/ui/SmartInputHelp';
 import { StatusDot } from '../../../components/ui/StatusDot';
+import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { VpsLookupInput } from '../../../components/ui/VpsLookupInput';
@@ -942,9 +943,12 @@ export function IncidentsPage() {
         />
       ) : (
         <>
-          <div className="hidden xl:block">
-            <div className="overflow-hidden rounded-lg border border-border bg-surface">
-              <table className="table-list w-full table-fixed text-sm" data-testid="incidents.list.table">
+          <TableCard
+            className="hidden xl:block"
+            minWidth="xl"
+            tableClassName="table-fixed"
+            tableTestId="incidents.list.table"
+          >
                 <colgroup>
                   <col className="w-8" />
                   <col className="w-24" />
@@ -955,20 +959,18 @@ export function IncidentsPage() {
                   <col />
                   <col className="w-32" />
                   {mode === 'admin' ? <col className="w-32" /> : null}
-                  <col className="w-32" />
                 </colgroup>
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted">
-                    <th className="w-8 px-4 py-2" aria-label={t('common.state')} />
-                    <th className="px-4 py-2">{t('common.id')}</th>
-                    <th className="px-4 py-2">{t('incidents.field.detected_at')}</th>
-                    {mode === 'admin' ? <th className="px-4 py-2">{t('common.user')}</th> : null}
-                    <th className="px-4 py-2">{t('common.vps')}</th>
-                    <th className="px-4 py-2">{t('incidents.field.ip')}</th>
-                    <th className="px-4 py-2">{t('incidents.field.subject')}</th>
-                    <th className="px-4 py-2">{t('incidents.field.codename')}</th>
-                    {mode === 'admin' ? <th className="px-4 py-2">{t('incidents.field.filed_by')}</th> : null}
-                    <th className="px-2 py-2 text-right">{t('common.actions')}</th>
+                    <th className="w-8 px-2 py-2" aria-label={t('common.state')} />
+                    <th className="px-3 py-2">{t('common.id')}</th>
+                    <th className="px-3 py-2">{t('incidents.field.detected_at')}</th>
+                    {mode === 'admin' ? <th className="px-3 py-2">{t('common.user')}</th> : null}
+                    <th className="px-3 py-2">{t('common.vps')}</th>
+                    <th className="px-3 py-2">{t('incidents.field.ip')}</th>
+                    <th className="px-3 py-2">{t('incidents.field.subject')}</th>
+                    <th className="px-3 py-2">{t('incidents.field.codename')}</th>
+                    {mode === 'admin' ? <th className="px-3 py-2">{t('incidents.field.filed_by')}</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -998,15 +1000,15 @@ export function IncidentsPage() {
 
                     return (
                       <TableRowLink key={r.id} to={to} variant={rowVariant} testId={`incidents.list.row.${r.id}`}>
-                        <td className="px-4 py-2">
+                        <td className="px-2 py-2">
                           <StatusDot variant={dotVariant} testId={`incidents.list.row.${r.id}.dot`} />
                         </td>
-                        <td className="px-4 py-2 font-mono text-xs">
+                        <td className="px-3 py-2 font-mono text-xs">
                           <MiniLink data-row-no-nav to={to}>
                             #{r.id}
                           </MiniLink>
                         </td>
-                        <td className="px-4 py-2">
+                        <td className="px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm">{det}</span>
                             {action !== 'none' ? (
@@ -1023,7 +1025,7 @@ export function IncidentsPage() {
                         </td>
 
                         {mode === 'admin' ? (
-                          <td className="px-4 py-2">
+                          <td className="px-3 py-2">
                             {userIdRow ? (
                               <ChipLink data-row-no-nav to={`${basePath}/users/${userIdRow}`} className="max-w-full">
                                 {userLogin || `#${userIdRow}`}
@@ -1036,7 +1038,7 @@ export function IncidentsPage() {
                           </td>
                         ) : null}
 
-                        <td className="px-4 py-2">
+                        <td className="px-3 py-2">
                           {vpsIdRow ? (
                             <ChipLink data-row-no-nav to={`${basePath}/vps/${vpsIdRow}`} className="max-w-full">
                               {vpsHost || `#${vpsIdRow}`}
@@ -1048,20 +1050,20 @@ export function IncidentsPage() {
                           )}
                         </td>
 
-                        <td className="px-4 py-2 break-all font-mono text-xs">{assignmentIp || '—'}</td>
-                        <td className="px-4 py-2">
+                        <td className="px-3 py-2 break-all font-mono text-xs">{assignmentIp || '—'}</td>
+                        <td className="px-3 py-2">
                           <div className="min-w-0 truncate text-sm font-medium leading-5" title={subject || undefined}>
                             {subject ? compactText(subject, 72) : '—'}
                           </div>
                         </td>
-                        <td className="px-4 py-2 font-mono text-xs">
+                        <td className="px-3 py-2 font-mono text-xs">
                           <span className="block truncate" title={codename || undefined}>
                             {codename ? compactText(codename, 36) : '—'}
                           </span>
                         </td>
 
                         {mode === 'admin' ? (
-                          <td className="px-4 py-2">
+                          <td className="px-3 py-2">
                             {filedId ? (
                               <ChipLink data-row-no-nav to={`${basePath}/users/${filedId}`} className="max-w-full">
                                 {filedLogin || `#${filedId}`}
@@ -1074,26 +1076,11 @@ export function IncidentsPage() {
                           </td>
                         ) : null}
 
-                        <td className="px-2 py-2 text-right">
-                          <span data-row-no-nav className="inline-flex max-w-full">
-                            <Button
-                              to={to}
-                              variant="secondary"
-                              size="sm"
-                              className="max-w-full whitespace-nowrap"
-                              testId={`incidents.list.row.${r.id}.open`}
-                            >
-                              {t('incidents.list.open_detail')}
-                            </Button>
-                          </span>
-                        </td>
                       </TableRowLink>
                     );
                   })}
                 </tbody>
-              </table>
-            </div>
-          </div>
+          </TableCard>
 
           <div className="xl:hidden" data-testid="incidents.list.cards">
             <div className="space-y-3">
@@ -1197,7 +1184,7 @@ export function IncidentsPage() {
               page={pagination.page}
               pageCount={pagination.stack.length}
               canPrev={pagination.canPrev}
-              canNext={!pagination.hasForward && rows.length === pagination.limit}
+              canNext={pagination.hasForward || rows.length === pagination.limit}
               onPrev={() => pagination.goPrev()}
               onNext={() => pagination.goNext(rows.length > 0 ? (rows[rows.length - 1] as any).id : undefined)}
               onGoToPage={pagination.goToPage}

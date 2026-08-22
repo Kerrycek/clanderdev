@@ -51,7 +51,7 @@ test('@smoke admin node detail: busy transaction gates maintenance lock', async 
     },
   });
 
-  await page.goto('/admin/nodes/5');
+  await page.goto('/admin/nodes/5?section=maintenance');
 
   const lockBtn = page.getByTestId('admin.node.maintenance.lock');
   await expect(lockBtn).toBeVisible();

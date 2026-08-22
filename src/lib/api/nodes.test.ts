@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { fetchNodes } from './nodes';
+import { fetchNodePools, fetchNodes } from './nodes';
 
 function mockFetchOk(response: any) {
   return vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: true, response }) });
@@ -38,5 +38,20 @@ describe('nodes API wrappers', () => {
     expect(u.searchParams.get('node[location]')).toBe('7');
     expect(u.searchParams.get('node[type]')).toBe('node');
     expect(u.searchParams.get('node[hypervisor_type]')).toBe('vpsadminos');
+  });
+
+  test('fetchNodePools limits pools to the selected node', async () => {
+    globalThis.fetch = mockFetchOk({ pools: [{ id: 7, name: 'tank' }] }) as typeof fetch;
+
+    const res = await fetchNodePools(12, { limit: 100 });
+
+    expect(res.data).toEqual([{ id: 7, name: 'tank' }]);
+
+    const [url] = lastFetchCall();
+    const u = new URL(url);
+
+    expect(u.pathname).toBe('/v7.0/pools');
+    expect(u.searchParams.get('pool[node]')).toBe('12');
+    expect(u.searchParams.get('pool[limit]')).toBe('100');
   });
 });

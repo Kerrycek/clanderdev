@@ -774,17 +774,14 @@ export function DnsZonesPage() {
               const dotVariant = zoneDotVariant(z);
               return (
                 <Card key={z.id} testId={`dns.zones.card.${z.id}`} className={toneSurfaceClass(rowVariant)}>
-                  <div className="p-4">
+                  <Link className="block p-4" to={`${basePath}/dns/zones/${z.id}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <StatusDot variant={dotVariant} testId={`dns.zones.card.${z.id}.dot`} />
-                          <Link
-                            className="block truncate text-base font-semibold text-accent hover:underline"
-                            to={`${basePath}/dns/zones/${z.id}`}
-                          >
+                          <span className="block truncate text-base font-semibold text-accent">
                             {zoneName(z)}
-                          </Link>
+                          </span>
                         </div>
                         <div className="mt-0.5 text-xs text-faint">#{z.id}</div>
                       </div>
@@ -805,13 +802,7 @@ export function DnsZonesPage() {
                         {t('dns.zones.field.ttl')}: {typeof z.default_ttl === 'number' ? z.default_ttl : '—'}
                       </span>
                     </div>
-
-                    <div className="mt-3">
-                      <LinkButton to={`${basePath}/dns/zones/${z.id}`} variant="secondary" size="sm">
-                        {t('common.open')}
-                      </LinkButton>
-                    </div>
-                  </div>
+                  </Link>
                 </Card>
               );
             })}
@@ -855,14 +846,13 @@ export function DnsZonesPage() {
           >
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="w-8 px-4 py-2"><span className="sr-only">{t('common.state')}</span></th>
-                <th className="px-4 py-2">{t('dns.zones.table.name')}</th>
-                <th className="px-4 py-2">{t('dns.zones.table.role')}</th>
-                <th className="px-4 py-2">{t('dns.zones.table.status')}</th>
-                <th className="px-4 py-2">{t('dns.zones.table.security')}</th>
-                <th className="px-4 py-2">{t('dns.zones.table.serial')}</th>
-                <th className="px-4 py-2">{t('dns.zones.table.ttl')}</th>
-                <th className="px-4 py-2 text-right">{t('dns.zones.table.actions')}</th>
+                <th className="w-8 px-3 py-2"><span className="sr-only">{t('common.state')}</span></th>
+                <th className="px-3 py-2">{t('dns.zones.table.name')}</th>
+                <th className="px-3 py-2">{t('dns.zones.table.role')}</th>
+                <th className="px-3 py-2">{t('dns.zones.table.status')}</th>
+                <th className="px-3 py-2">{t('dns.zones.table.security')}</th>
+                <th className="px-3 py-2">{t('dns.zones.table.serial')}</th>
+                <th className="px-3 py-2">{t('dns.zones.table.ttl')}</th>
               </tr>
             </thead>
             <tbody>
@@ -877,25 +867,20 @@ export function DnsZonesPage() {
                     variant={rowVariant}
                     className="border-b border-border/60 last:border-b-0"
                   >
-                  <td className="px-4 py-2 align-top">
+                  <td className="px-3 py-2 align-top">
                     <StatusDot variant={dotVariant} testId={`dns.zones.row.${z.id}.dot`} />
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-3 py-2">
                     <Link to={`${basePath}/dns/zones/${z.id}`} className="font-medium text-accent hover:underline">
                       {zoneName(z)}
                     </Link>
                     <div className="mt-0.5 text-xs text-faint">#{z.id}</div>
                   </td>
-                  <td className="px-4 py-2">{z.role ? roleLabel(t, z.role) : '—'}</td>
-                  <td className="px-4 py-2">{enabledBadge(z.enabled)}</td>
-                  <td className="px-4 py-2">{dnssecBadge(z.dnssec_enabled)}</td>
-                  <td className="px-4 py-2">{typeof z.serial === 'number' ? z.serial : '—'}</td>
-                  <td className="px-4 py-2">{typeof z.default_ttl === 'number' ? z.default_ttl : '—'}</td>
-                  <td className="px-4 py-2 text-right">
-                    <LinkButton to={`${basePath}/dns/zones/${z.id}`} variant="secondary" size="sm">
-                      {t('common.open')}
-                    </LinkButton>
-                  </td>
+                  <td className="px-3 py-2">{z.role ? roleLabel(t, z.role) : '—'}</td>
+                  <td className="px-3 py-2">{enabledBadge(z.enabled)}</td>
+                  <td className="px-3 py-2">{dnssecBadge(z.dnssec_enabled)}</td>
+                  <td className="px-3 py-2">{typeof z.serial === 'number' ? z.serial : '—'}</td>
+                  <td className="px-3 py-2">{typeof z.default_ttl === 'number' ? z.default_ttl : '—'}</td>
                   </TableRowLink>
                 );
               })}

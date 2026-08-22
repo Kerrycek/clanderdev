@@ -6,7 +6,6 @@ import { useAuth } from '../../app/auth';
 import { useAppMode } from '../../app/appMode';
 import { useObjectScope } from '../../app/objectScope';
 import { clusterSearch, type ClusterSearchHit } from '../../lib/api/clusterSearch';
-import { fetchVps, fetchVpsList, type Vps } from '../../lib/api/vps';
 import {
   clusterResourceHref,
   clusterResourceKey,
@@ -15,6 +14,10 @@ import {
   normalizeClusterResource,
   parseClusterId,
 } from '../../lib/search/clusterSearchResults';
+import {
+  searchUserObjects,
+  type UserGlobalSearchGroup,
+} from '../../lib/search/userGlobalSearch';
 import { Badge } from '../ui/Badge';
 import { clsx } from '../ui/clsx';
 import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
@@ -31,24 +34,13 @@ interface InlineSearchResult {
   id?: number;
   resource?: string;
   attribute?: string;
+  group?: UserGlobalSearchGroup;
 }
 
-function parseInlineVpsId(raw: string): number | null {
-  const m = String(raw ?? '').trim().match(/^(?:vps\s*)?#?(\d+)$/i);
-  if (!m) return null;
-  const id = Number(m[1]);
-  return Number.isFinite(id) && id > 0 ? Math.trunc(id) : null;
-}
-
-function inlineResultFromVps(basePath: string, t: AppHeaderProps['t'], vps: Vps): InlineSearchResult {
-  return {
-    key: `vps:${vps.id}`,
-    primary: vps.hostname ?? t('common.vps_ref', { id: vps.id }),
-    secondary: t('common.vps_ref', { id: vps.id }),
-    href: `${basePath}/vps/${vps.id}`,
-    id: vps.id,
-    resource: 'Vps',
-  };
+function userSearchGroupLabel(group: UserGlobalSearchGroup, t: AppHeaderProps['t']): string {
+  if (group === 'vps') return t('palette.group.vps');
+  if (group === 'ips') return t('palette.group.ip_addresses');
+  return t('palette.group.dns_zones');
 }
 
 function inlineResultsFromClusterSearch(basePath: string, t: AppHeaderProps['t'], hits: ClusterSearchHit[]): InlineSearchResult[] {
@@ -166,36 +158,17 @@ export function AppHeader(props: AppHeaderProps) {
           return;
         }
 
-        const maybeId = parseInlineVpsId(q);
-        if (maybeId !== null) {
-          try {
-            const one = await fetchVps(maybeId, { includes: 'user', signal: ac.signal });
-            const vps = one.data;
-            if (
-              scope.mineUserId !== undefined &&
-              typeof vps.user?.id === 'number' &&
-              vps.user.id !== scope.mineUserId
-            ) {
-              if (!alive || ac.signal.aborted) return;
-              setSearchResults([]);
-              return;
-            }
-            if (!alive || ac.signal.aborted) return;
-            setSearchResults([inlineResultFromVps(basePath, t, vps)]);
-            return;
-          } catch (e: any) {
-            if (e?.name === 'AbortError') return;
-          }
-        }
-
-        const res = await fetchVpsList({
-          limit: 8,
-          hostnameAny: q,
-          user: scope.mineUserId,
+        const results = await searchUserObjects({
+          basePath,
+          query: q,
+          t,
+          scopeUserId: scope.mineUserId,
+          expectedUserId: typeof auth.user?.id === 'number' ? auth.user.id : undefined,
+          limitPerGroup: 4,
           signal: ac.signal,
         });
         if (!alive || ac.signal.aborted) return;
-        setSearchResults((res.data ?? []).slice(0, 8).map((vps) => inlineResultFromVps(basePath, t, vps)));
+        setSearchResults(results);
       } catch (e: any) {
         if (e?.name === 'AbortError') return;
         if (!alive || ac.signal.aborted) return;
@@ -213,7 +186,7 @@ export function AppHeader(props: AppHeaderProps) {
       alive = false;
       ac.abort();
     };
-  }, [basePath, canUseClusterSearch, debouncedSearch, mode, scope.mineUserId, t]);
+  }, [auth.user?.id, basePath, canUseClusterSearch, debouncedSearch, mode, scope.mineUserId, t]);
 
   useEffect(() => {
     setSelectedSearchResult(0);
@@ -306,23 +279,37 @@ export function AppHeader(props: AppHeaderProps) {
             >
               {searchResults.length > 0 ? (
                 <div className="py-1">
-                  {searchResults.map((result, index) => (
-                    <button
-                      key={result.key}
-                      type="button"
-                      className={clsx(
-                        'flex w-full flex-col items-start px-3 py-2 text-left text-sm',
-                        index === selectedSearchResult ? 'bg-surface-2' : 'hover:bg-surface-2'
-                      )}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onMouseEnter={() => setSelectedSearchResult(index)}
-                      onClick={() => openInlineResult(result)}
-                      data-testid={`shell.inline-search.result.${index}`}
-                    >
-                      <span className="font-medium text-fg">{result.primary}</span>
-                      <span className="text-xs text-muted">{result.secondary}</span>
-                    </button>
-                  ))}
+                  {searchResults.map((result, index) => {
+                    const showGroup = !canUseClusterSearch && result.group && (
+                      index === 0 || searchResults[index - 1]?.group !== result.group
+                    );
+                    return (
+                      <React.Fragment key={result.key}>
+                        {showGroup && result.group ? (
+                          <div
+                            className="border-t border-border px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted first:border-t-0"
+                            data-testid={`shell.inline-search.group.${result.group}`}
+                          >
+                            {userSearchGroupLabel(result.group, t)}
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={clsx(
+                            'flex w-full flex-col items-start px-3 py-2 text-left text-sm',
+                            index === selectedSearchResult ? 'bg-surface-2' : 'hover:bg-surface-2'
+                          )}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onMouseEnter={() => setSelectedSearchResult(index)}
+                          onClick={() => openInlineResult(result)}
+                          data-testid={`shell.inline-search.result.${index}`}
+                        >
+                          <span className="font-medium text-fg">{result.primary}</span>
+                          <span className="text-xs text-muted">{result.secondary}</span>
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="px-3 py-2 text-sm text-muted" data-testid="shell.inline-search.status">

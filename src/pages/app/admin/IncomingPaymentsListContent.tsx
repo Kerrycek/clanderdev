@@ -154,7 +154,7 @@ export function IncomingPaymentsListContent(props: {
       >
         <thead>
           <tr className="border-b border-border text-left text-xs text-muted">
-            <th className="px-4 py-2">
+            <th className="w-10 px-2 py-2">
               <input
                 type="checkbox"
                 checked={allVisibleSelected}
@@ -164,14 +164,14 @@ export function IncomingPaymentsListContent(props: {
                 className="h-4 w-4 rounded border-border"
               />
             </th>
-            <th className="px-4 py-2">{t('common.id')}</th>
-            <th className="px-4 py-2">{t('common.date')}</th>
-            <th className="px-4 py-2">{t('payments.incoming.list.col.amount')}</th>
-            <th className="px-4 py-2">{t('payments.incoming.list.col.vs')}</th>
-            <th className="px-4 py-2">{t('payments.incoming.list.col.account')}</th>
-            <th className="px-4 py-2">{t('common.user')}</th>
-            <th className="px-4 py-2">{t('payments.incoming.list.col.paid_until')}</th>
-            <th className="px-4 py-2">{t('common.state')}</th>
+            <th className="px-3 py-2">{t('common.id')}</th>
+            <th className="px-3 py-2">{t('common.date')}</th>
+            <th className="px-3 py-2">{t('payments.incoming.list.col.amount')}</th>
+            <th className="px-3 py-2">{t('payments.incoming.list.col.vs')}</th>
+            <th className="px-3 py-2">{t('payments.incoming.list.col.account')}</th>
+            <th className="px-3 py-2">{t('common.user')}</th>
+            <th className="px-3 py-2">{t('payments.incoming.list.col.paid_until')}</th>
+            <th className="px-3 py-2">{t('common.state')}</th>
           </tr>
         </thead>
         <tbody>
@@ -201,7 +201,7 @@ export function IncomingPaymentsListContent(props: {
                 variant={rowVar}
                 className="border-b border-border/60 last:border-b-0"
               >
-                <td className="px-4 py-2">
+                <td className="px-2 py-2">
                   <input
                     type="checkbox"
                     checked={selectedIds.has(p.id)}
@@ -211,21 +211,21 @@ export function IncomingPaymentsListContent(props: {
                     className="h-4 w-4 rounded border-border"
                   />
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-3 py-2">
                   <div className="flex items-center gap-2">
                     <StatusDot variant={dotVar} testId={`admin.payments.incoming.row.${p.id}.dot`} />
                     <span className="font-medium text-accent">#{p.id}</span>
                   </div>
                 </td>
-                <td className="px-4 py-2 text-xs text-muted">{formatDateTime(p.date)}</td>
-                <td className="px-4 py-2">
+                <td className="px-3 py-2 text-xs text-muted">{formatDateTime(p.date)}</td>
+                <td className="px-3 py-2">
                   <div className="text-sm font-medium tabular-nums">{recvAmount}</div>
                   {acctAmount ? <div className="text-xs text-muted">{acctAmount}</div> : null}
                 </td>
-                <td className="px-4 py-2 text-xs text-muted tabular-nums">{String(p.vs ?? '—')}</td>
-                <td className="px-4 py-2 text-xs text-muted">{String(p.account_name ?? '—')}</td>
-                <td className="px-4 py-2 text-xs text-muted">{incomingPaymentUserLabel(p.user)}</td>
-                <td className="px-4 py-2 text-xs text-muted">
+                <td className="px-3 py-2 text-xs text-muted tabular-nums">{String(p.vs ?? '—')}</td>
+                <td className="px-3 py-2 text-xs text-muted">{String(p.account_name ?? '—')}</td>
+                <td className="px-3 py-2 text-xs text-muted">{incomingPaymentUserLabel(p.user)}</td>
+                <td className="px-3 py-2 text-xs text-muted">
                   {p.user ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="tabular-nums">{p.user_paid_until ? formatDateTime(p.user_paid_until) : '—'}</span>
@@ -239,7 +239,7 @@ export function IncomingPaymentsListContent(props: {
                     <span className="text-faint">—</span>
                   )}
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-3 py-2">
                   <Badge variant={incomingPaymentBadgeVariant(st)}>{t(incomingPaymentStateLabelKey(st))}</Badge>
                 </td>
               </TableRowLink>

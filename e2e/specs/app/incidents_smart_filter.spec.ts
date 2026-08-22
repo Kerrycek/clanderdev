@@ -58,6 +58,7 @@ test.describe('Incident reports - Smart Filter Input', () => {
     await expect(page.getByTestId('incidents.list.row.125')).toHaveAttribute('data-row-variant', 'warn');
     await expect(page.getByTestId('incidents.list.row.125.dot')).toBeVisible();
     await expect(page.getByTestId('incidents.list.row.125')).toContainText('default');
+    await expect(page.getByTestId('incidents.list.row.125').locator('td')).toHaveCount(9);
 
     // Apply SFI codename filter
     const input = page.getByTestId('incidents.smart_filter.input');

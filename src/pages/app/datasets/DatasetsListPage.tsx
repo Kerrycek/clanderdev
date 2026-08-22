@@ -762,14 +762,14 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
           >
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="w-8 px-4 py-2"><span className="sr-only">{t('common.state')}</span></th>
-                <th className="px-4 py-2">{t('common.name')}</th>
-                {showOwnerColumn ? <th className="px-4 py-2">{t('common.user')}</th> : showVpsFilter ? <th className="px-4 py-2">{t('common.vps')}</th> : null}
-                <th className="px-4 py-2">{t('dataset.field.usage')}</th>
-                {showSnapshotColumn ? <th className="px-4 py-2">{t('dataset.field.snapshots')}</th> : null}
-                {showMountColumn ? <th className="px-4 py-2">{t('dataset.field.mounts')}</th> : null}
-                {showExportColumn ? <th className="px-4 py-2">{t('dataset.field.exports')}</th> : null}
-                {showStateColumn ? <th className="px-4 py-2">{t('common.state')}</th> : null}
+                <th className="w-8 px-3 py-2"><span className="sr-only">{t('common.state')}</span></th>
+                <th className="px-3 py-2">{t('common.name')}</th>
+                {showOwnerColumn ? <th className="px-3 py-2">{t('common.user')}</th> : showVpsFilter ? <th className="px-3 py-2">{t('common.vps')}</th> : null}
+                <th className="px-3 py-2">{t('dataset.field.usage')}</th>
+                {showSnapshotColumn ? <th className="px-3 py-2">{t('dataset.field.snapshots')}</th> : null}
+                {showMountColumn ? <th className="px-3 py-2">{t('dataset.field.mounts')}</th> : null}
+                {showExportColumn ? <th className="px-3 py-2">{t('dataset.field.exports')}</th> : null}
+                {showStateColumn ? <th className="px-3 py-2">{t('common.state')}</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -794,17 +794,17 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                     variant={rowVariant}
                     className="border-b border-border/60 last:border-b-0"
                   >
-                    <td className="px-4 py-2 align-top">
+                    <td className="px-3 py-2 align-top">
                       <StatusDot variant={dotVariant} testId={`datasets.row.${ds.id}.dot`} />
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       <Link className="font-medium text-accent hover:underline" to={`${basePath}/${detailSection}/${ds.id}`}>
                         {label}
                       </Link>
                       <div className="mt-0.5 text-xs text-faint">#{ds.id}</div>
                     </td>
                     {showOwnerColumn ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {ownerId ? (
                           <Link className="text-accent hover:underline" to={`${basePath}/users/${ownerId}`}>
                             {ownerLogin ? ownerLogin : `#${ownerId}`}
@@ -814,7 +814,7 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                         )}
                       </td>
                     ) : showVpsFilter ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {vpsId ? (
                           <Link className="text-accent hover:underline" to={`${basePath}/vps/${vpsId}`}>
                             {vpsHostname ? vpsHostname : `#${vpsId}`}
@@ -824,14 +824,14 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                         )}
                       </td>
                     ) : null}
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       <DatasetUsage used={ds.used} refquota={ds.refquota} avail={ds.avail} />
                     </td>
-                    {showSnapshotColumn ? <td className="px-4 py-2">{ds.snapshots_count ?? 0}</td> : null}
-                    {showMountColumn ? <td className="px-4 py-2">{ds.mount_count ?? 0}</td> : null}
-                    {showExportColumn ? <td className="px-4 py-2">{ds.export_count ?? 0}</td> : null}
+                    {showSnapshotColumn ? <td className="px-3 py-2">{ds.snapshots_count ?? 0}</td> : null}
+                    {showMountColumn ? <td className="px-3 py-2">{ds.mount_count ?? 0}</td> : null}
+                    {showExportColumn ? <td className="px-3 py-2">{ds.export_count ?? 0}</td> : null}
                     {showStateColumn ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {state ? <Badge variant={state.variant}>{state.label}</Badge> : <span className="text-faint">—</span>}
                       </td>
                     ) : null}

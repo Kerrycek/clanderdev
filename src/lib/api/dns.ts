@@ -39,7 +39,6 @@ export interface DnsRecord {
   dynamic_update_url?: string;
   [k: string]: unknown;
 }
-
 export interface DnsRecordLog {
   id: number;
   user?: ResourceRef;
@@ -63,6 +62,7 @@ export async function fetchDnsZones(opts?: {
   dnssec_enabled?: boolean;
   role?: string;
   source?: string;
+  signal?: AbortSignal;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
@@ -79,8 +79,8 @@ export async function fetchDnsZones(opts?: {
     path: '/dns_zones',
     namespace: 'dns_zone',
     params,
+    signal: opts?.signal,
   });
-
   return { ...res, data: expectArray<DnsZone>(res.data, 'dns_zones#index') };
 }
 
