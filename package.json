@@ -39,6 +39,8 @@
     "e2e:live:manual": "npm run env:check && node scripts/playwright.mjs test --live-manual --project=chromium",
     "e2e:live:audit": "npm run env:check && node scripts/live-audit.mjs",
     "e2e:live:regression": "npm run env:check && node scripts/live-regression-audit.mjs",
+    "e2e:live:routes": "npm run env:check && node scripts/live-route-sweep.mjs",
+    "e2e:live:mutations": "npm run env:check && node scripts/live-mutation-audit.mjs",
     "audit:ui-strings": "node scripts/audit-ui-strings.mjs --write work/audits/ui_strings.md",
     "audit:ui-strings:check": "node scripts/audit-ui-strings.mjs --fail --write work/audits/ui_strings.md",
     "audit:pages": "node scripts/audit-page-integrity.mjs",

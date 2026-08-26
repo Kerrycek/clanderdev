@@ -28,7 +28,7 @@ const configBody = [
   'window.vpsAdmin = window.vpsAdmin || {};',
   `window.vpsAdmin.api = ${JSON.stringify({ url: apiUrl, version: apiVersion })};`,
   `window.vpsAdmin.sessionToken = ${JSON.stringify(token)};`,
-  'window.vpsAdmin.webuiNext = { haveApi: { authHeader: "X-HaveAPI-Auth-Token" }, uiSettings: { persistence: "local" } };',
+  'window.vpsAdmin.webuiNext = { haveApi: { authHeader: "X-HaveAPI-Auth-Token", metaNamespace: "_meta" }, uiSettings: { persistence: "local" } };',
   '',
 ].join('\n');
 
