@@ -35,6 +35,7 @@ export const enCommon_navigation = {
   'nav.user_namespaces': 'User namespaces',
   'nav.ip_addresses': 'IP addresses',
   'nav.requests': 'Requests',
+  'nav.my_requests': 'My requests',
   'nav.mailer': 'Mailer',
   'nav.content': 'Content',
   'nav.incoming_payments': 'Incoming payments',

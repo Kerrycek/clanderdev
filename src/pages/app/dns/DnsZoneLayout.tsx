@@ -111,10 +111,9 @@ export function DnsZoneLayout() {
   const secondaryZone = isSecondaryDnsZone(zone);
   const tabs = secondaryZone
     ? [
-        { label: t('dns.zone.tabs.servers'), to: `${basePath}/dns/zones/${zone.id}/servers` },
         { label: t('dns.zone.tabs.transfers'), to: `${basePath}/dns/zones/${zone.id}/transfers` },
+        { label: t('dns.zone.tabs.servers'), to: `${basePath}/dns/zones/${zone.id}/servers` },
         { label: t('dns.zone.tabs.settings'), to: `${basePath}/dns/zones/${zone.id}/settings` },
-        { label: t('dns.zone.tabs.logs'), to: `${basePath}/dns/zones/${zone.id}/logs` },
       ]
     : [
         { label: t('dns.zone.tabs.records'), to: `${basePath}/dns/zones/${zone.id}`, end: true },

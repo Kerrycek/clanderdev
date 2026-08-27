@@ -6,6 +6,7 @@ export const enProfile_page = {
   "profile.personal.change.help": "Name, e-mail and address are changed through an approval request. Changes take effect after an administrator processes them.",
   "profile.personal.change.sent.body": "The request is waiting for approval. Current account details have not changed yet.",
   "profile.personal.change.sent.title": "Change request was sent",
+  "profile.personal.change.sent.open": "Open request",
   "profile.personal.change.submit": "Request change",
   "profile.personal.change.toast.failed.title": "Failed to send change request",
   "profile.personal.change.toast.sent.body": "Administrators will see it in requests.",

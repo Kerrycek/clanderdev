@@ -10,6 +10,7 @@ export interface SelectOption {
 
 export function Select(props: {
   testId?: string;
+  selectId?: string;
   value?: string;
   defaultValue?: string;
   name?: string;
@@ -32,6 +33,7 @@ export function Select(props: {
 
   const select = (
     <select
+      id={props.selectId}
       data-testid={props.testId}
       name={props.name}
       value={props.value}

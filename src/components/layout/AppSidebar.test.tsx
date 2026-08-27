@@ -99,6 +99,8 @@ describe('buildSidebarNavItems', () => {
     expect(sidebarNavSections(items)).toEqual([{ id: 'ungrouped', items }]);
     expect(sidebarFooterNavItems(items)).toEqual([]);
     expect(items.map((item) => item.id)).toContain('backups');
+    expect(items.map((item) => item.id)).toContain('requests');
+    expect(items.find((item) => item.id === 'requests')?.to).toBe('/app/requests');
     expect(items.at(-1)?.id).toBe('account');
   });
 

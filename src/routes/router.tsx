@@ -34,6 +34,7 @@ const DnsZoneLogsPage = lazyRoute(() => import('../pages/app/dns/DnsZoneLogsPage
 const DnsZoneTransfersPage = lazyRoute(() => import('../pages/app/dns/DnsZoneTransfersPage'), 'DnsZoneTransfersPage');
 const DnsZoneDnssecPage = lazyRoute(() => import('../pages/app/dns/DnsZoneDnssecPage'), 'DnsZoneDnssecPage');
 const DnsZoneServersPage = lazyRoute(() => import('../pages/app/dns/DnsZoneServersPage'), 'DnsZoneServersPage');
+const DnsTsigKeysPage = lazyRoute(() => import('../pages/app/dns/DnsTsigKeysPage'), 'DnsTsigKeysPage');
 const ProfilePage = lazyRoute(() => import('../pages/app/profile/ProfilePage'), 'ProfilePage');
 const ProfileResourcesPage = lazyRoute(() => import('../pages/app/profile/ProfileResourcesPage'), 'ProfileResourcesPage');
 const ProfileMailPage = lazyRoute(() => import('../pages/app/profile/ProfileMailPage'), 'ProfileMailPage');
@@ -81,6 +82,8 @@ const NetworkLivePage = lazyRoute(() => import('../pages/app/admin/networking/Ne
 const NetworkTrafficUsersPage = lazyRoute(() => import('../pages/app/admin/networking/NetworkTrafficUsersPage'), 'NetworkTrafficUsersPage');
 const RequestsPage = lazyRoute(() => import('../pages/app/admin/RequestsPage'), 'RequestsPage');
 const RequestDetailPage = lazyRoute(() => import('../pages/app/admin/RequestDetailPage'), 'RequestDetailPage');
+const MyRequestsPage = lazyRoute(() => import('../pages/app/requests/MyRequestsPage'), 'MyRequestsPage');
+const MyRequestDetailPage = lazyRoute(() => import('../pages/app/requests/MyRequestDetailPage'), 'MyRequestDetailPage');
 const IncomingPaymentsPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentsPage'), 'IncomingPaymentsPage');
 const IncomingPaymentDetailPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentDetailPage'), 'IncomingPaymentDetailPage');
 const MailLogsPage = lazyRoute(() => import('../pages/app/admin/mailer/MailLogsPage'), 'MailLogsPage');
@@ -106,7 +109,7 @@ const ResourcePackageDetailPage = lazyRoute(() => import('../pages/app/admin/clu
 const SystemConfigPage = lazyRoute(() => import('../pages/app/admin/cluster/SystemConfigPage'), 'SystemConfigPage');
 const DnsResolversPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsResolversPage'), 'DnsResolversPage');
 const DnsServersPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsServersPage'), 'DnsServersPage');
-const DnsTsigKeysPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsTsigKeysPage'), 'DnsTsigKeysPage');
+const AdminDnsTsigKeysPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsTsigKeysPage'), 'DnsTsigKeysPage');
 const AdminNewsPage = lazyRoute(() => import('../pages/app/admin/content/AdminNewsPage'), 'AdminNewsPage');
 const AdminHelpBoxesPage = lazyRoute(() => import('../pages/app/admin/content/AdminHelpBoxesPage'), 'AdminHelpBoxesPage');
 const AdminUserNamespacesLayout = lazyRoute(() => import('../pages/app/admin/userNamespaces/AdminUserNamespacesLayout'), 'AdminUserNamespacesLayout');
@@ -211,6 +214,7 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'dns', element: <DnsZonesPage /> },
+            { path: 'dns/tsig-keys', element: <DnsTsigKeysPage /> },
             { path: 'networking', element: <CoreRoutes.UserNetworkPage /> },
             {
               path: 'dns/zones/:zoneId',
@@ -249,8 +253,8 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'payments', element: <PaymentsPage /> },
-            { path: 'requests', element: <RequestsPage /> },
-            { path: 'requests/:type/:requestId', element: <RequestDetailPage /> },
+            { path: 'requests', element: <MyRequestsPage /> },
+            { path: 'requests/:type/:requestId', element: <MyRequestDetailPage /> },
             { path: 'profile', element: <ProfilePage /> },
             { path: 'profile/resources', element: <ProfileResourcesPage /> },
             { path: 'profile/security', element: <ProfileSecurityPage /> },
@@ -316,7 +320,7 @@ export const router = createBrowserRouter([
                 { path: 'system-config', element: <SystemConfigPage /> },
                 { path: 'dns-resolvers', element: <DnsResolversPage /> },
                 { path: 'dns-servers', element: <DnsServersPage /> },
-                { path: 'dns-tsig-keys', element: <DnsTsigKeysPage /> },
+                { path: 'dns-tsig-keys', element: <AdminDnsTsigKeysPage /> },
               ],
             },
             { path: 'users', element: <UsersPage /> },
@@ -402,7 +406,7 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'dns', element: <DnsZonesPage /> },
-            { path: 'dns/tsig-keys', element: <DnsTsigKeysPage /> },
+            { path: 'dns/tsig-keys', element: <AdminDnsTsigKeysPage /> },
             {
               path: 'dns/zones/:zoneId',
               element: <DnsZoneLayout />,

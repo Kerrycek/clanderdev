@@ -35,6 +35,7 @@ export const csCommon_navigation = {
   'nav.user_namespaces': 'Uživatelské jmenné prostory',
   'nav.ip_addresses': 'IP adresy',
   'nav.requests': 'Žádosti',
+  'nav.my_requests': 'Moje žádosti',
   'nav.mailer': 'Pošta',
   'nav.content': 'Obsah',
   'nav.incoming_payments': 'Příchozí platby',

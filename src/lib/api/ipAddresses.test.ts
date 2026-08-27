@@ -13,6 +13,7 @@ import {
   createHostIpAddress,
   deleteHostIpAddress,
   fetchIpAddressAssignments,
+  fetchNetworkInterfaceMonitor,
   freeHostIpAddress,
   updateHostIpAddress,
 } from './networking';
@@ -27,6 +28,40 @@ function lastFetchCall() {
 }
 
 describe('network address API wrappers', () => {
+  test('live monitor sends only supported scope filters and nested includes', async () => {
+    globalThis.fetch = mockFetchOk({ network_interface_monitors: [] }) as typeof fetch;
+
+    await fetchNetworkInterfaceMonitor({
+      limit: 100,
+      user: 7,
+      environment: 2,
+      location: 3,
+      node: 4,
+      vps: 5,
+      networkInterface: 6,
+      order: '-bytes',
+      includes:
+        'network_interface__vps__user,' +
+        'network_interface__vps__node__location__environment',
+    });
+
+    const [url] = lastFetchCall();
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe('/v7.0/network_interface_monitors');
+    expect([...parsed.searchParams.keys()].some((key) => key.endsWith('[q]'))).toBe(false);
+    expect(parsed.searchParams.get('network_interface_monitor[user]')).toBe('7');
+    expect(parsed.searchParams.get('network_interface_monitor[environment]')).toBe('2');
+    expect(parsed.searchParams.get('network_interface_monitor[location]')).toBe('3');
+    expect(parsed.searchParams.get('network_interface_monitor[node]')).toBe('4');
+    expect(parsed.searchParams.get('network_interface_monitor[vps]')).toBe('5');
+    expect(parsed.searchParams.get('network_interface_monitor[network_interface]')).toBe('6');
+    expect(parsed.searchParams.get('network_interface_monitor[order]')).toBe('-bytes');
+    expect(parsed.searchParams.get('network_interface_monitor[limit]')).toBe('100');
+    expect(parsed.searchParams.get('_meta[includes]')).toBe(
+      'network_interface__vps__user,network_interface__vps__node__location__environment'
+    );
+  });
+
   test('fetchIpAddresses forwards purpose and include filters used by admin networking', async () => {
     globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
 

@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { useI18n } from '../../../app/i18n';
+import { useAppMode } from '../../../app/appMode';
 import { useChrome } from '../../../components/layout/ChromeContext';
-import { Alert } from '../../../components/ui/Alert';
 import { ActionButton } from '../../../components/ui/ActionButton';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
@@ -13,28 +13,28 @@ import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { CopyButton } from '../../../components/ui/CopyButton';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorState } from '../../../components/ui/ErrorState';
-import { HostIpLookupInput } from '../../../components/ui/HostIpLookupInput';
 import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../components/ui/LoadingState';
-import { Modal } from '../../../components/ui/Modal';
-import { Select } from '../../../components/ui/Select';
+import { LinkButton } from '../../../components/ui/LinkButton';
 import { formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import {
   fetchDnsServerZones,
+  fetchDnsServerZoneTransferLogs,
   fetchDnsTsigKeys,
   fetchDnsZoneTransfers,
   createDnsZoneTransfer,
   deleteDnsZoneTransfer,
   type DnsServerZone,
+  type DnsServerZoneTransferLog,
   type DnsZoneTransfer,
 } from '../../../lib/api/dns';
-import { formatErrorMessage } from '../../../lib/errors';
 
 import { useDnsZoneContext } from './DnsZoneContext';
-import { isSecondaryDnsZone } from './DnsZoneModel';
+import { DnsZoneTransferCreateModal } from './DnsZoneTransferCreateModal';
+import { dnsZoneTransferPeerType, isSecondaryDnsZone } from './DnsZoneModel';
 import { preflightDnsZoneNotBusy } from './dnsPreflight';
 
 function peerLabel(transfer: DnsZoneTransfer): string {
@@ -46,11 +46,11 @@ function peerLabel(transfer: DnsZoneTransfer): string {
   return String(ipAddress ?? address ?? `#${host.id ?? transfer.id}`);
 }
 
-function peerTypeLabel(v: unknown): string {
+function peerTypeLabel(t: (key: string) => string, v: unknown): string {
   const s = String(v ?? '');
-  if (s === 'primary_type') return 'primary';
-  if (s === 'secondary_type') return 'secondary';
-  return s;
+  if (s === 'primary_type' || s === 'primary') return t('dns.zone.transfers.peer_type.primary');
+  if (s === 'secondary_type' || s === 'secondary') return t('dns.zone.transfers.peer_type.secondary');
+  return s || t('common.na');
 }
 
 function serverName(row: DnsServerZone): string {
@@ -58,6 +58,43 @@ function serverName(row: DnsServerZone): string {
   if (!server) return '—';
   const name = 'name' in server ? server.name : undefined;
   return String(name ?? `#${server.id}`);
+}
+
+function transferLogServerName(row: DnsServerZoneTransferLog): string {
+  const serverZone = row.dns_server_zone;
+  if (!serverZone) return '—';
+  const server = serverZone['dns_server'];
+  if (server && typeof server === 'object') {
+    if ('name' in server && server.name) return String(server.name);
+    if ('id' in server) return `#${String(server.id)}`;
+  }
+  return `#${serverZone.id}`;
+}
+
+function transferLogStatusBadge(t: (key: string) => string, status: unknown) {
+  const value = String(status ?? '');
+  if (value === 'success') return <Badge variant="ok">{t('dns.zone.transfers.log.status.success')}</Badge>;
+  if (value === 'failed') return <Badge variant="danger">{t('dns.zone.transfers.log.status.failed')}</Badge>;
+  return <Badge variant="neutral">{value || t('common.na')}</Badge>;
+}
+
+const TRANSFER_REASON_KEYS: Record<string, string> = {
+  invalid_zone: 'dns.zone.transfers.log.reason.invalid_zone',
+  refused: 'dns.zone.transfers.log.reason.refused',
+  not_authoritative: 'dns.zone.transfers.log.reason.not_authoritative',
+  not_found: 'dns.zone.transfers.log.reason.not_found',
+  servfail: 'dns.zone.transfers.log.reason.servfail',
+  timeout: 'dns.zone.transfers.log.reason.timeout',
+  connection_failed: 'dns.zone.transfers.log.reason.connection_failed',
+  tsig_error: 'dns.zone.transfers.log.reason.tsig_error',
+  unknown: 'dns.zone.transfers.log.reason.unknown',
+};
+
+function transferLogReason(t: (key: string) => string, row: DnsServerZoneTransferLog): string {
+  const reasonCode = String(row.reason_code ?? '').trim();
+  const translationKey = TRANSFER_REASON_KEYS[reasonCode];
+  if (translationKey) return t(translationKey);
+  return String(row.reason ?? reasonCode ?? '').trim();
 }
 
 function transferSnippet(transfer: DnsZoneTransfer): string {
@@ -73,9 +110,15 @@ function transferSnippet(transfer: DnsZoneTransfer): string {
 
 export function DnsZoneTransfersPage() {
   const { t } = useI18n();
+  const { basePath, mode } = useAppMode();
   const chrome = useChrome();
   const { zone, zoneRef, busyLocalLock, busyTransaction, concernClasses, refetchChains } = useDnsZoneContext();
   const secondaryZone = isSecondaryDnsZone(zone);
+  const createPeerType = dnsZoneTransferPeerType(zone);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [hostIpId, setHostIpId] = useState<number | null>(null);
+  const [tsigKeyId, setTsigKeyId] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<DnsZoneTransfer | null>(null);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const pagination = useKeysetPagination({
@@ -94,8 +137,15 @@ export function DnsZoneTransfersPage() {
   });
 
   const tsigQ = useQuery({
-    queryKey: ['dns_tsig_keys', 'lookup', zone.id],
-    queryFn: async () => (await fetchDnsTsigKeys({ limit: 200 })).data,
+    queryKey: ['dns_tsig_keys', 'lookup', zone.id, zone.user?.id ?? null],
+    queryFn: async () =>
+      (
+        await fetchDnsTsigKeys({
+          limit: 200,
+          user: typeof zone.user?.id === 'number' ? zone.user.id : undefined,
+        })
+      ).data,
+    enabled: createOpen,
     staleTime: 30_000,
   });
 
@@ -105,15 +155,35 @@ export function DnsZoneTransfersPage() {
     enabled: secondaryZone,
   });
 
+  const transferLogLimit = 25;
+  const [transferLogPage, setTransferLogPage] = useState(0);
+  const [transferLogCursors, setTransferLogCursors] = useState<Array<number | undefined>>([undefined]);
+  const transferLogFromId = transferLogCursors[transferLogPage];
+  useEffect(() => {
+    setTransferLogPage(0);
+    setTransferLogCursors([undefined]);
+  }, [zone.id]);
+
+  const transferLogsQ = useQuery({
+    queryKey: ['dns_server_zone_transfer_logs', zone.id, transferLogPage, transferLogFromId],
+    queryFn: async () =>
+      (
+        await fetchDnsServerZoneTransferLogs({
+          dns_zone: zone.id,
+          fromId: transferLogFromId,
+          limit: transferLogLimit,
+          order: 'latest',
+        })
+      ).data,
+    enabled: secondaryZone,
+  });
+
   const transfers = listQ.data?.data ?? [];
   const cursor = useMemo(() => cursorFromDescendingPage(transfers), [transfers]);
   const hasMore = transfers.length >= pagination.limit;
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [hostIpId, setHostIpId] = useState<number | null>(null);
-  const [peerType, setPeerType] = useState('primary_type');
-  const [tsigKeyId, setTsigKeyId] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState<DnsZoneTransfer | null>(null);
+  const transferLogs = transferLogsQ.data ?? [];
+  const transferLogCursor = useMemo(() => cursorFromDescendingPage(transferLogs), [transferLogs]);
+  const transferLogHasMore = transferLogs.length >= transferLogLimit && transferLogCursor !== undefined;
 
   const createM = useMutation({
     mutationFn: async () => {
@@ -122,7 +192,7 @@ export function DnsZoneTransfersPage() {
       return createDnsZoneTransfer({
         dns_zone: zone.id,
         host_ip_address: hostIpId,
-        peer_type: peerType,
+        peer_type: createPeerType,
         dns_tsig_key: tsigKeyId ? Number(tsigKeyId) : undefined,
       });
     },
@@ -138,7 +208,6 @@ export function DnsZoneTransfersPage() {
       }
       setCreateOpen(false);
       setHostIpId(null);
-      setPeerType('primary_type');
       setTsigKeyId('');
       void listQ.refetch();
       refetchChains();
@@ -201,7 +270,14 @@ export function DnsZoneTransfersPage() {
             {secondaryZone ? t('dns.zone.transfers.secondary.description') : t('dns.zone.transfers.description')}
           </p>
         </div>
-        <Button onClick={() => setCreateOpen(true)} testId="dns.transfers.create.open">{t('common.create')}</Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <LinkButton to={`${basePath}/dns/tsig-keys`} variant="secondary" testId="dns.transfers.tsig_keys">
+            {t('dns.zones.action.tsig_keys')}
+          </LinkButton>
+          <Button onClick={() => setCreateOpen(true)} testId="dns.transfers.create.open">
+            {t('common.create')}
+          </Button>
+        </div>
       </div>
 
       {transfers.length === 0 ? (
@@ -226,7 +302,7 @@ export function DnsZoneTransfersPage() {
                   return (
                     <tr key={transfer.id} className="border-t border-border" data-testid={`dns.transfers.row.${transfer.id}`}>
                       <td className="py-2 pl-4 pr-3 font-medium text-fg">{peerLabel(transfer)}</td>
-                      <td className="py-2 pr-3"><Badge variant="neutral">{peerTypeLabel(transfer.peer_type)}</Badge></td>
+                      <td className="py-2 pr-3"><Badge variant="neutral">{peerTypeLabel(t, transfer.peer_type)}</Badge></td>
                       <td className="py-2 pr-3">{transfer.dns_tsig_key?.name ? <Badge variant="ok">{transfer.dns_tsig_key.name}</Badge> : <Badge variant="neutral">{t('common.none')}</Badge>}</td>
                       <td className="py-2 pr-3">{transfer.created_at ? formatDateTime(String(transfer.created_at)) : t('common.na')}</td>
                       <td className="py-2 pr-3">
@@ -248,6 +324,85 @@ export function DnsZoneTransfersPage() {
           <KeysetPagination page={pagination.page} pageCount={pagination.stack.length} canPrev={pagination.canPrev} canNext={hasMore} onPrev={pagination.goPrev} onNext={() => pagination.goNext(cursor)} />
         </Card>
       )}
+
+      {secondaryZone ? (
+        <Card testId="dns.transfers.log">
+          <div className="border-b border-border px-4 py-3">
+            <h3 className="text-base font-semibold text-fg">{t('dns.zone.transfers.log.title')}</h3>
+            <p className="mt-1 text-sm text-muted">{t('dns.zone.transfers.log.description')}</p>
+          </div>
+          {transferLogsQ.isLoading ? (
+            <LoadingState testId="dns.transfers.log.loading" />
+          ) : transferLogsQ.isError ? (
+            <ErrorState
+              testId="dns.transfers.log.error"
+              title={t('dns.zone.transfers.log.load_failed')}
+              error={transferLogsQ.error}
+              onRetry={() => void transferLogsQ.refetch()}
+              showBack={false}
+            />
+          ) : transferLogs.length === 0 ? (
+            <div className="px-4 py-5 text-sm text-muted">{t('dns.zone.transfers.log.empty')}</div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm table-list">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-faint">
+                      <th className="py-2 pl-4 pr-3">{t('common.time')}</th>
+                      <th className="py-2 pr-3">{t('dns.zone.transfers.log.table.server')}</th>
+                      <th className="py-2 pr-3">{t('dns.zone.transfers.log.table.status')}</th>
+                      <th className="py-2 pr-3">{t('dns.zone.transfers.log.table.primary')}</th>
+                      <th className="py-2 pr-3">{t('dns.zone.servers.table.serial')}</th>
+                      <th className="py-2 pr-4">{t('dns.zone.transfers.log.table.result')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transferLogs.map((row) => {
+                      const reason = transferLogReason(t, row);
+                      const message = String(row.message ?? '');
+                      return (
+                        <tr key={row.id} className="border-t border-border" data-testid={`dns.transfers.log.row.${row.id}`}>
+                          <td className="py-2 pl-4 pr-3 whitespace-nowrap">
+                            {row.event_at ? formatDateTime(row.event_at) : t('common.na')}
+                          </td>
+                          <td className="py-2 pr-3 font-medium text-fg">{transferLogServerName(row)}</td>
+                          <td className="py-2 pr-3">{transferLogStatusBadge(t, row.status)}</td>
+                          <td className="py-2 pr-3 font-mono text-xs">{row.primary_addr || t('common.na')}</td>
+                          <td className="py-2 pr-3">{typeof row.serial === 'number' ? row.serial : t('common.na')}</td>
+                          <td className="py-2 pr-4">
+                            {reason || t('common.na')}
+                            {message && message !== reason ? (
+                              <div className="mt-1 max-w-xl text-xs text-muted">{message}</div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <KeysetPagination
+                page={transferLogPage + 1}
+                pageCount={transferLogCursors.length}
+                canPrev={transferLogPage > 0}
+                canNext={transferLogHasMore}
+                onPrev={() => setTransferLogPage((page) => Math.max(0, page - 1))}
+                onNext={() => {
+                  if (typeof transferLogCursor !== 'number') return;
+                  const nextPage = transferLogPage + 1;
+                  const nextCursor = transferLogCursor;
+                  setTransferLogCursors((current) => [
+                    ...current.slice(0, nextPage),
+                    nextCursor,
+                  ]);
+                  setTransferLogPage(nextPage);
+                }}
+              />
+            </>
+          )}
+        </Card>
+      ) : null}
 
       {secondaryZone ? (
         <Card testId="dns.transfers.status">
@@ -298,21 +453,22 @@ export function DnsZoneTransfersPage() {
         </Card>
       ) : null}
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('dns.zone.transfers.create.title')}>
-        <div className="space-y-4">
-          {createM.isError ? <Alert variant="danger" title={t('dns.zone.transfers.create.failed')}>{formatErrorMessage(createM.error)}</Alert> : null}
-          <div>
-            <div className="mb-1 text-sm font-medium text-fg">{t('dns.zone.transfers.field.host_ip')}</div>
-            <HostIpLookupInput value={hostIpId} onChange={setHostIpId} placeholder={t('dns.zone.transfers.field.host_ip_placeholder')} testId="dns.transfers.create.host_ip" />
-          </div>
-          <div><div className="mb-1 text-sm font-medium text-fg">{t('dns.zone.transfers.field.peer_type')}</div><Select value={peerType} onChange={(e) => setPeerType(e.target.value)} options={[{ value: 'primary_type', label: t('dns.zone.transfers.peer_type.primary') }, { value: 'secondary_type', label: t('dns.zone.transfers.peer_type.secondary') }]} testId="dns.transfers.create.peer_type" /></div>
-          <div><div className="mb-1 text-sm font-medium text-fg">{t('dns.zone.transfers.field.tsig_key')}</div><Select value={tsigKeyId} onChange={(e) => setTsigKeyId(e.target.value)} options={tsigOptions} testId="dns.transfers.create.tsig" /></div>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
-            <ActionButton onClick={() => createM.mutate()} loading={createM.isPending} disabled={!hostIpId}>{t('common.create')}</ActionButton>
-          </div>
-        </div>
-      </Modal>
+      <DnsZoneTransferCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        ownerUserId={mode === 'admin' && typeof zone.user?.id === 'number' ? zone.user.id : undefined}
+        hostIpId={hostIpId}
+        onHostIpIdChange={setHostIpId}
+        tsigKeyId={tsigKeyId}
+        onTsigKeyIdChange={setTsigKeyId}
+        tsigOptions={tsigOptions}
+        tsigLoading={tsigQ.isLoading}
+        tsigError={tsigQ.isError ? tsigQ.error : null}
+        onRetryTsig={() => void tsigQ.refetch()}
+        createPending={createM.isPending}
+        createError={createM.isError ? createM.error : null}
+        onSubmit={() => createM.mutate()}
+      />
 
       <ConfirmDialog open={confirmDelete !== null} onClose={() => setConfirmDelete(null)} title={t('dns.zone.transfers.delete.title')} description={confirmDelete ? t('dns.zone.transfers.delete.description', { peer: peerLabel(confirmDelete) }) : ''} confirmLabel={t('common.delete')} confirmVariant="danger" onConfirm={() => deleteM.mutate()} loading={deleteM.isPending} />
     </div>

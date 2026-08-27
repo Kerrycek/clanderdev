@@ -184,9 +184,12 @@ export async function fetchHostIpAddresses(opts?: {
   fromId?: number;
   limit?: number;
   q?: string;
+  addr?: string;
   user?: number;
   vps?: number;
   assigned?: boolean;
+  purpose?: string;
+  routed?: boolean;
   order?: string;
   includes?: string;
 }) {
@@ -194,9 +197,12 @@ export async function fetchHostIpAddresses(opts?: {
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.q !== undefined) params['q'] = opts.q;
+  if (opts?.addr !== undefined) params['addr'] = opts.addr;
   if (opts?.user !== undefined) params['user'] = opts.user;
   if (opts?.vps !== undefined) params['vps'] = opts.vps;
   if (opts?.assigned !== undefined) params['assigned'] = opts.assigned;
+  if (opts?.purpose !== undefined) params['purpose'] = opts.purpose;
+  if (opts?.routed !== undefined) params['routed'] = opts.routed;
   if (opts?.order !== undefined) params['order'] = opts.order;
 
   const res = await haveApiCall<HostIpAddress[]>({

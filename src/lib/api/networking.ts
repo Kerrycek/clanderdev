@@ -178,7 +178,6 @@ export async function fetchIpAddressAssignments(opts?: {
 
 export async function fetchNetworkInterfaceMonitor(opts?: {
   limit?: number;
-  q?: string;
   user?: number;
   environment?: number;
   location?: number;
@@ -186,10 +185,10 @@ export async function fetchNetworkInterfaceMonitor(opts?: {
   vps?: number;
   networkInterface?: number;
   order?: string;
+  includes?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q) params['q'] = opts.q;
   if (opts?.user !== undefined) params['user'] = opts.user;
   if (opts?.environment !== undefined) params['environment'] = opts.environment;
   if (opts?.location !== undefined) params['location'] = opts.location;
@@ -203,7 +202,9 @@ export async function fetchNetworkInterfaceMonitor(opts?: {
     path: '/network_interface_monitors',
     namespace: 'network_interface_monitor',
     params,
-    meta: { includes: 'network_interface,network_interface.vps,network_interface.vps.user,network_interface.vps.node' },
+    meta: {
+      includes: opts?.includes ?? 'network_interface__vps',
+    },
   });
   return { ...res, data: expectArray<NetworkInterfaceMonitorRow>(res.data, 'network_interface_monitors#index') };
 }

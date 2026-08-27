@@ -1,13 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { CircleHelp, Plus, RefreshCw, SlidersHorizontal } from 'lucide-react';
 
 import { useAppMode } from '../../../app/appMode';
 import { useObjectScope } from '../../../app/objectScope';
 import { useI18n } from '../../../app/i18n';
-import { fetchDnsZones, createDnsZone, type DnsZone } from '../../../lib/api/dns';
-import { formatErrorMessage } from '../../../lib/errors';
+import { fetchDnsZones, type DnsZone } from '../../../lib/api/dns';
 import { searchUsers } from '../../../lib/api/users';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
@@ -25,11 +24,9 @@ import { ListShell } from '../../../components/layout/ListShell';
 import { SyncStaleBanner } from '../../../components/layout/SyncStaleBanner';
 import { PageHeader } from '../../../components/layout/PageHeader';
 
-import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
-import { Checkbox } from '../../../components/ui/Checkbox';
 import { CopyButton } from '../../../components/ui/CopyButton';
 import { Drawer } from '../../../components/ui/Drawer';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -39,7 +36,6 @@ import { Input } from '../../../components/ui/Input';
 import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LinkButton } from '../../../components/ui/LinkButton';
 import { LoadingState } from '../../../components/ui/LoadingState';
-import { Modal } from '../../../components/ui/Modal';
 import { Select } from '../../../components/ui/Select';
 import { SmartFilterInput, type SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
 import { SmartInputHelp } from '../../../components/ui/SmartInputHelp';
@@ -49,15 +45,31 @@ import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { toneSurfaceClass } from '../../../components/ui/tone';
 import {
-  canonicalDnsZoneName,
   canonicalKey,
-  isValidDnsZoneEmail,
   normalizeRole,
   normalizeSource,
   roleLabel,
   sourceLabel,
   zoneName,
 } from './dnsZoneListSemantics';
+import { DnsZoneCreateModal, type DnsZoneCreatedResult } from './DnsZoneCreateModal';
+
+function matchesZoneSearch(zone: DnsZone, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+
+  const owner = zone.user;
+  const values = [
+    zone.id,
+    `#${zone.id}`,
+    zone.name,
+    zone.label,
+    owner?.['login'],
+    owner?.['full_name'],
+  ];
+
+  return values.some((value) => String(value ?? '').toLocaleLowerCase().includes(needle));
+}
 
 export function DnsZonesPage() {
   const { basePath, mode } = useAppMode();
@@ -97,7 +109,10 @@ export function DnsZonesPage() {
 
   const userIdNum = useMemo(() => (mode === 'admin' ? parsePositiveInt(userRaw) : undefined), [mode, userRaw]);
   const enabledVal = useMemo(() => parseBoolParam(enabledRaw), [enabledRaw]);
-  const dnssecVal = useMemo(() => parseBoolParam(dnssecRaw), [dnssecRaw]);
+  const dnssecVal = useMemo(
+    () => (mode === 'admin' ? parseBoolParam(dnssecRaw) : undefined),
+    [dnssecRaw, mode]
+  );
   const roleVal = useMemo(() => normalizeRole(roleRaw), [roleRaw]);
   const sourceVal = useMemo(() => normalizeSource(sourceRaw), [sourceRaw]);
 
@@ -108,6 +123,11 @@ export function DnsZonesPage() {
 
     if (mode !== 'admin' && next.get('user')) {
       next.delete('user');
+      changed = true;
+    }
+
+    if (mode !== 'admin' && next.get('dnssec')) {
+      next.delete('dnssec');
       changed = true;
     }
 
@@ -150,7 +170,7 @@ export function DnsZonesPage() {
     Boolean(qText) ||
     (mode === 'admin' && userIdNum !== undefined) ||
     enabledVal !== undefined ||
-    dnssecVal !== undefined ||
+    (mode === 'admin' && dnssecVal !== undefined) ||
     roleVal !== undefined ||
     sourceVal !== undefined;
 
@@ -179,7 +199,6 @@ export function DnsZonesPage() {
       {
         limit: pagination.limit,
         fromId: pagination.fromId,
-        q: qText || null,
         user: mode === 'admin' ? userIdNum ?? null : scope.mineUserId ?? null,
         enabled: enabledVal ?? null,
         dnssec: dnssecVal ?? null,
@@ -191,19 +210,22 @@ export function DnsZonesPage() {
       await fetchDnsZones({
         limit: pagination.limit,
         fromId: pagination.fromId,
-        q: qText || undefined,
         user: mode === 'admin' ? userIdNum : scope.mineUserId,
         enabled: enabledVal,
-        dnssec_enabled: dnssecVal,
+        dnssec_enabled: mode === 'admin' ? dnssecVal : undefined,
         role: roleVal,
         source: sourceVal,
       })
     ).data,
   });
 
-  const rows = zonesQ.data ?? [];
-  const pageCursor = useMemo(() => cursorFromDescendingPage(rows as any), [rows]);
-  const hasMore = rows.length >= pagination.limit;
+  const apiRows = zonesQ.data ?? [];
+  const rows = useMemo(
+    () => apiRows.filter((zone) => matchesZoneSearch(zone, qText)),
+    [apiRows, qText]
+  );
+  const pageCursor = useMemo(() => cursorFromDescendingPage(apiRows as any), [apiRows]);
+  const hasMore = apiRows.length >= pagination.limit;
 
   const shareUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
@@ -454,6 +476,10 @@ export function DnsZonesPage() {
         }
 
         if (key === 'dnssec') {
+          if (mode !== 'admin') {
+            errors.push(t('filters.smart.error.admin_only', { key: 'dnssec' }));
+            continue;
+          }
           const b = parseBoolParam(value);
           if (b === undefined) {
             errors.push(t('dns.zones.smart.error.bool', { key: 'dnssec', value }));
@@ -503,7 +529,7 @@ export function DnsZonesPage() {
     setTextParam('q', nextQ || undefined);
     if (mode === 'admin') setTextParam('user', nextUser || undefined);
     setTextParam('enabled', nextEnabled || undefined);
-    setTextParam('dnssec', nextDnssec || undefined);
+    if (mode === 'admin') setTextParam('dnssec', nextDnssec || undefined);
     setTextParam('role', nextRole || undefined);
     setTextParam('source', nextSource || undefined);
 
@@ -550,7 +576,7 @@ export function DnsZonesPage() {
       );
     }
 
-    if (dnssecVal !== undefined) {
+    if (mode === 'admin' && dnssecVal !== undefined) {
       chips.push(
         <FilterChip
           key="dnssec"
@@ -591,60 +617,26 @@ export function DnsZonesPage() {
 
   // Create zone modal
   const [createOpen, setCreateOpen] = useState(false);
-  const [createName, setCreateName] = useState('');
-  const [createEmail, setCreateEmail] = useState('');
-  const [createEnabled, setCreateEnabled] = useState(true);
-  const [createDnssec, setCreateDnssec] = useState(false);
-  const [createDefaultTtl, setCreateDefaultTtl] = useState('3600');
-  const createEmailValue = createEmail.trim();
-  const createDefaultTtlValue = Number(createDefaultTtl);
-  const createValidationError = (() => {
-    if (!createName.trim()) return t('dns.zones.create.validation.name_required');
-    if (!createEmailValue) return t('dns.zones.create.validation.email_required');
-    if (!isValidDnsZoneEmail(createEmailValue)) return t('dns.zones.create.validation.email_invalid');
-    if (mode === 'admin' && (!Number.isFinite(createDefaultTtlValue) || createDefaultTtlValue < 60)) {
-      return t('dns.zones.create.validation.ttl_invalid');
+
+  const handleZoneCreated = (created: DnsZoneCreatedResult) => {
+    void zonesQ.refetch();
+
+    if (created.id !== null) {
+      navigate(
+        created.kind === 'secondary'
+          ? `${basePath}/dns/zones/${created.id}/transfers`
+          : `${basePath}/dns/zones/${created.id}`
+      );
+      return;
     }
-    return '';
-  })();
 
-  const createZ = useMutation({
-    mutationFn: async () => {
-      if (createValidationError) throw new Error(createValidationError);
-
-      const payload: Parameters<typeof createDnsZone>[0] = {
-        name: canonicalDnsZoneName(createName),
-        email: createEmailValue,
-        // A zone created from this UI is an authoritative user zone. The API
-        // treats internal and external zones differently, so keep this aligned
-        // with the legacy primary-zone form instead of relying on a DB default.
-        source: 'internal_source',
-        enabled: createEnabled,
-        dnssec_enabled: createDnssec,
-      };
-
-      // The API only whitelists default_ttl for admins during zone creation.
-      // User-created zones receive the backend default just like the legacy UI.
-      if (mode === 'admin') payload.default_ttl = createDefaultTtlValue;
-
-      return createDnsZone(payload);
-    },
-    onSuccess: () => {
-      setCreateOpen(false);
-      setCreateName('');
-      setCreateEmail('');
-      setCreateEnabled(true);
-      setCreateDnssec(false);
-      setCreateDefaultTtl('3600');
-      void zonesQ.refetch();
-
-      // Reset cursor stack to show the newest results.
-      const next = new URLSearchParams(searchParams);
-      next.delete('from_id');
-      next.set('page', '1');
-      setSearchParams(next, { replace: true });
-    },
-  });
+    // Reset cursor stack to show the newest result if an older API omits the
+    // created object from the response.
+    const next = new URLSearchParams(searchParams);
+    next.delete('from_id');
+    next.set('page', '1');
+    setSearchParams(next, { replace: true });
+  };
 
   return (
     <ListShell
@@ -658,11 +650,9 @@ export function DnsZonesPage() {
           meta={filtersActive ? t('list.meta.filters_active') : undefined}
           actions={
             <div className="flex items-center gap-2">
-              {mode === 'admin' ? (
-                <LinkButton to={`${basePath}/dns/tsig-keys`} variant="secondary" size="sm" testId="dns.zones.tsig_keys">
-                  {t('dns.zones.action.tsig_keys')}
-                </LinkButton>
-              ) : null}
+              <LinkButton to={`${basePath}/dns/tsig-keys`} variant="secondary" size="sm" testId="dns.zones.tsig_keys">
+                {t('dns.zones.action.tsig_keys')}
+              </LinkButton>
 
               <Button
                 variant="secondary"
@@ -757,7 +747,7 @@ export function DnsZonesPage() {
           showBack={false}
           detailsExtra={{ page: 'dns.zones', scope: scope.scope }}
         />
-      ) : rows.length === 0 ? (
+      ) : apiRows.length === 0 ? (
         <EmptyState
           testId="dns.zones.empty"
           title={filtersActive ? t('empty.list.no_matches.title') : t('dns.zones.empty')}
@@ -769,7 +759,15 @@ export function DnsZonesPage() {
         <>
           {/* Mobile: cards */}
           <div className="space-y-3 md:hidden">
-            {rows.map((z) => {
+            {rows.length === 0 ? (
+              <EmptyState
+                testId="dns.zones.no_matches.page"
+                title={t('empty.list.no_matches.title')}
+                body={t('empty.list.no_matches.body')}
+                actionLabel={t('common.clear_filters')}
+                onAction={clearFilters}
+              />
+            ) : rows.map((z) => {
               const rowVariant = zoneRowVariant(z);
               const dotVariant = zoneDotVariant(z);
               return (
@@ -856,7 +854,13 @@ export function DnsZonesPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((z) => {
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-3 py-10 text-center text-sm text-muted">
+                    {t('empty.list.no_matches.title')}
+                  </td>
+                </tr>
+              ) : rows.map((z) => {
                 const rowVariant = zoneRowVariant(z);
                 const dotVariant = zoneDotVariant(z);
                 return (
@@ -911,10 +915,12 @@ export function DnsZonesPage() {
             key: 'enabled:false',
             description: t('dns.zones.smart_help.items.enabled'),
           },
-          {
-            key: 'dnssec:true',
-            description: t('dns.zones.smart_help.items.dnssec'),
-          },
+          ...(mode === 'admin'
+            ? [{
+                key: 'dnssec:true',
+                description: t('dns.zones.smart_help.items.dnssec'),
+              }]
+            : []),
           {
             key: 'role:reverse',
             description: t('dns.zones.smart_help.items.role'),
@@ -983,21 +989,23 @@ export function DnsZonesPage() {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium">{t('dns.zones.advanced.dnssec.label')}</label>
-            <div className="mt-1">
-              <Select
-                value={dnssecRaw}
-                onChange={(e) => setTextParam('dnssec', e.target.value || undefined)}
-                testId="dns.zones.advanced.dnssec"
-                options={[
-                  { value: '', label: t('common.all') },
-                  { value: '1', label: t('common.yes') },
-                  { value: '0', label: t('common.no') },
-                ]}
-              />
+          {mode === 'admin' ? (
+            <div>
+              <label className="block text-sm font-medium">{t('dns.zones.advanced.dnssec.label')}</label>
+              <div className="mt-1">
+                <Select
+                  value={dnssecRaw}
+                  onChange={(e) => setTextParam('dnssec', e.target.value || undefined)}
+                  testId="dns.zones.advanced.dnssec"
+                  options={[
+                    { value: '', label: t('common.all') },
+                    { value: '1', label: t('common.yes') },
+                    { value: '0', label: t('common.no') },
+                  ]}
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div>
             <label className="block text-sm font-medium">{t('dns.zones.advanced.role.label')}</label>
@@ -1047,95 +1055,12 @@ export function DnsZonesPage() {
         </div>
       </Drawer>
 
-      <Modal
+      <DnsZoneCreateModal
+        mode={mode}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        title={t('dns.zones.create.title')}
-        testId="dns.zones.create.modal"
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setCreateOpen(false)}
-              disabled={createZ.isPending}
-              testId="dns.zones.create.cancel"
-            >
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={() => createZ.mutate()}
-              disabled={createZ.isPending || Boolean(createValidationError)}
-              testId="dns.zones.create.submit"
-            >
-              {createZ.isPending ? t('dns.zones.create.submit_creating') : t('dns.zones.create.submit')}
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted">{t('dns.zones.create.name.label')}</div>
-            <Input
-              value={createName}
-              onChange={(e) => setCreateName(e.target.value)}
-              placeholder={t('dns.zones.create.name.placeholder')}
-              testId="dns.zones.create.name"
-            />
-            <div className="mt-1 text-xs text-muted">{t('dns.zones.create.name.help')}</div>
-          </div>
-
-          <div>
-            <div className="mb-1 text-xs font-medium text-muted">{t('dns.zones.create.email.label')}</div>
-            <Input
-              value={createEmail}
-              onChange={(e) => setCreateEmail(e.target.value)}
-              placeholder={t('dns.zones.create.email.placeholder')}
-              testId="dns.zones.create.email"
-              className={createEmailValue && !isValidDnsZoneEmail(createEmailValue) ? 'border-danger-border' : undefined}
-            />
-            <div className="mt-1 text-xs text-muted">{t('dns.zones.create.email.help')}</div>
-          </div>
-
-          {mode === 'admin' ? (
-            <div>
-              <div className="mb-1 text-xs font-medium text-muted">{t('dns.zones.create.ttl.label')}</div>
-              <Select
-                value={createDefaultTtl}
-                onChange={(e) => setCreateDefaultTtl(e.target.value)}
-                testId="dns.zones.create.ttl"
-                options={[
-                  { value: '300', label: '300' },
-                  { value: '600', label: '600' },
-                  { value: '3600', label: '3600' },
-                  { value: '14400', label: '14400' },
-                  { value: '86400', label: '86400' },
-                ]}
-              />
-            </div>
-          ) : null}
-
-          <Checkbox checked={createEnabled} onChange={setCreateEnabled} testId="dns.zones.create.enabled" label={t('common.enabled')} />
-
-          <Checkbox
-            checked={createDnssec}
-            onChange={setCreateDnssec}
-            testId="dns.zones.create.dnssec"
-            label={t('dns.zones.create.dnssec.label')}
-          />
-
-          {createValidationError && (createName.trim() || createEmail.trim()) ? (
-            <Alert title={t('dns.zones.create.validation.title')} variant="warn">
-              {createValidationError}
-            </Alert>
-          ) : null}
-
-          {createZ.isError ? (
-            <Alert title={t('dns.zones.create.failed')} variant="danger">
-              {formatErrorMessage(createZ.error)}
-            </Alert>
-          ) : null}
-        </div>
-      </Modal>
+        onCreated={handleZoneCreated}
+      />
     </ListShell>
   );
 }
