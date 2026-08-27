@@ -46,6 +46,7 @@ function MountDatasetLink(props: { basePath: string; mount: VpsMount; testId: st
 export function VpsStorageMountsCard(props: {
   basePath: string;
   canAdmin: boolean;
+  canMutate: boolean;
   mounts: VpsMount[];
   loading: boolean;
   error: string | null;
@@ -106,14 +107,14 @@ export function VpsStorageMountsCard(props: {
                       {mount.expiration_date ? <span>{t('vps.storage.mounts.field.expiration', { value: formatDateTime(mount.expiration_date) })}</span> : null}
                     </div>
 
-                    <div className="mt-3 flex items-center justify-end gap-2">
+                    {props.canMutate ? <div className="mt-3 flex items-center justify-end gap-2">
                       <Button variant="secondary" size="sm" testId={`vps.storage.mounts.card.${mount.id}.edit`} onClick={() => props.onEdit(mount)}>
                         {t('common.edit')}
                       </Button>
                       <Button variant="danger" size="sm" testId={`vps.storage.mounts.card.${mount.id}.delete`} onClick={() => props.onDelete(mount)}>
                         {t('common.delete')}
                       </Button>
-                    </div>
+                    </div> : null}
                   </CardBody>
                 </Card>
               ))}
@@ -134,7 +135,7 @@ export function VpsStorageMountsCard(props: {
                     <th className="px-4 py-3">{t('vps.storage.mounts.field.current_state_short')}</th>
                     <th className="px-4 py-3">{t('vps.storage.mounts.field.expiration_short')}</th>
                     <th className="px-4 py-3">{t('vps.storage.mounts.field.updated')}</th>
-                    <th className="px-4 py-3"></th>
+                    {props.canMutate ? <th className="px-4 py-3"></th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -162,7 +163,7 @@ export function VpsStorageMountsCard(props: {
                         <td className="px-4 py-3">{String(mount.current_state ?? '—')}</td>
                         <td className="px-4 py-3 text-xs text-muted">{formatDateTime(mount.expiration_date)}</td>
                         <td className="px-4 py-3 text-xs text-muted">{formatDateTime(mount.updated_at)}</td>
-                        <td className="px-4 py-3 text-right">
+                        {props.canMutate ? <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-2">
                             <Button variant="secondary" size="sm" testId={`vps.storage.mounts.row.${mount.id}.edit`} onClick={() => props.onEdit(mount)}>
                               {t('common.edit')}
@@ -171,7 +172,7 @@ export function VpsStorageMountsCard(props: {
                               {t('common.delete')}
                             </Button>
                           </div>
-                        </td>
+                        </td> : null}
                       </tr>
                     );
                   })}

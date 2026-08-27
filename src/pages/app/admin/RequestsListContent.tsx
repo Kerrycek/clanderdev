@@ -198,15 +198,15 @@ export function RequestsListContent(props: {
               </th>
             ) : null}
             <th className="w-10 px-2 py-2"></th>
-            <th className="px-4 py-2">{t('common.id')}</th>
-            <th className="px-4 py-2">{t('common.type')}</th>
-            <th className="px-4 py-2">{t('common.label')}</th>
-            {props.isAdmin ? <th className="px-4 py-2">{t('common.user')}</th> : null}
-            <th className="px-4 py-2">{t('common.state')}</th>
-            <th className="px-4 py-2">{t('common.created')}</th>
-            <th className="px-4 py-2">{t('requests.list.col.api_ip')}</th>
-            <th className="px-4 py-2">{t('requests.list.col.client_ip')}</th>
-            {props.isAdmin ? <th className="px-4 py-2">{t('requests.list.col.risk')}</th> : null}
+            <th className="px-3 py-2">{t('common.id')}</th>
+            <th className="px-3 py-2">{t('common.type')}</th>
+            <th className="px-3 py-2">{t('common.label')}</th>
+            {props.isAdmin ? <th className="px-3 py-2">{t('common.user')}</th> : null}
+            <th className="px-3 py-2">{t('common.state')}</th>
+            <th className="px-3 py-2">{t('common.created')}</th>
+            <th className="px-3 py-2">{t('requests.list.col.api_ip')}</th>
+            <th className="px-3 py-2">{t('requests.list.col.client_ip')}</th>
+            {props.isAdmin ? <th className="px-3 py-2">{t('requests.list.col.risk')}</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -256,25 +256,25 @@ export function RequestsListContent(props: {
                       {expanded ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
                     </Button>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <StatusDot variant={dotVar} testId={`admin.requests.row.${reqType}.${id}.dot`} />
                       <span className="font-medium text-accent">#{id}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-3 py-2">
                     <Badge variant={requestTypeBadgeVariant(reqType)}>{t(requestTypeLabelKey(reqType))}</Badge>
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted">{requestLabel(request)}</td>
-                  {props.isAdmin ? <td className="px-4 py-2 text-xs text-muted">{userLabel(request.user)}</td> : null}
-                  <td className="px-4 py-2">
+                  <td className="px-3 py-2 text-xs text-muted">{requestLabel(request)}</td>
+                  {props.isAdmin ? <td className="px-3 py-2 text-xs text-muted">{userLabel(request.user)}</td> : null}
+                  <td className="px-3 py-2">
                     <Badge variant={stateVar}>{t(requestStateLabelKey(state))}</Badge>
                   </td>
-                  <td className="px-4 py-2 text-xs text-muted">{createdAt ? formatDateTime(createdAt) : '—'}</td>
-                  <td className="px-4 py-2 text-xs text-muted">{requestIpValue(request, 'api_ip_addr')}</td>
-                  <td className="px-4 py-2 text-xs text-muted">{requestIpValue(request, 'client_ip_addr')}</td>
+                  <td className="px-3 py-2 text-xs text-muted">{createdAt ? formatDateTime(createdAt) : '—'}</td>
+                  <td className="px-3 py-2 text-xs text-muted">{requestIpValue(request, 'api_ip_addr')}</td>
+                  <td className="px-3 py-2 text-xs text-muted">{requestIpValue(request, 'client_ip_addr')}</td>
                   {props.isAdmin ? (
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       {risk ? (
                         <Badge variant={risk.variant} title={t('requests.risk.tooltip', { score: risk.score })}>
                           {t(risk.labelKey)} {risk.score}

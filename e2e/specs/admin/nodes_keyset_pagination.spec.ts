@@ -41,6 +41,9 @@ test('admin nodes: keyset pagination (from_id)', async ({ page }) => {
   await expect(page.getByTestId('admin.nodes.row.125')).toHaveAttribute('data-row-variant', 'danger');
   await expect(page.getByTestId('admin.nodes.row.125.dot')).toBeVisible();
   await expect(page.getByTestId('admin.nodes.row.124')).toHaveAttribute('data-row-variant', 'warn');
+  await expect(page.getByTestId('admin.nodes.row.125.detail')).toHaveAttribute('href', '/admin/nodes/125');
+  await expect(page.getByTestId('admin.nodes.row.125.copy')).toBeVisible();
+  await expect(page.getByTestId('admin.nodes.row.125.vps')).toBeVisible();
 
   await page.getByTestId('admin.nodes.pagination.desktop.next').click();
   await expect(page.getByTestId('admin.nodes.row.75')).toBeVisible();

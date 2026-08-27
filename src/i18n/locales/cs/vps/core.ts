@@ -50,7 +50,7 @@ export const csVps_core = {
   'vps.power.error.task_failed': 'Operace selhala (úloha #{id}). Podrobnosti najdeš v Úlohách.',
   'vps.tabs.overview': 'Přehled',
   'vps.tabs.network': 'Síť',
-  'vps.tabs.storage': 'Úložiště',
+  'vps.tabs.storage': 'Úložiště a zálohy',
   'vps.tabs.features': 'Funkce',
   'vps.tabs.maintenance': 'Údržba',
   'vps.tabs.lifecycle': 'Lifecycle',

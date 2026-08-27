@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Activity, AlertTriangle, Clock3, Globe, LogOut, Menu, Search, User, WifiOff } from 'lucide-react';
+import { Activity, Menu, Search } from 'lucide-react';
 
 import { useAuth } from '../../app/auth';
 import { useAppMode } from '../../app/appMode';
 import { useObjectScope } from '../../app/objectScope';
 import { clusterSearch, type ClusterSearchHit } from '../../lib/api/clusterSearch';
-import { fetchVps, fetchVpsList, type Vps } from '../../lib/api/vps';
 import {
   clusterResourceHref,
   clusterResourceKey,
@@ -15,379 +14,17 @@ import {
   normalizeClusterResource,
   parseClusterId,
 } from '../../lib/search/clusterSearchResults';
+import {
+  searchUserObjects,
+  type UserGlobalSearchGroup,
+} from '../../lib/search/userGlobalSearch';
 import { Badge } from '../ui/Badge';
-import { Button } from '../ui/Button';
 import { clsx } from '../ui/clsx';
-import { formatErrorMessage } from '../../lib/errors';
 import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
+import { AppSyncPopover, AppUserMenu, readSessionIdleLimitSeconds } from './AppHeaderMenus';
+import type { AppHeaderProps } from './AppHeaderTypes';
 
-interface AppHeaderProps {
-  t: (key: any, vars?: Record<string, unknown>) => string;
-  mode: 'user' | 'admin';
-  canSwitchMode: boolean;
-  shortcutHint: string;
-  onOpenMobileNav: () => void;
-  showSyncIndicator: boolean;
-  syncRef: React.RefObject<HTMLDivElement | null>;
-  syncOpen: boolean;
-  setSyncOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  syncStatus: 'offline' | 'error';
-  syncTitle: string;
-  syncBody: string;
-  syncError: unknown;
-  onRetrySync: () => void;
-  tasksFailedCount: number;
-  tasksActiveCount: number;
-  onOpenTasks: () => void;
-  userMenuRef: React.RefObject<HTMLDivElement | null>;
-  userMenuOpen: boolean;
-  setUserMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  authLogin?: string;
-  authRole?: string;
-  sessionExpiresAt?: number;
-  theme: 'system' | 'light' | 'dark';
-  language: 'system' | 'en' | 'cs';
-  onSetTheme: (next: 'system' | 'light' | 'dark') => void;
-  onSetLanguage: (next: 'system' | 'en' | 'cs') => void;
-  onGoToOtherMode: () => void;
-  onGoToProfile: () => void;
-  onGoToPublicStatus: () => void;
-  loginLogoutHref: string;
-}
-
-function AppSyncPopover(props: Pick<AppHeaderProps,
-  't' | 'syncRef' | 'syncOpen' | 'setSyncOpen' | 'syncStatus' | 'syncTitle' | 'syncBody' | 'syncError' | 'onRetrySync'
->) {
-  const { t, syncRef, syncOpen, setSyncOpen, syncStatus, syncTitle, syncBody, syncError, onRetrySync } = props;
-
-  return (
-    <div className="relative order-8 md:order-6" ref={syncRef}>
-      <button
-        className={clsx(
-          'inline-flex h-11 w-12 items-center justify-center rounded-md border border-border bg-overlay-surface text-sm shadow-card hover:bg-surface-2',
-          'sm:h-10 sm:w-auto sm:justify-start sm:gap-2 sm:px-3',
-          syncStatus === 'offline' ? 'text-danger' : 'text-warn'
-        )}
-        onClick={() => setSyncOpen((v) => !v)}
-        aria-label={syncStatus === 'offline' ? t('sync.offline.indicator') : t('sync.error.indicator')}
-        title={syncStatus === 'offline' ? t('sync.offline.indicator') : t('sync.error.indicator')}
-        data-testid="shell.sync-indicator"
-      >
-        {syncStatus === 'offline' ? <WifiOff size={18} /> : <AlertTriangle size={18} />}
-        <span className="hidden sm:inline">{syncTitle}</span>
-      </button>
-
-      {syncOpen ? (
-        <div
-          className="absolute right-0 mt-2 w-64 rounded-md border border-border bg-overlay-surface p-2 shadow-panel"
-          data-testid="shell.sync-panel"
-          data-overlay="popover"
-          data-overlay-surface="overlay"
-        >
-          <div className="px-2 py-1">
-            <div className="text-sm font-semibold">{syncTitle}</div>
-            <p className="mt-1 text-xs text-muted">{syncBody}</p>
-
-            {syncStatus === 'error' && syncError ? (
-              <p className="mt-2 text-xs text-muted" data-testid="shell.sync-panel.last-error">
-                {t('sync.error.last_error', { message: formatErrorMessage(syncError) })}
-              </p>
-            ) : null}
-
-            <div className="mt-3 flex gap-2">
-              <Button
-                testId="shell.sync-panel.retry"
-                size="sm"
-                variant="primary"
-                onClick={() => {
-                  onRetrySync();
-                  setSyncOpen(false);
-                }}
-              >
-                {t('common.retry')}
-              </Button>
-              <Button
-                testId="shell.sync-panel.reload"
-                size="sm"
-                variant="secondary"
-                onClick={() => window.location.reload()}
-              >
-                {t('common.reload')}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function AppUserMenu(props: Pick<AppHeaderProps,
-  't' | 'mode' | 'canSwitchMode' | 'userMenuRef' | 'userMenuOpen' | 'setUserMenuOpen' | 'authLogin' | 'authRole' |
-  'sessionExpiresAt' | 'theme' | 'language' | 'onSetTheme' | 'onSetLanguage' | 'onGoToOtherMode' | 'onGoToProfile' | 'onGoToPublicStatus' | 'loginLogoutHref'
-> & { sessionIdleLimitSeconds: number | null }) {
-  const {
-    t,
-    mode,
-    canSwitchMode,
-    userMenuRef,
-    userMenuOpen,
-    setUserMenuOpen,
-    authLogin,
-    authRole,
-    sessionExpiresAt,
-    sessionIdleLimitSeconds,
-    theme,
-    language,
-    onSetTheme,
-    onSetLanguage,
-    onGoToOtherMode,
-    onGoToProfile,
-    onGoToPublicStatus,
-    loginLogoutHref,
-  } = props;
-  const sessionRemaining = useSessionRemainingLabel(t, sessionExpiresAt);
-  const sessionIdleLimit = formatSessionIdleLimit(t, sessionIdleLimitSeconds);
-  const sessionDisplay = sessionIdleLimit
-    ? {
-        menuLabel: t('auth.session_idle.menu_label'),
-        value: sessionIdleLimit,
-      }
-    : sessionRemaining
-      ? {
-          menuLabel: t('auth.session_remaining.menu_label'),
-          value: sessionRemaining,
-        }
-      : null;
-  const segmentedButtonClass = (active: boolean) =>
-    clsx(
-      'inline-flex min-h-8 w-full min-w-0 items-center justify-center rounded-md border px-2 py-1 text-center text-xs font-medium leading-tight transition-colors',
-      'focus:outline-none focus:ring-2 focus:ring-focus/35 focus:ring-offset-2 focus:ring-offset-bg',
-      active ? 'border-accent bg-accent text-accent-fg hover:bg-accent-hover' : 'border-border bg-surface text-fg hover:bg-surface-2'
-    );
-
-  return (
-    <div className="relative order-10 flex items-center gap-2 md:order-8" ref={userMenuRef}>
-      {sessionDisplay ? (
-        <div
-          className={clsx(
-            'hidden h-10 items-center gap-1.5 rounded-md border border-border bg-overlay-surface px-2.5 text-xs font-medium text-muted shadow-card',
-            'lg:inline-flex'
-          )}
-          aria-label={`${sessionDisplay.menuLabel}: ${sessionDisplay.value}`}
-          title={`${sessionDisplay.menuLabel}: ${sessionDisplay.value}`}
-          data-testid="shell.session-remaining"
-        >
-          <Clock3 size={15} />
-          <span>{sessionDisplay.value}</span>
-        </div>
-      ) : null}
-      <button
-        className={clsx(
-          'inline-flex h-11 w-12 items-center justify-center gap-2 rounded-md border border-border bg-overlay-surface text-sm shadow-card hover:bg-surface-2',
-          'sm:h-10 sm:w-auto sm:justify-start sm:px-3'
-        )}
-        onClick={() => setUserMenuOpen((v) => !v)}
-        aria-label={t('user_menu.open')}
-        data-testid="shell.user-menu-button"
-      >
-        <User size={18} />
-        <span className="hidden sm:inline font-medium">{authLogin ?? '—'}</span>
-        <span className="hidden md:inline text-xs text-muted">{String(authRole ?? '—')}</span>
-      </button>
-
-      {userMenuOpen ? (
-        <div
-          className="absolute right-0 top-[calc(100%+0.5rem)] z-50 max-h-modal w-drawer-md overflow-y-auto overscroll-contain rounded-md border border-border bg-overlay-surface p-2 shadow-panel"
-          data-testid="shell.user-menu"
-          data-overlay="popover"
-          data-overlay-surface="overlay"
-        >
-          {canSwitchMode ? (
-            <div className="px-2 py-1">
-              <div className="text-xs text-muted">{t('settings.scope.label')}</div>
-              <div className="mt-1 grid grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-2">
-                <button
-                  type="button"
-                  data-testid="shell.user-menu.scope.mine"
-                  className={segmentedButtonClass(mode === 'user')}
-                  onClick={() => {
-                    if (mode === 'user') return;
-                    setUserMenuOpen(false);
-                    onGoToOtherMode();
-                  }}
-                >
-                  {t('settings.scope.mine')}
-                </button>
-                <button
-                  type="button"
-                  data-testid="shell.user-menu.scope.all"
-                  className={segmentedButtonClass(mode === 'admin')}
-                  onClick={() => {
-                    if (mode === 'admin') return;
-                    setUserMenuOpen(false);
-                    onGoToOtherMode();
-                  }}
-                >
-                  {t('settings.scope.all')}
-                </button>
-              </div>
-              <p className={clsx('mt-2 text-xs', mode === 'admin' ? 'text-warn' : 'text-muted')}>
-                {mode === 'admin' ? t('scope.indicator.admin_hint') : t('scope.indicator.my_hint')}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="mt-2 border-t border-border px-2 pt-2">
-            <div className="text-xs text-muted">{t('settings.theme.label')}</div>
-            <div className="mt-1 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                data-testid="shell.user-menu.theme.system"
-                className={segmentedButtonClass(theme === 'system')}
-                onClick={() => onSetTheme('system')}
-              >
-                {t('settings.theme.system')}
-              </button>
-              <button
-                type="button"
-                data-testid="shell.user-menu.theme.light"
-                className={segmentedButtonClass(theme === 'light')}
-                onClick={() => onSetTheme('light')}
-              >
-                {t('settings.theme.light')}
-              </button>
-              <button
-                type="button"
-                data-testid="shell.user-menu.theme.dark"
-                className={segmentedButtonClass(theme === 'dark')}
-                onClick={() => onSetTheme('dark')}
-              >
-                {t('settings.theme.dark')}
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-2 border-t border-border px-2 pt-2">
-            <div className="text-xs text-muted">{t('settings.language.label')}</div>
-            <div className="mt-1 grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                data-testid="shell.user-menu.language.system"
-                className={segmentedButtonClass(language === 'system')}
-                onClick={() => onSetLanguage('system')}
-              >
-                {t('settings.language.system')}
-              </button>
-              <button
-                type="button"
-                data-testid="shell.user-menu.language.en"
-                title={t('settings.language.en')}
-                className={segmentedButtonClass(language === 'en')}
-                onClick={() => onSetLanguage('en')}
-              >
-                EN
-              </button>
-              <button
-                type="button"
-                data-testid="shell.user-menu.language.cs"
-                title={t('settings.language.cs')}
-                className={segmentedButtonClass(language === 'cs')}
-                onClick={() => onSetLanguage('cs')}
-              >
-                CS
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-2 border-t border-border pt-2">
-            <button
-              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-2"
-              onClick={() => {
-                setUserMenuOpen(false);
-                onGoToProfile();
-              }}
-              data-testid="shell.user-menu.account"
-            >
-              <User size={16} />
-              <span>{t('user_menu.account')}</span>
-            </button>
-            <button
-              className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-2"
-              onClick={() => {
-                setUserMenuOpen(false);
-                onGoToPublicStatus();
-              }}
-              data-testid="shell.user-menu.public-status"
-            >
-              <Globe size={16} />
-              <span>{t('user_menu.public_status')}</span>
-            </button>
-          </div>
-
-          <div className="mt-2 border-t border-border pt-2">
-            <a
-              data-testid="shell.user-menu.logout"
-              className="flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-2"
-              href={loginLogoutHref}
-            >
-              <LogOut size={16} />
-              <span>{t('user_menu.logout')}</span>
-            </a>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function formatSessionRemaining(t: AppHeaderProps['t'], expiresAt: number, now: number): string {
-  const remainingMs = expiresAt - now;
-  if (remainingMs <= 0) return t('auth.session_remaining.expired');
-  if (remainingMs < 60_000) return t('auth.session_remaining.less_than_minute');
-
-  const minutesTotal = Math.ceil(remainingMs / 60_000);
-  if (minutesTotal < 60) return t('auth.session_remaining.minutes', { minutes: minutesTotal });
-
-  const hours = Math.floor(minutesTotal / 60);
-  const minutes = minutesTotal % 60;
-  if (minutes === 0) return t('auth.session_remaining.hours', { hours });
-  return t('auth.session_remaining.hours_minutes', { hours, minutes });
-}
-
-function useSessionRemainingLabel(t: AppHeaderProps['t'], expiresAt?: number): string | null {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!expiresAt) return undefined;
-
-    const id = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(id);
-  }, [expiresAt]);
-
-  if (!expiresAt || !Number.isFinite(expiresAt)) return null;
-  return formatSessionRemaining(t, expiresAt, now);
-}
-
-function readSessionIdleLimitSeconds(value: unknown): number | null {
-  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
-  if (!Number.isFinite(n) || n < 0) return null;
-  return Math.floor(n);
-}
-
-function formatSessionIdleLimit(t: AppHeaderProps['t'], seconds: number | null): string | null {
-  if (seconds === null) return null;
-  if (seconds === 0) return t('security.settings.session_length.preset.never');
-  if (seconds < 60) return t('auth.session_remaining.less_than_minute');
-
-  const minutesTotal = Math.ceil(seconds / 60);
-  if (minutesTotal < 60) return t('auth.session_remaining.minutes', { minutes: minutesTotal });
-
-  const hours = Math.floor(minutesTotal / 60);
-  const minutes = minutesTotal % 60;
-  if (minutes === 0) return t('auth.session_remaining.hours', { hours });
-  return t('auth.session_remaining.hours_minutes', { hours, minutes });
-}
+export type { AppHeaderProps } from './AppHeaderTypes';
 
 interface InlineSearchResult {
   key: string;
@@ -397,24 +34,13 @@ interface InlineSearchResult {
   id?: number;
   resource?: string;
   attribute?: string;
+  group?: UserGlobalSearchGroup;
 }
 
-function parseInlineVpsId(raw: string): number | null {
-  const m = String(raw ?? '').trim().match(/^(?:vps\s*)?#?(\d+)$/i);
-  if (!m) return null;
-  const id = Number(m[1]);
-  return Number.isFinite(id) && id > 0 ? Math.trunc(id) : null;
-}
-
-function inlineResultFromVps(basePath: string, t: AppHeaderProps['t'], vps: Vps): InlineSearchResult {
-  return {
-    key: `vps:${vps.id}`,
-    primary: vps.hostname ?? t('common.vps_ref', { id: vps.id }),
-    secondary: t('common.vps_ref', { id: vps.id }),
-    href: `${basePath}/vps/${vps.id}`,
-    id: vps.id,
-    resource: 'Vps',
-  };
+function userSearchGroupLabel(group: UserGlobalSearchGroup, t: AppHeaderProps['t']): string {
+  if (group === 'vps') return t('palette.group.vps');
+  if (group === 'ips') return t('palette.group.ip_addresses');
+  return t('palette.group.dns_zones');
 }
 
 function inlineResultsFromClusterSearch(basePath: string, t: AppHeaderProps['t'], hits: ClusterSearchHit[]): InlineSearchResult[] {
@@ -532,36 +158,17 @@ export function AppHeader(props: AppHeaderProps) {
           return;
         }
 
-        const maybeId = parseInlineVpsId(q);
-        if (maybeId !== null) {
-          try {
-            const one = await fetchVps(maybeId, { includes: 'user', signal: ac.signal });
-            const vps = one.data;
-            if (
-              scope.mineUserId !== undefined &&
-              typeof (vps as any)?.user?.id === 'number' &&
-              (vps as any).user.id !== scope.mineUserId
-            ) {
-              if (!alive || ac.signal.aborted) return;
-              setSearchResults([]);
-              return;
-            }
-            if (!alive || ac.signal.aborted) return;
-            setSearchResults([inlineResultFromVps(basePath, t, vps)]);
-            return;
-          } catch (e: any) {
-            if (e?.name === 'AbortError') return;
-          }
-        }
-
-        const res = await fetchVpsList({
-          limit: 8,
-          hostnameAny: q,
-          user: scope.mineUserId,
+        const results = await searchUserObjects({
+          basePath,
+          query: q,
+          t,
+          scopeUserId: scope.mineUserId,
+          expectedUserId: typeof auth.user?.id === 'number' ? auth.user.id : undefined,
+          limitPerGroup: 4,
           signal: ac.signal,
         });
         if (!alive || ac.signal.aborted) return;
-        setSearchResults((res.data ?? []).slice(0, 8).map((vps) => inlineResultFromVps(basePath, t, vps)));
+        setSearchResults(results);
       } catch (e: any) {
         if (e?.name === 'AbortError') return;
         if (!alive || ac.signal.aborted) return;
@@ -579,7 +186,7 @@ export function AppHeader(props: AppHeaderProps) {
       alive = false;
       ac.abort();
     };
-  }, [basePath, canUseClusterSearch, debouncedSearch, mode, scope.mineUserId, t]);
+  }, [auth.user?.id, basePath, canUseClusterSearch, debouncedSearch, mode, scope.mineUserId, t]);
 
   useEffect(() => {
     setSelectedSearchResult(0);
@@ -672,23 +279,37 @@ export function AppHeader(props: AppHeaderProps) {
             >
               {searchResults.length > 0 ? (
                 <div className="py-1">
-                  {searchResults.map((result, index) => (
-                    <button
-                      key={result.key}
-                      type="button"
-                      className={clsx(
-                        'flex w-full flex-col items-start px-3 py-2 text-left text-sm',
-                        index === selectedSearchResult ? 'bg-surface-2' : 'hover:bg-surface-2'
-                      )}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onMouseEnter={() => setSelectedSearchResult(index)}
-                      onClick={() => openInlineResult(result)}
-                      data-testid={`shell.inline-search.result.${index}`}
-                    >
-                      <span className="font-medium text-fg">{result.primary}</span>
-                      <span className="text-xs text-muted">{result.secondary}</span>
-                    </button>
-                  ))}
+                  {searchResults.map((result, index) => {
+                    const showGroup = !canUseClusterSearch && result.group && (
+                      index === 0 || searchResults[index - 1]?.group !== result.group
+                    );
+                    return (
+                      <React.Fragment key={result.key}>
+                        {showGroup && result.group ? (
+                          <div
+                            className="border-t border-border px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted first:border-t-0"
+                            data-testid={`shell.inline-search.group.${result.group}`}
+                          >
+                            {userSearchGroupLabel(result.group, t)}
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={clsx(
+                            'flex w-full flex-col items-start px-3 py-2 text-left text-sm',
+                            index === selectedSearchResult ? 'bg-surface-2' : 'hover:bg-surface-2'
+                          )}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onMouseEnter={() => setSelectedSearchResult(index)}
+                          onClick={() => openInlineResult(result)}
+                          data-testid={`shell.inline-search.result.${index}`}
+                        >
+                          <span className="font-medium text-fg">{result.primary}</span>
+                          <span className="text-xs text-muted">{result.secondary}</span>
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="px-3 py-2 text-sm text-muted" data-testid="shell.inline-search.status">

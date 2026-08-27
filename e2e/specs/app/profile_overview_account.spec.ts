@@ -76,4 +76,8 @@ test('@smoke profile: overview exposes account actions and profile updates', asy
   expect(changePayload?.change_reason).toBe('Moving to a new address');
   expect(changePayload?.time_zone).toBeUndefined();
   await expect(page.getByTestId('profile.personal.change.sent')).toBeVisible();
+  await expect(page.getByTestId('profile.personal.change.sent.open')).toHaveAttribute(
+    'href',
+    '/app/requests/change/55'
+  );
 });

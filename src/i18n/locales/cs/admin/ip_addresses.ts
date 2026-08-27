@@ -55,6 +55,8 @@ export const csAdmin_ip_addresses = {
   "admin.ip_addresses.quick.unassigned": "Volné adresy",
   "admin.ip_addresses.search.placeholder": "Hledat… (IP, VPS, uživatel, síť) — ? pro nápovědu",
   "admin.ip_addresses.suggested_free": "Ukázka volných IP adres z dostupných lokalit.",
+  "admin.ip_addresses.suggested_loading": "Doplňují se další lokality…",
+  "admin.ip_addresses.suggested_partial_error": "Některé typy adres se nepodařilo načíst.",
   "admin.ip_addresses.smart_help.examples.addr": "Filtrovat přesnou adresu (na serveru)",
   "admin.ip_addresses.smart_help.examples.addr_prefix": "Filtrovat přesnou adresu + prefix",
   "admin.ip_addresses.smart_help.examples.assigned": "Zobrazit jen přiřazené / nepřiřazené",

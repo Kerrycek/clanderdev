@@ -6,6 +6,7 @@ export const csProfile_page = {
   "profile.personal.change.help": "Jméno, e-mail a adresa se mění žádostí ke schválení. Změny se projeví až po zpracování administrátorem.",
   "profile.personal.change.sent.body": "Žádost čeká na schválení. Aktuální údaje se zatím nezměnily.",
   "profile.personal.change.sent.title": "Žádost o změnu byla odeslána",
+  "profile.personal.change.sent.open": "Otevřít žádost",
   "profile.personal.change.submit": "Požádat o změnu",
   "profile.personal.change.toast.failed.title": "Nepodařilo se odeslat žádost",
   "profile.personal.change.toast.sent.body": "Administrátoři ji uvidí v žádostech.",

@@ -25,6 +25,7 @@ describe('transactions API wrappers', () => {
       rowId: 123,
       userId: 7,
       userSessionId: 44,
+      count: true,
     });
 
     expect(res.data).toEqual([{ id: 10, label: 'chain' }]);
@@ -39,6 +40,7 @@ describe('transactions API wrappers', () => {
     expect(u.searchParams.get('transaction_chain[row_id]')).toBe('123');
     expect(u.searchParams.get('transaction_chain[user]')).toBe('7');
     expect(u.searchParams.get('transaction_chain[user_session]')).toBe('44');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchTransactions forwards transaction-chain debug filters', async () => {

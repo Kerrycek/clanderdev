@@ -10,5 +10,9 @@ dist/
 playwright-report/
 e2e/test-results/
 
+# Local audit output can contain authenticated screenshots and PII.
+work/
+artifacts/
+
 # Local runtime config (may contain secrets)
 public/config.local.js

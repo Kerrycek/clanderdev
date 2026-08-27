@@ -4,7 +4,6 @@ export interface ResourceRef {
   id: number;
   [k: string]: unknown;
 }
-
 export interface DnsZone {
   id: number;
   user?: ResourceRef;
@@ -12,6 +11,8 @@ export interface DnsZone {
   label?: string;
   role?: string;
   source?: string;
+  type?: string;
+  zone_type?: string;
   reverse_network_address?: string;
   reverse_network_prefix?: number;
   dnssec_enabled?: boolean;
@@ -23,7 +24,6 @@ export interface DnsZone {
   updated_at?: string;
   [k: string]: unknown;
 }
-
 export interface DnsRecord {
   id: number;
   user?: ResourceRef;
@@ -39,7 +39,6 @@ export interface DnsRecord {
   dynamic_update_url?: string;
   [k: string]: unknown;
 }
-
 export interface DnsRecordLog {
   id: number;
   user?: ResourceRef;
@@ -57,17 +56,16 @@ export interface DnsRecordLog {
 export async function fetchDnsZones(opts?: {
   fromId?: number;
   limit?: number;
-  q?: string;
   user?: number;
   enabled?: boolean;
   dnssec_enabled?: boolean;
   role?: string;
   source?: string;
+  signal?: AbortSignal;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q !== undefined) params['q'] = opts.q;
   if (opts?.user !== undefined) params['user'] = opts.user;
   if (opts?.enabled !== undefined) params['enabled'] = opts.enabled;
   if (opts?.dnssec_enabled !== undefined) params['dnssec_enabled'] = opts.dnssec_enabled;
@@ -79,8 +77,8 @@ export async function fetchDnsZones(opts?: {
     path: '/dns_zones',
     namespace: 'dns_zone',
     params,
+    signal: opts?.signal,
   });
-
   return { ...res, data: expectArray<DnsZone>(res.data, 'dns_zones#index') };
 }
 
@@ -140,14 +138,12 @@ export async function fetchDnsRecords(opts?: {
   limit?: number;
   user?: number;
   dns_zone?: number;
-  q?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.user !== undefined) params['user'] = opts.user;
   if (opts?.dns_zone !== undefined) params['dns_zone'] = opts.dns_zone;
-  if (opts?.q !== undefined) params['q'] = opts.q;
 
   const res = await haveApiCall<DnsRecord[]>({
     method: 'GET',
@@ -236,28 +232,6 @@ export async function fetchDnsRecordLogs(opts?: {
 }
 
 
-export interface HostIpAddress {
-  id: number;
-  ip_address?: ResourceRef & { ip_addr?: string; addr?: string };
-  addr?: string;
-  reverse_record_value?: string | null;
-  vps?: ResourceRef & { hostname?: string };
-  user?: ResourceRef & { login?: string };
-  network_interface?: ResourceRef & { name?: string };
-  [k: string]: unknown;
-}
-
-export interface DnsZoneTransfer {
-  id: number;
-  dns_zone?: ResourceRef & { name?: string };
-  host_ip_address?: HostIpAddress | ResourceRef;
-  peer_type?: string;
-  dns_tsig_key?: ResourceRef & { name?: string } | null;
-  created_at?: string;
-  updated_at?: string;
-  [k: string]: unknown;
-}
-
 export interface DnssecRecord {
   id: number;
   dns_zone?: ResourceRef & { name?: string };
@@ -294,88 +268,16 @@ export interface DnsServerZone {
   expires_at?: string | null;
   refresh_at?: string | null;
   last_check_at?: string | null;
+  last_transfer_at?: string | null;
+  last_transfer_status?: string | null;
+  last_transfer_reason_code?: string | null;
+  last_transfer_reason?: string | null;
+  last_transfer_primary_addr?: string | null;
+  last_transfer_serial?: number | null;
+  last_transfer_log_id?: number | null;
   created_at?: string;
   updated_at?: string;
   [k: string]: unknown;
-}
-
-export interface DnsTsigKey {
-  id: number;
-  user?: ResourceRef & { login?: string };
-  name?: string;
-  algorithm?: string;
-  secret?: string;
-  created_at?: string;
-  updated_at?: string;
-  [k: string]: unknown;
-}
-
-export async function fetchHostIpAddresses(opts?: {
-  fromId?: number;
-  limit?: number;
-  q?: string;
-  user?: number;
-  vps?: number;
-  assigned?: boolean;
-}) {
-  const params: Record<string, unknown> = {};
-  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-  if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q !== undefined) params['q'] = opts.q;
-  if (opts?.user !== undefined) params['user'] = opts.user;
-  if (opts?.vps !== undefined) params['vps'] = opts.vps;
-  if (opts?.assigned !== undefined) params['assigned'] = opts.assigned;
-  const res = await haveApiCall<HostIpAddress[]>({
-    method: 'GET',
-    path: '/host_ip_addresses',
-    namespace: 'host_ip_address',
-    params,
-    meta: { includes: 'ip_address,user,vps,network_interface' },
-  });
-  return { ...res, data: expectArray<HostIpAddress>(res.data, 'host_ip_addresses#index') };
-}
-
-export async function fetchDnsZoneTransfers(opts?: {
-  fromId?: number;
-  limit?: number;
-  dns_zone?: number;
-  host_ip_address?: number;
-  peer_type?: string;
-  dns_tsig_key?: number;
-}) {
-  const params: Record<string, unknown> = {};
-  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-  if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.dns_zone !== undefined) params['dns_zone'] = opts.dns_zone;
-  if (opts?.host_ip_address !== undefined) params['host_ip_address'] = opts.host_ip_address;
-  if (opts?.peer_type !== undefined) params['peer_type'] = opts.peer_type;
-  if (opts?.dns_tsig_key !== undefined) params['dns_tsig_key'] = opts.dns_tsig_key;
-  const res = await haveApiCall<DnsZoneTransfer[]>({
-    method: 'GET',
-    path: '/dns_zone_transfers',
-    namespace: 'dns_zone_transfer',
-    params,
-    meta: { includes: 'dns_zone,host_ip_address,dns_tsig_key' },
-  });
-  return { ...res, data: expectArray<DnsZoneTransfer>(res.data, 'dns_zone_transfers#index') };
-}
-
-export async function createDnsZoneTransfer(payload: {
-  dns_zone: number;
-  host_ip_address: number;
-  peer_type?: string;
-  dns_tsig_key?: number;
-}) {
-  return haveApiCall<DnsZoneTransfer>({
-    method: 'POST',
-    path: '/dns_zone_transfers',
-    namespace: 'dns_zone_transfer',
-    params: payload,
-  });
-}
-
-export async function deleteDnsZoneTransfer(id: number) {
-  return haveApiCall<void>({ method: 'DELETE', path: `/dns_zone_transfers/${id}` });
 }
 
 export async function fetchDnssecRecords(opts?: { fromId?: number; limit?: number; dns_zone?: number }) {
@@ -473,33 +375,5 @@ export async function deleteDnsServerZone(id: number) {
   return haveApiCall<void>({ method: 'DELETE', path: `/dns_server_zones/${id}` });
 }
 
-export async function fetchDnsTsigKeys(opts?: {
-  fromId?: number;
-  limit?: number;
-  q?: string;
-  user?: number;
-  algorithm?: string;
-}) {
-  const params: Record<string, unknown> = {};
-  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-  if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q !== undefined) params['q'] = opts.q;
-  if (opts?.user !== undefined) params['user'] = opts.user;
-  if (opts?.algorithm !== undefined) params['algorithm'] = opts.algorithm;
-  const res = await haveApiCall<DnsTsigKey[]>({
-    method: 'GET',
-    path: '/dns_tsig_keys',
-    namespace: 'dns_tsig_key',
-    params,
-    meta: { includes: 'user' },
-  });
-  return { ...res, data: expectArray<DnsTsigKey>(res.data, 'dns_tsig_keys#index') };
-}
-
-export async function createDnsTsigKey(payload: { user?: number; name: string; algorithm?: string }) {
-  return haveApiCall<DnsTsigKey>({ method: 'POST', path: '/dns_tsig_keys', namespace: 'dns_tsig_key', params: payload });
-}
-
-export async function deleteDnsTsigKey(id: number) {
-  return haveApiCall<void>({ method: 'DELETE', path: `/dns_tsig_keys/${id}` });
-}
+export * from './dnsTransfers';
+export * from './dnsTsigKeys';

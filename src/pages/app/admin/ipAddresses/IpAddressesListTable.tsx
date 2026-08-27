@@ -97,15 +97,15 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
       </colgroup>
       <thead>
         <tr className="border-b border-border text-left text-xs text-muted">
-          <th className="w-8 px-4 py-2" aria-label={t('common.state')} />
-          <th className="px-4 py-2">{t('admin.ip_addresses.field.ip')}</th>
-          <th className="px-4 py-2">{t('admin.ip.field.network')}</th>
-          <th className="px-4 py-2">{t('admin.ip_addresses.field.environment')}</th>
-          <th className="px-4 py-2">{t('object_kind.vps')}</th>
-          <th className="px-4 py-2">{t('admin.user.heading')}</th>
-          <th className="px-4 py-2">{t('admin.ip_addresses.field.interface')}</th>
-          <th className="px-4 py-2">{t('admin.ip_addresses.field.flags')}</th>
-          <th className="px-4 py-2">{t('admin.ip.field.created')}</th>
+          <th className="w-8 px-3 py-2" aria-label={t('common.state')} />
+          <th className="px-3 py-2">{t('admin.ip_addresses.field.ip')}</th>
+          <th className="px-3 py-2">{t('admin.ip.field.network')}</th>
+          <th className="px-3 py-2">{t('admin.ip_addresses.field.environment')}</th>
+          <th className="px-3 py-2">{t('object_kind.vps')}</th>
+          <th className="px-3 py-2">{t('admin.user.heading')}</th>
+          <th className="px-3 py-2">{t('admin.ip_addresses.field.interface')}</th>
+          <th className="px-3 py-2">{t('admin.ip_addresses.field.flags')}</th>
+          <th className="px-3 py-2">{t('admin.ip.field.created')}</th>
           <th className="px-1 py-2 text-right">{t('common.actions')}</th>
         </tr>
       </thead>
@@ -127,21 +127,21 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
               variant={ipRowVariant(ip)}
               className="border-b border-border/60 last:border-b-0"
             >
-              <td className="px-4 py-2">
+              <td className="px-3 py-2">
                 <StatusDot
                   variant={ipDotVariant(ip)}
                   ariaLabel={assigned ? t('admin.ip_addresses.chip.assigned_true') : t('admin.ip_addresses.chip.assigned_false')}
                   testId={`admin.ip_addresses.row.${id}.dot`}
                 />
               </td>
-              <td className="px-4 py-2">
+              <td className="px-3 py-2">
                 <Link className="font-medium text-accent hover:underline" to={detailPath}>
                   {ipLabel(ip)}
                 </Link>
                 <div className="mt-1 text-xs text-faint">#{id}</div>
               </td>
-              <td className="px-4 py-2 text-xs text-muted">{networkLabel(ip, na)}</td>
-              <td className="px-4 py-2 text-xs text-muted">
+              <td className="px-3 py-2 text-xs text-muted">{networkLabel(ip, na)}</td>
+              <td className="px-3 py-2 text-xs text-muted">
                 {mark ? (
                   <span title={mark.label} aria-label={mark.label} className="inline-flex min-w-5 justify-center rounded border border-border bg-surface-2 px-1 font-semibold text-fg">
                     {mark.code}
@@ -150,7 +150,7 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
                   environmentLabel(ip, na)
                 )}
               </td>
-              <td className="px-4 py-2 text-xs">
+              <td className="px-3 py-2 text-xs">
                 {vpsId ? (
                   <Link className="text-accent hover:underline" to={`${basePath}/vps/${vpsId}`}>
                     {vpsLabel(ip, na)}
@@ -159,7 +159,7 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
                   <span className="text-faint">{na}</span>
                 )}
               </td>
-              <td className="px-4 py-2 text-xs">
+              <td className="px-3 py-2 text-xs">
                 {userId ? (
                   <Link className="text-accent hover:underline" to={`${basePath}/users/${userId}`}>
                     {userLabel(ip, na)}
@@ -168,8 +168,8 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
                   <span className="text-faint">{na}</span>
                 )}
               </td>
-              <td className="px-4 py-2 text-xs text-muted">{ifaceLabel(ip, na)}</td>
-              <td className="px-4 py-2">
+              <td className="px-3 py-2 text-xs text-muted">{ifaceLabel(ip, na)}</td>
+              <td className="px-3 py-2">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={assigned ? 'ok' : 'warn'}>
                     {assigned ? t('admin.ip_addresses.chip.assigned_true') : t('admin.ip_addresses.chip.assigned_false')}
@@ -178,7 +178,7 @@ export function IpAddressesListTable({ pageData, ipDetailBasePath, basePath, na,
                   {isRoutedIp(ip) ? <Badge variant="black">{t('admin.ip.routed_badge')}</Badge> : null}
                 </div>
               </td>
-              <td className="px-4 py-2 text-xs text-muted">{createdAt ? formatDateTime(createdAt) : na}</td>
+              <td className="px-3 py-2 text-xs text-muted">{createdAt ? formatDateTime(createdAt) : na}</td>
               <td className="px-1 py-2 text-right">
                 <IpAddressRowActions
                   ipAddr={ipAddr}

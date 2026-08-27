@@ -171,6 +171,62 @@ set and object IDs are provided through environment variables. It opens real
 VPS and dataset workflows and checks confirmation gates without submitting
 destructive actions. See `deploy/dev.crucio.cz/live-parity-workflows.md`.
 
+### Destructive live mutation audit
+
+`scripts/live-mutation-audit.mjs` is the explicit opt-in counterpart to the
+readiness spec. It is deliberately limited to one self-contained vertical
+slice: an isolated DNS zone and one A record are created, edited, deleted and
+verified through the real admin UI on `https://dev.crucio.cz`.
+
+The runner refuses to start unless all safety conditions are satisfied:
+
+- `E2E_LIVE_MUTATIONS=1` is explicitly set;
+- `E2E_BASE_URL` is exactly `https://dev.crucio.cz` (a trailing slash is okay);
+- an authenticated admin token is provided through
+  `E2E_LIVE_SESSION_TOKEN` or `E2E_LIVE_SESSION_TOKEN_FILE`;
+- before opening a mutation form, `GET /users/current` must confirm a valid
+  administrator (level 90+); its response body is never written to artifacts;
+- execution is serial by construction (one browser context, one page, no
+  Playwright workers);
+- every created object uses a unique `webui-next-live-*` prefix and is written
+  as a pending intent before form submission, then immediately to
+  `work/live-mutations/<run>/objects.json` after HaveAPI returns its ID;
+- a failed create is reconciled by the exact unique zone/record name before
+  cleanup, so a request that reached HaveAPI before the UI failed is not lost;
+- final cleanup only accepts IDs registered in that run ledger and removes
+  child records before their parent zone, even after a test failure;
+- immediately before every cleanup DELETE, HaveAPI must return the expected
+  resource kind, exact run-owned name, DNS record type and parent zone ID;
+  mismatches fail closed and leave the object for manual review;
+- if an owned child cannot be removed, its parent zone is deliberately left in
+  place and marked `blocked` in the ledger for a safe manual retry;
+- the runner rejects output targets with a symlink anywhere in their existing
+  ancestor chain; the run directory is mode `0700` and ledgers/reports are mode
+  `0600`;
+- authenticated screenshots and videos are disabled by default. Set
+  `E2E_RECORD_ARTIFACTS=1` only when the private artifacts are explicitly
+  needed; capture failures are included in the report and fail the run.
+
+Run it manually with a disposable dev token:
+
+```sh
+E2E_LIVE_MUTATIONS=1 \
+E2E_BASE_URL=https://dev.crucio.cz \
+E2E_LIVE_SESSION_TOKEN_FILE=/secure/path/to/dev-token \
+npm run e2e:live:mutations
+```
+
+Use `E2E_CHROMIUM_EXECUTABLE_PATH=/path/to/chromium` when the managed
+Playwright browser is unavailable. This changes only the browser executable;
+all target, opt-in and administrator guards remain mandatory.
+
+The mutation report and cleanup ledger are saved under
+`work/live-mutations/`; screenshots and videos are added only with the
+explicit artifact opt-in above. Never use a production API URL or reuse IDs
+from another run. The runner intentionally does not cover users or VPS creation:
+those workflows require environment, node, resource-package and ownership
+prerequisites that must not be guessed on a live cluster.
+
 ## Auth model
 
 Most tests use `bootstrapVpsAdminWindow()` plus `installHaveApiMock()` to emulate an authenticated HaveAPI session.

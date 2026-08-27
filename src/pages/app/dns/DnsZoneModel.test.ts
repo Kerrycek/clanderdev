@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { isSecondaryDnsZone } from './DnsZoneModel';
+import { dnsZoneTransferPeerType, isSecondaryDnsZone } from './DnsZoneModel';
 
 describe('DnsZoneModel', () => {
   test('treats external source zones as secondary zones', () => {
@@ -14,7 +14,12 @@ describe('DnsZoneModel', () => {
   });
 
   test('falls back to explicit secondary type fields', () => {
-    expect(isSecondaryDnsZone({ id: 1, type: 'secondary_type' } as any)).toBe(true);
-    expect(isSecondaryDnsZone({ id: 1, zone_type: 'secondary' } as any)).toBe(true);
+    expect(isSecondaryDnsZone({ id: 1, type: 'secondary_type' })).toBe(true);
+    expect(isSecondaryDnsZone({ id: 1, zone_type: 'secondary' })).toBe(true);
+  });
+
+  test('derives the opposite transfer peer role from the zone source', () => {
+    expect(dnsZoneTransferPeerType({ id: 1, source: 'internal_source' })).toBe('secondary_type');
+    expect(dnsZoneTransferPeerType({ id: 2, source: 'external_source' })).toBe('primary_type');
   });
 });

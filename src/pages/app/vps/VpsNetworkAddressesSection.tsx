@@ -12,6 +12,7 @@ import { VpsNetworkAdminActionsCard } from './VpsNetworkOverviewCard';
 
 export function VpsNetworkAddressesSection(props: {
   canAdmin: boolean;
+  canMutate: boolean;
   adminBasePath: string;
   netEnabled: boolean;
   gate: GateDecision;
@@ -65,6 +66,7 @@ export function VpsNetworkAddressesSection(props: {
 
       <VpsNetworkIpRoutesCard
         canAdmin={props.canAdmin}
+        canMutate={props.canMutate}
         adminBasePath={props.adminBasePath}
         gate={props.gate}
         isLoading={props.routesLoading}
@@ -81,6 +83,7 @@ export function VpsNetworkAddressesSection(props: {
       />
 
       <VpsNetworkHostAddressesCard
+        canMutate={props.canMutate}
         gate={props.gate}
         isLoading={props.hostsLoading}
         errorMessage={props.hostsErrorMessage}
@@ -97,7 +100,7 @@ export function VpsNetworkAddressesSection(props: {
         onDelete={props.onDeleteHost}
       />
 
-      {props.canAdmin ? (
+      {props.canAdmin && props.canMutate ? (
         <Card testId="vps.network.admin_settings">
           <details>
             <summary

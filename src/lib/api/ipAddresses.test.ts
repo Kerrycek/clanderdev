@@ -12,6 +12,8 @@ import {
   assignHostIpAddress,
   createHostIpAddress,
   deleteHostIpAddress,
+  fetchIpAddressAssignments,
+  fetchNetworkInterfaceMonitor,
   freeHostIpAddress,
   updateHostIpAddress,
 } from './networking';
@@ -21,13 +23,47 @@ function mockFetchOk(response: any) {
 }
 
 function lastFetchCall() {
-  const calls = (globalThis.fetch as any).mock.calls;
+  const calls = vi.mocked(globalThis.fetch).mock.calls;
   return calls[calls.length - 1] as [string, RequestInit?];
 }
 
 describe('network address API wrappers', () => {
+  test('live monitor sends only supported scope filters and nested includes', async () => {
+    globalThis.fetch = mockFetchOk({ network_interface_monitors: [] }) as typeof fetch;
+
+    await fetchNetworkInterfaceMonitor({
+      limit: 100,
+      user: 7,
+      environment: 2,
+      location: 3,
+      node: 4,
+      vps: 5,
+      networkInterface: 6,
+      order: '-bytes',
+      includes:
+        'network_interface__vps__user,' +
+        'network_interface__vps__node__location__environment',
+    });
+
+    const [url] = lastFetchCall();
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe('/v7.0/network_interface_monitors');
+    expect([...parsed.searchParams.keys()].some((key) => key.endsWith('[q]'))).toBe(false);
+    expect(parsed.searchParams.get('network_interface_monitor[user]')).toBe('7');
+    expect(parsed.searchParams.get('network_interface_monitor[environment]')).toBe('2');
+    expect(parsed.searchParams.get('network_interface_monitor[location]')).toBe('3');
+    expect(parsed.searchParams.get('network_interface_monitor[node]')).toBe('4');
+    expect(parsed.searchParams.get('network_interface_monitor[vps]')).toBe('5');
+    expect(parsed.searchParams.get('network_interface_monitor[network_interface]')).toBe('6');
+    expect(parsed.searchParams.get('network_interface_monitor[order]')).toBe('-bytes');
+    expect(parsed.searchParams.get('network_interface_monitor[limit]')).toBe('100');
+    expect(parsed.searchParams.get('_meta[includes]')).toBe(
+      'network_interface__vps__user,network_interface__vps__node__location__environment'
+    );
+  });
+
   test('fetchIpAddresses forwards purpose and include filters used by admin networking', async () => {
-    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as any;
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
 
     await fetchIpAddresses({
       limit: 50,
@@ -44,7 +80,7 @@ describe('network address API wrappers', () => {
   });
 
   test('fetchIpAddresses forwards network and assignment filters', async () => {
-    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as any;
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
 
     await fetchIpAddresses({
       network: 12,
@@ -58,8 +94,31 @@ describe('network address API wrappers', () => {
     expect(parsed.searchParams.get('ip_address[assigned_to_interface]')).toBe('false');
   });
 
+  test('fetchIpAddresses can request ownerless addresses in ascending order', async () => {
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
+
+    await fetchIpAddresses({ user: null, assignedToInterface: false, order: 'asc' });
+
+    const [url] = lastFetchCall();
+    const parsed = new URL(url);
+    expect(parsed.searchParams.has('ip_address[user]')).toBe(true);
+    expect(parsed.searchParams.get('ip_address[user]')).toBe('');
+    expect(parsed.searchParams.get('ip_address[assigned_to_interface]')).toBe('false');
+    expect(parsed.searchParams.get('ip_address[order]')).toBe('asc');
+  });
+
+  test('fetchIpAddresses forwards cancellation to the HaveAPI request', async () => {
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
+    const controller = new AbortController();
+
+    await fetchIpAddresses({ signal: controller.signal });
+
+    const [, init] = lastFetchCall();
+    expect(init?.signal).toBe(controller.signal);
+  });
+
   test('fetchIpAddressesForVps forwards the VPS scope and custom includes', async () => {
-    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as any;
+    globalThis.fetch = mockFetchOk({ ip_addresses: [] }) as typeof fetch;
 
     await fetchIpAddressesForVps(123, {
       limit: 250,
@@ -76,8 +135,29 @@ describe('network address API wrappers', () => {
     );
   });
 
+  test('fetchIpAddressAssignments supports one active user-scoped request with nested address data', async () => {
+    globalThis.fetch = mockFetchOk({ ip_address_assignments: [] }) as typeof fetch;
+
+    await fetchIpAddressAssignments({
+      user: 7,
+      active: true,
+      limit: 250,
+      includes: 'ip_address__network__primary_location__environment,ip_address__network_interface__vps,user,vps',
+    });
+
+    const [url] = lastFetchCall();
+    const parsed = new URL(url);
+    expect(parsed.pathname).toBe('/v7.0/ip_address_assignments');
+    expect(parsed.searchParams.get('ip_address_assignment[user]')).toBe('7');
+    expect(parsed.searchParams.get('ip_address_assignment[active]')).toBe('true');
+    expect(parsed.searchParams.get('ip_address_assignment[limit]')).toBe('250');
+    expect(parsed.searchParams.get('_meta[includes]')).toBe(
+      'ip_address__network__primary_location__environment,ip_address__network_interface__vps,user,vps'
+    );
+  });
+
   test('assignIpAddressRoute posts the legacy route assign payload', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as any;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
 
     await assignIpAddressRoute(42, { network_interface: 501, route_via: 700 });
 
@@ -93,7 +173,7 @@ describe('network address API wrappers', () => {
   });
 
   test('assignIpAddressRouteWithHostAddress posts the combined route and host action', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as any;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
 
     await assignIpAddressRouteWithHostAddress(42, { network_interface: 501 });
 
@@ -108,7 +188,7 @@ describe('network address API wrappers', () => {
   });
 
   test('freeIpAddressRoute posts route free without a namespaced payload', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as any;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
 
     await freeIpAddressRoute(42);
 
@@ -119,7 +199,7 @@ describe('network address API wrappers', () => {
   });
 
   test('updateIpAddress sends owner changes through the ip_address namespace', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as any;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
 
     await updateIpAddress(42, { user: 7, environment: 2 });
 
@@ -135,7 +215,7 @@ describe('network address API wrappers', () => {
   });
 
   test('host IP wrappers cover create, PTR update, assign, free and delete endpoints', async () => {
-    globalThis.fetch = mockFetchOk({ host_ip_address: { id: 9 } }) as any;
+    globalThis.fetch = mockFetchOk({ host_ip_address: { id: 9 } }) as typeof fetch;
 
     await createHostIpAddress({ ip_address: 42, addr: '192.0.2.10' });
     let [url, init] = lastFetchCall();

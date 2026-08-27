@@ -350,8 +350,11 @@ test.describe('@smoke Dataset snapshots', () => {
     expect(deleteCalls).toBe(1);
   });
 
-  test('normal users can create backups but cannot see restore or snapshot delete actions', async ({ page }) => {
+  test('dataset owners can download, restore and delete their snapshots', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    let rollbackCalls = 0;
+    let deleteCalls = 0;
+    let deleted = false;
 
     await installHaveApiMock(page, {
       user: { id: 2, login: 'member', level: 1 },
@@ -367,10 +370,11 @@ test.describe('@smoke Dataset snapshots', () => {
           export_count: 0,
           object_state: 'active',
           vps: { id: 300, hostname: 'alpha.example' },
+          user: { id: 2, login: 'member' },
         }),
 
         'GET datasets/10/snapshots': () => ({
-          snapshots: [
+          snapshots: deleted ? [] : [
             {
               id: 200,
               dataset: 10,
@@ -389,6 +393,15 @@ test.describe('@smoke Dataset snapshots', () => {
             download_url: '/generated/snap-200.tar.gz',
           },
         }),
+        'POST datasets/10/snapshots/200/rollback': () => {
+          rollbackCalls += 1;
+          return { ok: true };
+        },
+        'DELETE datasets/10/snapshots/200': () => {
+          deleteCalls += 1;
+          deleted = true;
+          return { ok: true };
+        },
       },
     });
 
@@ -408,7 +421,17 @@ test.describe('@smoke Dataset snapshots', () => {
     });
     await expect(page.getByTestId('dataset.snapshots.download.created')).toBeVisible();
     await expect(page.getByTestId('dataset.snapshots.download.created.open')).toHaveAttribute('href', /\/generated\/snap-200\.tar\.gz$/);
-    await expect(page.getByTestId('dataset.snapshots.row.200.rollback')).toHaveCount(0);
-    await expect(page.getByTestId('dataset.snapshots.row.200.delete')).toHaveCount(0);
+    await page.getByTestId('dataset.snapshots.download.created.close').click();
+    await expect(page.getByTestId('dataset.snapshots.row.200.rollback')).toBeEnabled();
+    await page.getByTestId('dataset.snapshots.row.200.rollback').click();
+    await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
+    await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
+    expect(rollbackCalls).toBe(1);
+
+    await expect(page.getByTestId('dataset.snapshots.row.200.delete')).toBeEnabled();
+    await page.getByTestId('dataset.snapshots.row.200.delete').click();
+    await page.getByTestId('dataset.snapshots.delete_confirm.confirm').click();
+    await expect(page.getByTestId('dataset.snapshots.row.200')).toHaveCount(0);
+    expect(deleteCalls).toBe(1);
   });
 });

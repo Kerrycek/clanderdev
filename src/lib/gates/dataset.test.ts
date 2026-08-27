@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { gateDatasetAction } from './dataset';
+import { datasetCapabilities, gateDatasetAction } from './dataset';
 
 const baseDataset: any = {
   id: 10,
@@ -22,7 +22,7 @@ describe('gateDatasetAction', () => {
   });
 
   it('does not block safe actions when the API omits dataset state', () => {
-    const dataset = { id: 10 } as any;
+    const dataset = { id: 10, name: 'dataset-10' };
     expect(gateDatasetAction('snapshot.create', { dataset, role: 'user' }).allowed).toBe(true);
     expect(gateDatasetAction('download.create', { dataset, role: 'user' }).allowed).toBe(true);
   });
@@ -40,30 +40,125 @@ describe('gateDatasetAction', () => {
     expect(r.allowed).toBe(true);
   });
 
-  it('keeps user-safe snapshot and backup actions available to regular users', () => {
+  it('keeps owner-scoped snapshot and backup actions available to regular users', () => {
     expect(gateDatasetAction('snapshot.create', { dataset: baseDataset, role: 'user' }).allowed).toBe(true);
+    expect(
+      gateDatasetAction('snapshot.rollback', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: true,
+      }).allowed
+    ).toBe(true);
+    expect(
+      gateDatasetAction('snapshot.delete', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: true,
+      }).allowed
+    ).toBe(true);
     expect(gateDatasetAction('download.create', { dataset: baseDataset, role: 'user' }).allowed).toBe(true);
   });
 
-  it('blocks destructive dataset and restore actions for regular users', () => {
-    const actions = [
-      'dataset.create',
-      'dataset.delete',
-      'snapshot.rollback',
-      'snapshot.delete',
-      'download.delete',
-    ] as const;
+  it('fails closed for owner-only snapshot actions without an object permission decision', () => {
+    expect(gateDatasetAction('snapshot.rollback', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
+    expect(gateDatasetAction('snapshot.delete', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
+  });
 
-    for (const action of actions) {
-      const r = gateDatasetAction(action, { dataset: baseDataset, role: 'user' });
-      expect(r.allowed, action).toBe(false);
-      if (!r.allowed) {
-        expect(r.reason.titleKey).toBe('gate.admin_only.title');
-      }
+  it('keeps download deletion admin-only', () => {
+    const r = gateDatasetAction('download.delete', { dataset: baseDataset, role: 'user' });
+    expect(r.allowed).toBe(false);
+    if (!r.allowed) {
+      expect(r.reason.titleKey).toBe('gate.admin_only.title');
     }
+  });
+
+  it('honors an explicit object permission denial for snapshot mutations', () => {
+    expect(
+      gateDatasetAction('snapshot.rollback', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: false,
+      }).allowed
+    ).toBe(false);
+    expect(
+      gateDatasetAction('snapshot.delete', {
+        dataset: baseDataset,
+        role: 'user',
+        permission: false,
+      }).allowed
+    ).toBe(false);
   });
 
   it('allows regular users to request dataset updates', () => {
     expect(gateDatasetAction('dataset.update', { dataset: baseDataset, role: 'user' }).allowed).toBe(true);
+  });
+
+  it('derives user create/delete/update access from scoped ownership and dataset structure', () => {
+    const root = {
+      ...baseDataset,
+      user: { id: 42 },
+    };
+    const child = {
+      ...root,
+      id: 11,
+      parent: { id: 10 },
+    };
+
+    const rootCapabilities = datasetCapabilities(root, { role: 'user', scope: 'mine', userId: 42 });
+    expect(rootCapabilities).toMatchObject({
+      canCreateSubdataset: true,
+      canDelete: false,
+      canUpdate: true,
+      canUseAdminProperties: false,
+    });
+
+    const childCapabilities = datasetCapabilities(child, { role: 'user', scope: 'mine', userId: 42 });
+    expect(childCapabilities.canDelete).toBe(true);
+    expect(
+      gateDatasetAction('dataset.create', {
+        dataset: root,
+        role: 'user',
+        permission: rootCapabilities.canCreateSubdataset,
+      }).allowed
+    ).toBe(true);
+    expect(
+      gateDatasetAction('dataset.delete', {
+        dataset: child,
+        role: 'user',
+        permission: childCapabilities.canDelete,
+      }).allowed
+    ).toBe(true);
+  });
+
+  it('denies foreign datasets even when loaded into the user view', () => {
+    const foreign = {
+      ...baseDataset,
+      user: { id: 99 },
+      parent: { id: 9 },
+    };
+    const denied = datasetCapabilities(foreign, { role: 'user', scope: 'mine', userId: 42 });
+    expect(denied).toMatchObject({
+      canCreateSubdataset: false,
+      canDelete: false,
+      canUpdate: false,
+    });
+  });
+
+  it('fails closed when the API omits ownership metadata', () => {
+    const withoutOwner = {
+      ...baseDataset,
+      parent: { id: 9 },
+    };
+    const denied = datasetCapabilities(withoutOwner, { role: 'user', scope: 'mine', userId: 42 });
+    expect(denied).toMatchObject({
+      canCreateSubdataset: false,
+      canDelete: false,
+      canUpdate: false,
+    });
+  });
+
+  it('keeps regular-user create/delete fail-closed without an object permission decision', () => {
+    expect(gateDatasetAction('dataset.create', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
+    expect(gateDatasetAction('dataset.delete', { dataset: baseDataset, role: 'user' }).allowed).toBe(false);
   });
 });

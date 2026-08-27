@@ -57,12 +57,12 @@ function parseNominatimPoint(places: unknown): OsmPoint | null {
   return { lat, lon };
 }
 
-function useOsmPoint(address: string) {
+function useOsmPoint(address: string, enabled: boolean) {
   const [point, setPoint] = React.useState<OsmPoint | null>(null);
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!address) {
+    if (!address || !enabled) {
       setPoint(null);
       setLoading(false);
       return;
@@ -89,7 +89,7 @@ function useOsmPoint(address: string) {
       });
 
     return () => controller.abort();
-  }, [address]);
+  }, [address, enabled]);
 
   return { point, loading };
 }
@@ -98,7 +98,8 @@ export function RequestAddressMapLink(props: { address: unknown; testId?: string
   const { t } = useI18n();
   const address = String(props.address ?? '').trim();
   const href = openStreetMapAddressUrl(address);
-  const { point, loading } = useOsmPoint(address);
+  const [previewRequested, setPreviewRequested] = React.useState(false);
+  const { point, loading } = useOsmPoint(address, previewRequested);
   const embedHref = React.useMemo(() => openStreetMapEmbedUrl(point), [point]);
 
   if (!href) return <div className="text-sm">—</div>;
@@ -118,13 +119,29 @@ export function RequestAddressMapLink(props: { address: unknown; testId?: string
           className="h-44 w-full border-0 bg-surface-1"
         />
       ) : (
-        <div className="flex h-24 items-center justify-center gap-2 bg-surface-1 text-xs text-muted">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <MapPin className="h-4 w-4" aria-hidden="true" />}
+        <div className="flex min-h-24 flex-col items-center justify-center gap-2 bg-surface-1 px-4 py-3 text-center text-xs text-muted">
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          ) : (
+            <MapPin className="h-4 w-4" aria-hidden="true" />
+          )}
           <span>
             {loading
               ? t('requests.detail.address_map.loading')
-              : t('requests.detail.address_map.preview_unavailable')}
+              : previewRequested
+                ? t('requests.detail.address_map.preview_unavailable')
+                : t('requests.detail.address_map.preview_prompt')}
           </span>
+          {!previewRequested ? (
+            <button
+              type="button"
+              onClick={() => setPreviewRequested(true)}
+              data-testid={`${props.testId ?? 'requests.detail.address_map'}.load_preview`}
+              className="rounded-md border border-border bg-surface-2 px-3 py-1.5 font-medium text-fg transition hover:bg-accent-soft focus:outline-none focus:ring-2 focus:ring-focus/35"
+            >
+              {t('requests.detail.address_map.load_preview')}
+            </button>
+          ) : null}
         </div>
       )}
       <a

@@ -38,7 +38,6 @@ import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { LoadingState } from '../../../components/ui/LoadingState';
-import { Input } from '../../../components/ui/Input';
 import { Select } from '../../../components/ui/Select';
 import { StatusDot } from '../../../components/ui/StatusDot';
 import { IncomingPaymentAssignReviewCard } from './IncomingPaymentReviewCards';

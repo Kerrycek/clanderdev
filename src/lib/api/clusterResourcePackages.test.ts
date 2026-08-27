@@ -24,8 +24,10 @@ describe('cluster resource packages API wrappers', () => {
 
     expect(res.data).toEqual([{ id: 77, label: 'Personal package', is_personal: true }]);
 
-    const [url] = (globalThis.fetch as any).mock.calls.find(([u]: [string]) => new URL(u).pathname.endsWith('/cluster_resource_packages'));
-    const u = new URL(url);
+    const [url] = vi.mocked(globalThis.fetch).mock.calls.find(([input]) =>
+      new URL(input instanceof Request ? input.url : input).pathname.endsWith('/cluster_resource_packages'),
+    )!;
+    const u = new URL(url instanceof Request ? url.url : url);
 
     expect(u.pathname).toBe('/v7.0/cluster_resource_packages');
     expect(u.searchParams.get('cluster_resource_package[q]')).toBe('alice');
@@ -45,8 +47,10 @@ describe('cluster resource packages API wrappers', () => {
 
     await fetchClusterResourcePackages({ userId: null, limit: 500 });
 
-    const [url] = (globalThis.fetch as any).mock.calls.find(([u]: [string]) => new URL(u).pathname.endsWith('/cluster_resource_packages'));
-    const u = new URL(url);
+    const [url] = vi.mocked(globalThis.fetch).mock.calls.find(([input]) =>
+      new URL(input instanceof Request ? input.url : input).pathname.endsWith('/cluster_resource_packages'),
+    )!;
+    const u = new URL(url instanceof Request ? url.url : url);
 
     expect(u.searchParams.has('cluster_resource_package[user]')).toBe(true);
     expect(u.searchParams.get('cluster_resource_package[user]')).toBe('');

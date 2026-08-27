@@ -1,4 +1,4 @@
-import { loadOptionalRuntimeScripts } from './app/runtimeBootstrap';
+import { loadBffRuntimeSession, loadOptionalRuntimeScripts } from './app/runtimeBootstrap';
 
 
 type BootstrapLanguage = 'en' | 'cs';
@@ -134,6 +134,7 @@ export function renderBootstrapFailure(error: unknown, doc: Document = document)
 async function bootstrap() {
   try {
     await loadOptionalRuntimeScripts();
+    await loadBffRuntimeSession();
     await import('./main');
   } catch (error) {
     console.error('vpsAdmin UI bootstrap failed', error);

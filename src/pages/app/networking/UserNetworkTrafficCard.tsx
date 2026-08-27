@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useI18n } from '../../../app/i18n';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
+import { Button } from '../../../components/ui/Button';
 import { clsx } from '../../../components/ui/clsx';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { ErrorState } from '../../../components/ui/ErrorState';
@@ -238,7 +239,14 @@ export function UserNetworkTrafficCard(props: { userId: number | null; isAdmin: 
       <CardHeader
         title={t('network.user.traffic.title')}
         subtitle={t('network.user.traffic.subtitle')}
-        actions={<span className="text-xs font-medium text-muted">{current.year}/{current.month}</span>}
+        actions={
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted">{current.year}/{current.month}</span>
+            <Button variant="secondary" size="sm" onClick={() => void trafficQ.refetch()}>
+              {t('common.refresh')}
+            </Button>
+          </div>
+        }
       />
       <CardBody>
         {trafficQ.isLoading ? (

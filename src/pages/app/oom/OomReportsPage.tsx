@@ -10,9 +10,9 @@ import { useToasts } from '../../../app/toasts';
 import { FilterBar } from '../../../components/layout/FilterBar';
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
-import { fetchNodes, type Node } from '../../../lib/api/nodes';
+import { fetchNodes } from '../../../lib/api/nodes';
 import { searchUsers } from '../../../lib/api/users';
-import { fetchEnvironments, fetchLocations, fetchOomReports, type Environment, type Location, type OomReport } from '../../../lib/api/oom';
+import { fetchEnvironments, fetchLocations, fetchOomReports, type OomReport } from '../../../lib/api/oom';
 import { localInputToIso } from '../../../lib/datetimeLocal';
 import { compactText, formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
@@ -42,88 +42,17 @@ import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { VpsLookupInput } from '../../../components/ui/VpsLookupInput';
 import { dotVariantFromRowVariant } from '../../../lib/variantMap';
-
-function safeNumber(value: string): number | undefined {
-  const t = value.trim();
-  if (!t) return undefined;
-  const n = Number(t);
-  if (!Number.isFinite(n)) return undefined;
-  const i = Math.floor(n);
-  if (i <= 0) return undefined;
-  return i;
-}
-
-type SmartKey =
-  | 'id'
-  | 'q'
-  | 'vps'
-  | 'user'
-  | 'node'
-  | 'location'
-  | 'environment'
-  | 'rule'
-  | 'cgroup'
-  | 'since'
-  | 'until';
-
-function canonicalKey(raw: string): SmartKey | null {
-  const k = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (!k) return null;
-
-  if (['id', '#', 'oom', 'report'].includes(k)) return 'id';
-  if (['q', 'query', 'search', 'text'].includes(k)) return 'q';
-  if (['vps', 'vm', 'host'].includes(k)) return 'vps';
-  if (['user', 'owner', 'login'].includes(k)) return 'user';
-  if (['node', 'server'].includes(k)) return 'node';
-  if (['location', 'loc'].includes(k)) return 'location';
-  if (['environment', 'env'].includes(k)) return 'environment';
-  if (['rule', 'oom_rule'].includes(k)) return 'rule';
-  if (['cgroup'].includes(k)) return 'cgroup';
-  if (['since', 'after', 'from'].includes(k)) return 'since';
-  if (['until', 'before', 'to'].includes(k)) return 'until';
-
-  return null;
-}
-
-function parseDateTimeLocalValue(input: string, opts: { endOfDay?: boolean } = {}): string | null {
-  const v = input.trim();
-  if (!v) return '';
-
-  // Accept full datetime-local.
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return v;
-
-  // Accept date-only; expand to day start/end.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    return opts.endOfDay ? `${v}T23:59` : `${v}T00:00`;
-  }
-
-  return null;
-}
-
-function nodeLabel(n: Node): string {
-  return (n as any).domain_name ? String((n as any).domain_name) : `#${n.id}`;
-}
-
-function envLabel(e: Environment): string {
-  return e.label ? String(e.label) : `#${e.id}`;
-}
-
-function locLabel(l: Location): string {
-  return l.label ? String(l.label) : `#${l.id}`;
-}
-
-function ruleVariant(action?: string): 'neutral' | 'warn' {
-  if (action === 'ignore') return 'neutral';
-  return 'warn'; // notify + implicit
-}
-
-function ruleLabelKey(action?: string): string {
-  if (action === 'ignore') return 'oom.rule.ignore';
-  if (action === 'notify') return 'oom.rule.notify';
-  return 'oom.rule.implicit';
-}
+import {
+  canonicalKey,
+  envLabel,
+  locLabel,
+  nodeLabel,
+  parseDateTimeLocalValue,
+  resolveOptionId,
+  ruleLabelKey,
+  ruleVariant,
+  safeNumber,
+} from './oomReportsListSemantics';
 
 export function OomReportsPage() {
   const { basePath, mode } = useAppMode();
@@ -133,6 +62,7 @@ export function OomReportsPage() {
   const toasts = useToasts();
 
   const [sp, setSp] = useSearchParams();
+  const searchParamsKey = sp.toString();
 
   const [q, setQ] = useState(() => sp.get('q') ?? '');
   const [vps, setVps] = useState(() => sp.get('vps') ?? '');
@@ -153,18 +83,18 @@ export function OomReportsPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
-    setQ(sp.get('q') ?? '');
-    setVps(sp.get('vps') ?? '');
-    setUser(sp.get('user') ?? '');
-    setNode(sp.get('node') ?? '');
-    setLocation(sp.get('location') ?? '');
-    setEnvironment(sp.get('environment') ?? '');
-    setRule(sp.get('oom_report_rule') ?? '');
-    setCgroup(sp.get('cgroup') ?? '');
-    setSince(sp.get('since') ?? '');
-    setUntil(sp.get('until') ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp.toString()]);
+    const current = new URLSearchParams(searchParamsKey);
+    setQ(current.get('q') ?? '');
+    setVps(current.get('vps') ?? '');
+    setUser(current.get('user') ?? '');
+    setNode(current.get('node') ?? '');
+    setLocation(current.get('location') ?? '');
+    setEnvironment(current.get('environment') ?? '');
+    setRule(current.get('oom_report_rule') ?? '');
+    setCgroup(current.get('cgroup') ?? '');
+    setSince(current.get('since') ?? '');
+    setUntil(current.get('until') ?? '');
+  }, [searchParamsKey]);
 
   useEffect(() => {
     if (smartNeedle === '?') setHelpOpen(true);
@@ -369,8 +299,7 @@ export function OomReportsPage() {
   const shareUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
     return window.location.href;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp.toString()]);
+  }, [searchParamsKey]);
 
   const clearFilters = () => {
     setQ('');
@@ -389,25 +318,6 @@ export function OomReportsPage() {
 
   const openReport = (id: number) => {
     navigate(`${basePath}/oom-reports/${id}`);
-  };
-
-  const resolveOptionId = <T extends { id: number }>(
-    list: T[],
-    value: string,
-    labelFn: (item: T) => string
-  ): { id: number } | { err: 'none' | 'ambiguous' } => {
-    const needle = value.trim().toLowerCase();
-    if (!needle) return { err: 'none' };
-
-    const exact = list.filter((item) => labelFn(item).trim().toLowerCase() === needle || String(item.id) === needle);
-    const [firstExact] = exact;
-    if (firstExact) return { id: Number(firstExact.id) };
-
-    const partial = list.filter((item) => labelFn(item).trim().toLowerCase().includes(needle));
-    const [firstPartial] = partial;
-    if (firstPartial) return { id: Number(firstPartial.id) };
-    if (partial.length > 1) return { err: 'ambiguous' };
-    return { err: 'none' };
   };
 
   async function applySmartText(raw: string) {
@@ -1277,7 +1187,7 @@ export function OomReportsPage() {
               canPrev={pagination.canPrev}
               canNext={!pagination.hasForward && rows.length === pagination.limit}
               onPrev={() => pagination.goPrev()}
-              onNext={() => pagination.goNext(rows.length > 0 ? (rows[rows.length - 1] as any).id : undefined)}
+              onNext={() => pagination.goNext(rows[rows.length - 1]?.id)}
               onGoToPage={pagination.goToPage}
               limit={pagination.limit}
               allowedLimits={pagination.allowedLimits}

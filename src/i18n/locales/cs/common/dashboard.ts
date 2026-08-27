@@ -88,6 +88,7 @@ export const csCommon_dashboard = {
   'dashboard.section.cluster.empty': 'Stav nodů není dostupný.',
   'dashboard.section.cluster.location_unknown': 'Neznámá lokalita',
   'dashboard.section.cluster.location_summary': '{up} online · {maintenance} údržba · {down} down · {total} celkem',
+  'dashboard.section.cluster.location_summary_compact': '{up}/{total} online',
   'dashboard.section.cluster.location_bar_aria': 'Stav nodů v lokalitě {location}',
   'dashboard.section.cluster.more_locations': '+{count} dalších lokalit skryto z dashboardu',
   'dashboard.section.cluster.status.up': 'Online',

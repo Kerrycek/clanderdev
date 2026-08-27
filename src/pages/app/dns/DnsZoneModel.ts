@@ -13,8 +13,17 @@ export function isSecondaryDnsZone(zone: DnsZone): boolean {
   const source = normalizedToken(zone.source);
   if (source === 'external_source' || source === 'external' || source === 'secondary_source') return true;
 
-  const type = normalizedToken((zone as any).type ?? (zone as any).zone_type);
+  const type = normalizedToken(zone.type ?? zone.zone_type);
   if (type === 'secondary_type' || type === 'secondary') return true;
 
   return false;
+}
+
+/**
+ * A zone transfer peer always has the opposite authoritative role to the
+ * managed zone: internal zones send to secondaries, external zones receive
+ * from primaries. This is a property of the zone, not a user choice.
+ */
+export function dnsZoneTransferPeerType(zone: DnsZone): 'primary_type' | 'secondary_type' {
+  return isSecondaryDnsZone(zone) ? 'primary_type' : 'secondary_type';
 }

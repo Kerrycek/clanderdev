@@ -34,7 +34,6 @@ import { fetchOutage, fetchOutageEntities, fetchOutageHandlers, fetchOutageUpdat
 import type { Outage, OutageEntity, OutageHandler } from '../../../lib/api/public';
 import {
   applyOutageSystems,
-  createOutage,
   createOutageWithSystems,
   createOutageUpdate,
   fetchAdminOutages,

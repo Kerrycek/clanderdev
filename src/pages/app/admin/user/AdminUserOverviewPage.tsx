@@ -16,7 +16,7 @@ import { SwitchRow } from '../../../../components/ui/SwitchRow';
 
 import { updateUser } from '../../../../lib/api/users';
 import { fetchUserPayments } from '../../../../lib/api/payments';
-import { adminDateTimeInputToIso, dateToAdminDateTimeInput, isoToAdminDateTimeInput } from '../../../../lib/datetimeLocal';
+import { adminDateTimeInputToIso } from '../../../../lib/datetimeLocal';
 import { formatDateTime } from '../../../../lib/format';
 import { getPaidUntilStatus, paidUntilBadgeVariant, paidUntilStatusLabelKey } from '../../../../lib/paymentsBadges';
 import { formatMoneyLike } from '../../../../lib/paymentsFormat';
@@ -24,56 +24,14 @@ import { roleFromLevel } from '../../../../lib/roles';
 import { objectStateBadge } from '../../../../lib/taskStatus';
 
 import { useAdminUserContext } from './AdminUserLayout';
-
-interface EditUserDraft {
-  fullName: string;
-  email: string;
-  address: string;
-  level: string;
-  info: string;
-  mailerEnabled: boolean;
-}
-
-interface StateDraft {
-  objectState: string;
-  expirationDate: string;
-  remindAfterDate: string;
-  reason: string;
-}
-
-function optionalStringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? value : undefined;
-}
-
-function makeEditDraft(u: Record<string, unknown>): EditUserDraft {
-  return {
-    fullName: typeof u['full_name'] === 'string' ? u['full_name'] : '',
-    email: typeof u['email'] === 'string' ? u['email'] : '',
-    address: typeof u['address'] === 'string' ? u['address'] : '',
-    level: typeof u['level'] === 'number' && Number.isFinite(u['level']) ? String(u['level']) : '',
-    info: typeof u['info'] === 'string' ? u['info'] : '',
-    mailerEnabled: u['mailer_enabled'] !== false,
-  };
-}
-
-function softDeleteExpirationInput(): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  d.setSeconds(0, 0);
-  return dateToAdminDateTimeInput(d);
-}
-
-function makeStateDraft(u: Record<string, unknown>): StateDraft {
-  return {
-    objectState: typeof u['object_state'] === 'string' && u['object_state'].trim() ? u['object_state'] : 'active',
-    expirationDate: isoToAdminDateTimeInput(u['expiration_date']),
-    remindAfterDate: isoToAdminDateTimeInput(u['remind_after_date']),
-    reason: '',
-  };
-}
+import {
+  makeEditDraft,
+  makeStateDraft,
+  optionalStringField,
+  softDeleteExpirationInput,
+  type EditUserDraft,
+  type StateDraft,
+} from './AdminUserOverviewModel';
 
 export function AdminUserOverviewPage() {
   const { t } = useI18n();
@@ -374,7 +332,7 @@ export function AdminUserOverviewPage() {
                       setStateField('expirationDate', e.target.value);
                       if (!e.target.value.trim()) setStateField('remindAfterDate', '');
                     }}
-                    placeholder="YYYY-MM-DD HH:MM:SS"
+                    placeholder={t('common.datetime.placeholder')}
                     testId="admin.user.lifecycle.expiration"
                   />
                 </label>

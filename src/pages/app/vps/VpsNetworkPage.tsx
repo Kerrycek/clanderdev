@@ -65,7 +65,7 @@ export function VpsNetworkPage() {
   const { t } = useI18n();
   const { pushToast } = useToasts();
 
-  const { vps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
 
   const vpsId = vps.id;
   const canAdmin = mode === 'admin' && auth.role === 'admin';
@@ -83,6 +83,7 @@ export function VpsNetworkPage() {
   const ipsQ = useQuery({
     queryKey: ['ip_address', 'list', { vpsId, limit: 250 }],
     queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 250 })).data,
+    staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
 
@@ -132,6 +133,7 @@ export function VpsNetworkPage() {
   const [addIpOpen, setAddIpOpen] = useState(false);
 
   const openEdit = (ni: NetworkInterface) => {
+    if (!canMutateVps) return;
     setEditNetif(ni);
     setEditError(null);
     setEditName(ni.name ?? '');
@@ -142,6 +144,7 @@ export function VpsNetworkPage() {
 
   const updateNetifM = useMutation({
     mutationFn: async (payload: { id: number; params: Record<string, unknown> }) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return updateNetworkInterface(payload.id, payload.params);
     },
@@ -206,6 +209,7 @@ export function VpsNetworkPage() {
   }, [canAdmin, editEnable, editMaxRx, editMaxTx, editName, editNetif]);
 
   const saveNetif = async () => {
+    if (!canMutateVps) return;
     if (!editNetif) return;
 
     const params: Record<string, unknown> = {
@@ -242,6 +246,7 @@ export function VpsNetworkPage() {
 
   const toggleNetM = useMutation({
     mutationFn: async (payload: { enable: boolean; reason?: string }) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
 
       const params: Record<string, unknown> = { enable_network: payload.enable };
@@ -307,6 +312,7 @@ export function VpsNetworkPage() {
 
   const updatePtrM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!ptrEditor) throw new Error(t('vps.network.host_addresses.validation.missing'));
       const validation = validatePtrValue(ptrValue);
       if (!validation.ok) {
@@ -331,6 +337,7 @@ export function VpsNetworkPage() {
 
   const freeHostM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!freeHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return freeHostIpAddress(freeHost.id);
@@ -350,6 +357,7 @@ export function VpsNetworkPage() {
 
   const assignHostM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!assignHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
       const networkInterface = Number(assignHostInterface);
       if (!Number.isInteger(networkInterface) || networkInterface <= 0) {
@@ -374,6 +382,7 @@ export function VpsNetworkPage() {
 
   const deleteHostM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!deleteHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return deleteHostIpAddress(deleteHost.id);
@@ -392,6 +401,7 @@ export function VpsNetworkPage() {
 
   const freeRouteM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!freeRouteIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return freeIpAddressRoute(freeRouteIp.id);
@@ -411,6 +421,7 @@ export function VpsNetworkPage() {
 
   const assignRouteM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!assignRouteIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
       const networkInterface = Number(assignRouteInterface);
       if (!Number.isInteger(networkInterface) || networkInterface <= 0) {
@@ -435,6 +446,7 @@ export function VpsNetworkPage() {
 
   const updateOwnerM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       if (!ownerIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
       const user = ownerUser.trim() ? parsePositiveId(ownerUser) : null;
       if (ownerUser.trim() && !user) throw new Error(t('vps.network.ip_addresses.owner.validation.user'));
@@ -495,6 +507,12 @@ export function VpsNetworkPage() {
 
   return (
     <div data-testid="vps.network.page" className="space-y-4">
+      {!canMutateVps ? (
+        <Alert title={t('gate.blocked.permission.title')} variant="warn">
+          <div data-testid="vps.network.read_only">{t('gate.blocked.permission.body')}</div>
+        </Alert>
+      ) : null}
+
       <VpsNetworkOverviewCard
         netEnabled={netEnabled}
         gate={gate}
@@ -516,6 +534,7 @@ export function VpsNetworkPage() {
 
       <VpsNetworkInterfacesCard
         canAdmin={canAdmin}
+        canMutate={canMutateVps}
         isLoading={netifsQ.isLoading}
         errorMessage={netifsQ.isError ? errorMessage(netifsQ.error) : null}
         netifs={netifs}
@@ -526,6 +545,7 @@ export function VpsNetworkPage() {
 
       <VpsNetworkAddressesSection
         canAdmin={canAdmin}
+        canMutate={canMutateVps}
         adminBasePath={adminBasePath}
         netEnabled={netEnabled}
         gate={gate}

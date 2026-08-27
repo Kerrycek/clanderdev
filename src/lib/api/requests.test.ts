@@ -1,26 +1,106 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import {
+  assertOwnedUserRequest,
+  assertOwnedUserRequests,
   fetchChangeRequests,
+  fetchMyChangeRequest,
+  fetchMyChangeRequests,
+  fetchMyRegistrationRequests,
   fetchRegistrationRequests,
   previewRegistrationRequest,
   resolveChangeRequest,
   resolveRegistrationRequest,
   updateRegistrationRequestByToken,
+  type UserRequestCommon,
+  UserRequestOwnershipError,
 } from './requests';
 
-function mockFetchOk(response: any) {
-  return vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: true, response }) });
+function mockFetchOk(response: Record<string, unknown>): typeof fetch {
+  const result: Pick<Response, 'ok' | 'status' | 'json'> = {
+    ok: true,
+    status: 200,
+    json: async () => ({ status: true, response }),
+  };
+
+  return vi.fn<typeof fetch>().mockResolvedValue(
+    result as Response
+  );
 }
 
 function lastFetchCall() {
-  const calls = (globalThis.fetch as any).mock.calls;
-  return calls[calls.length - 1] as [string, RequestInit?];
+  const call = vi.mocked(globalThis.fetch).mock.calls.at(-1);
+  if (!call) throw new Error('Expected fetch to have been called');
+
+  const input = call[0];
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+  return [url, call[1]] as const;
 }
 
 describe('requests API wrappers', () => {
+  test('owner verification accepts numeric string IDs and rejects missing or foreign owners', () => {
+    const owned: UserRequestCommon = { id: 1, user: { id: '7' } };
+    expect(assertOwnedUserRequest(owned, 7)).toBe(owned);
+
+    expect(() => assertOwnedUserRequest({ id: 2 }, 7)).toThrow(UserRequestOwnershipError);
+    expect(() => assertOwnedUserRequest({ id: 3, user: { id: 8 } }, 7)).toThrow(
+      UserRequestOwnershipError
+    );
+    expect(() => assertOwnedUserRequests([
+      { id: 4, user: { id: 7 } },
+      { id: 5, user: { id: 8 } },
+    ], 7)).toThrow(UserRequestOwnershipError);
+  });
+
+  test('fetchMyChangeRequests sends only owner-safe index parameters', async () => {
+    globalThis.fetch = mockFetchOk({
+      changes: [{ id: 9, user: { id: '7' }, state: 'awaiting' }],
+    });
+
+    const result = await fetchMyChangeRequests(7, {
+      limit: 25,
+      fromId: 77,
+      state: 'awaiting',
+      count: true,
+    });
+
+    expect(result.data.map((request) => request.id)).toEqual([9]);
+    const [url] = lastFetchCall();
+    const u = new URL(url);
+    expect(u.searchParams.get('change[limit]')).toBe('25');
+    expect(u.searchParams.get('change[from_id]')).toBe('77');
+    expect(u.searchParams.get('change[state]')).toBe('awaiting');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
+    expect(u.searchParams.has('change[user]')).toBe(false);
+    expect(u.searchParams.has('change[q]')).toBe(false);
+    expect(u.searchParams.has('change[admin]')).toBe(false);
+    expect(u.searchParams.has('change[api_ip_addr]')).toBe(false);
+    expect(u.searchParams.has('change[client_ip_addr]')).toBe(false);
+  });
+
+  test('owner-safe list and detail wrappers fail closed on foreign data', async () => {
+    globalThis.fetch = mockFetchOk({
+      registrations: [{ id: 11, user: { id: 99 }, email: 'private@example.test' }],
+    });
+    await expect(fetchMyRegistrationRequests(7, { limit: 25 })).rejects.toBeInstanceOf(
+      UserRequestOwnershipError
+    );
+
+    globalThis.fetch = mockFetchOk({
+      change: { id: 12, user: { id: 99 }, address: 'Private address' },
+    });
+    await expect(fetchMyChangeRequest(12, 7)).rejects.toBeInstanceOf(
+      UserRequestOwnershipError
+    );
+  });
+
   test('fetchRegistrationRequests forwards q and structured filters', async () => {
-    globalThis.fetch = mockFetchOk({ registrations: [], _meta: { total_count: 0 } }) as any;
+    globalThis.fetch = mockFetchOk({ registrations: [], _meta: { total_count: 0 } });
 
     await fetchRegistrationRequests({
       limit: 25,
@@ -32,6 +112,7 @@ describe('requests API wrappers', () => {
       apiIpAddr: '192.0.2.10',
       clientIpAddr: '198.51.100.5',
       clientIpPtr: 'ptr.example.test',
+      count: true,
     });
 
     const [url] = lastFetchCall();
@@ -47,10 +128,11 @@ describe('requests API wrappers', () => {
     expect(u.searchParams.get('registration[api_ip_addr]')).toBe('192.0.2.10');
     expect(u.searchParams.get('registration[client_ip_addr]')).toBe('198.51.100.5');
     expect(u.searchParams.get('registration[client_ip_ptr]')).toBe('ptr.example.test');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchChangeRequests forwards q and structured filters', async () => {
-    globalThis.fetch = mockFetchOk({ changes: [], _meta: { total_count: 0 } }) as any;
+    globalThis.fetch = mockFetchOk({ changes: [], _meta: { total_count: 0 } });
 
     await fetchChangeRequests({
       limit: 15,
@@ -62,6 +144,7 @@ describe('requests API wrappers', () => {
       apiIpAddr: '192.0.2.20',
       clientIpAddr: '198.51.100.8',
       clientIpPtr: 'ptr2.example.test',
+      count: true,
     });
 
     const [url] = lastFetchCall();
@@ -77,10 +160,11 @@ describe('requests API wrappers', () => {
     expect(u.searchParams.get('change[api_ip_addr]')).toBe('192.0.2.20');
     expect(u.searchParams.get('change[client_ip_addr]')).toBe('198.51.100.8');
     expect(u.searchParams.get('change[client_ip_ptr]')).toBe('ptr2.example.test');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('previewRegistrationRequest encodes the token in the path', async () => {
-    globalThis.fetch = mockFetchOk({ registration: { id: 11 } }) as any;
+    globalThis.fetch = mockFetchOk({ registration: { id: 11 } });
 
     await previewRegistrationRequest(11, 'fix token/42');
 
@@ -91,7 +175,7 @@ describe('requests API wrappers', () => {
   });
 
   test('updateRegistrationRequestByToken sends namespaced payload', async () => {
-    globalThis.fetch = mockFetchOk({ registration: { id: 11 } }) as any;
+    globalThis.fetch = mockFetchOk({ registration: { id: 11 } });
 
     await updateRegistrationRequestByToken(11, 'fix-token', {
       login: 'alice',
@@ -127,7 +211,7 @@ describe('requests API wrappers', () => {
   });
 
   test('resolveRegistrationRequest posts namespaced action payload', async () => {
-    globalThis.fetch = mockFetchOk({ registration: { id: 12 }, _meta: { action_state_id: 44 } }) as any;
+    globalThis.fetch = mockFetchOk({ registration: { id: 12 }, _meta: { action_state_id: 44 } });
 
     await resolveRegistrationRequest(12, {
       action: 'approve',
@@ -155,7 +239,7 @@ describe('requests API wrappers', () => {
   });
 
   test('resolveChangeRequest posts namespaced action payload', async () => {
-    globalThis.fetch = mockFetchOk({ change: { id: 13 } }) as any;
+    globalThis.fetch = mockFetchOk({ change: { id: 13 } });
 
     await resolveChangeRequest(13, {
       action: 'request_correction',

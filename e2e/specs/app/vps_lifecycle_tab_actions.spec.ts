@@ -47,6 +47,7 @@ function runningActionState(id: number, label: string) {
 }
 
 async function installLifecycleMock(page: Page) {
+  let ipAddressRequests = 0;
   await installHaveApiMock(page, {
     user: { id: 1, login: 'admin', level: 99 },
     handlers: {
@@ -76,7 +77,10 @@ async function installLifecycleMock(page: Page) {
           diskspace: 20480,
         },
       }),
-      'GET ip_addresses': () => ({ ip_addresses: [] }),
+      'GET ip_addresses': () => {
+        ipAddressRequests += 1;
+        return { ip_addresses: [] };
+      },
       'GET vpses/123/statuses': () => ({ statuses: [] }),
       'GET vpses/123/state_logs': () => ({ state_logs: [] }),
       'GET transaction_chains': () => ({ transaction_chains: [] }),
@@ -104,6 +108,8 @@ async function installLifecycleMock(page: Page) {
       'DELETE vpses/123': () => ({ _meta: { action_state_id: 511 } }),
     },
   });
+
+  return { ipAddressRequests: () => ipAddressRequests };
 }
 
 test.describe('@pr-smoke VPS lifecycle tab', () => {
@@ -303,11 +309,12 @@ test.describe('@pr-smoke VPS lifecycle tab', () => {
 
   test('posts legacy reinstall payload from lifecycle tab', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
-    await installLifecycleMock(page);
+    const mock = await installLifecycleMock(page);
 
     await page.goto('/admin/vps/123/lifecycle/reinstall');
 
     await expect(page.getByTestId('vps.lifecycle.reinstall.impact')).toBeVisible();
+    expect(mock.ipAddressRequests()).toBe(1);
     await page.getByTestId('vps.lifecycle.reinstall.os_template').selectOption('7');
     await expect(page.getByTestId('vps.lifecycle.reinstall.confirm').locator('input')).toHaveCount(0);
 

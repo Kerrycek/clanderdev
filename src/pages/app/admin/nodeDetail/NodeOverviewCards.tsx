@@ -97,16 +97,6 @@ export function NodeOverviewCards(props: {
               <dt className="text-xs text-muted">{t('admin.node.field.process_count')}</dt>
               <dd>{fmt(node.process_count)}</dd>
             </div>
-            <div>
-              <dt className="text-xs text-muted">{t('admin.node.field.pool')}</dt>
-              <dd className="break-words">
-                <span className="text-muted">{fmt(node.pool_state)}</span>
-                {typeof node.pool_scan === 'string' ? (
-                  <span className="text-faint"> · {t('admin.node.health.pool_scan', { scan: node.pool_scan })}</span>
-                ) : null}
-                {typeof node.pool_scan_percent === 'number' ? <span className="text-faint"> · {String(node.pool_scan_percent)}%</span> : null}
-              </dd>
-            </div>
           </dl>
         </div>
       </Card>

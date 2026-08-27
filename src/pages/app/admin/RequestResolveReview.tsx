@@ -13,17 +13,7 @@ import {
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 
-import type { RequestReviewType, ReviewableRequest } from './RequestReviewActions';
-
-export type RequestResolveOverrides = {
-  login: string;
-  fullName: string;
-  orgName: string;
-  orgId: string;
-  email: string;
-  address: string;
-  changeReason: string;
-};
+import type { RequestResolveOverrides, RequestReviewType, ReviewableRequest } from './RequestReviewTypes';
 
 function trimValue(value: string): string {
   return value.trim();
@@ -64,7 +54,6 @@ export function RequestResolveReview(props: {
   reqId: number;
   action: ResolveUserRequestAction;
   requiresReason: boolean;
-  requiresConfirmation: boolean;
   approveCreateVps: boolean;
   approveActivate: boolean;
   approveNode: string;
@@ -118,7 +107,6 @@ export function RequestResolveReview(props: {
           <div className="text-xs font-medium uppercase tracking-wide text-muted">{t('requests.resolve.review.gates')}</div>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             <li>{props.requiresReason ? t('requests.resolve.review.reason_required') : t('requests.resolve.review.reason_optional')}</li>
-            <li>{props.requiresConfirmation ? t('requests.resolve.review.confirmation_required') : t('requests.resolve.review.confirmation_not_required')}</li>
           </ul>
         </div>
         <div>

@@ -12,7 +12,7 @@ function mockFetchOk(response: any) {
 }
 
 function lastFetchCall() {
-  const calls = (globalThis.fetch as any).mock.calls;
+  const calls = vi.mocked(globalThis.fetch).mock.calls;
   return calls[calls.length - 1] as [string, RequestInit?];
 }
 

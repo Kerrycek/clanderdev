@@ -1,17 +1,21 @@
 import React from 'react';
 
 import { useAppMode } from '../../../app/appMode';
-import { useAuth } from '../../../app/auth';
 import { LifecyclePanel } from '../../../components/lifetimes/LifecyclePanel';
 import { useVps } from './VpsContext';
 import { VpsOverviewAdminOperationsCard } from './VpsOverviewAdminOperationsCard';
 import { VpsOverviewMetricsCard } from './VpsOverviewMetricsCard';
 import {
+  VpsAccessCard,
+  VpsActivityCard,
+  VpsHealthBanner,
+  VpsNetworkCard,
+  VpsResourcesCard,
+  VpsStorageBackupsCard,
+} from './VpsControlCenterCards';
+import {
   OverviewAdminContextCard,
   OverviewDiagnosticsCard,
-  OverviewResourceUsageCard,
-  OverviewStatusAccessCard,
-  RecentTransactionChainsCard,
 } from './VpsOverviewPrimitives';
 
 export function VpsOverviewPage() {
@@ -19,31 +23,64 @@ export function VpsOverviewPage() {
     vps,
     refetch,
     busyTransaction,
+    busyLocalLock,
     chainsStale,
     activeChainIds,
     ipAddresses,
     ipAddressesLoading,
     ipAddressesError,
     sshCommand,
+    transactionChains,
+    transactionChainsLoading,
+    transactionChainsError,
   } = useVps();
   const { basePath, mode } = useAppMode();
-  const auth = useAuth();
-  const currentUserId = typeof auth.user?.id === 'number' ? auth.user.id : undefined;
+  const isAdminView = mode === 'admin';
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <OverviewStatusAccessCard
+    <div className="grid gap-4 lg:grid-cols-12" data-testid="vps.overview.control_center">
+      <div className="lg:col-span-12">
+        <VpsHealthBanner
+          vps={vps}
+          busy={busyTransaction || busyLocalLock}
+          stale={chainsStale}
+          sshCommand={sshCommand}
+          ipAddressesLoading={ipAddressesLoading}
+          ipAddressesError={ipAddressesError}
+        />
+      </div>
+
+      <VpsResourcesCard vps={vps} basePath={basePath} />
+
+      <VpsAccessCard
         vps={vps}
         basePath={basePath}
-        busyTransaction={busyTransaction}
-        chainsStale={chainsStale}
-        activeChainIds={activeChainIds}
         sshCommand={sshCommand}
       />
 
-      <OverviewResourceUsageCard vps={vps} basePath={basePath} mode={mode} currentUserId={currentUserId} />
+      <VpsNetworkCard
+        vps={vps}
+        basePath={basePath}
+        ipAddresses={ipAddresses}
+        loading={ipAddressesLoading}
+        error={ipAddressesError}
+      />
 
-      {mode === 'admin' ? (
+      <VpsStorageBackupsCard vps={vps} basePath={basePath} />
+
+      <VpsOverviewMetricsCard vps={vps} />
+
+      <VpsActivityCard
+        vps={vps}
+        basePath={basePath}
+        chains={transactionChains}
+        loading={transactionChainsLoading}
+        error={transactionChainsError}
+      />
+
+      {!isAdminView ? <OverviewDiagnosticsCard vps={vps} basePath={basePath} /> : null}
+
+      {isAdminView ? (
         <VpsOverviewAdminOperationsCard
           vps={vps}
           basePath={basePath}
@@ -56,7 +93,7 @@ export function VpsOverviewPage() {
         />
       ) : null}
 
-      <div className="lg:col-span-2">
+      <div className="lg:col-span-12">
         <LifecyclePanel
           kind="vps"
           id={vps.id}
@@ -69,13 +106,7 @@ export function VpsOverviewPage() {
         />
       </div>
 
-      <VpsOverviewMetricsCard vps={vps} />
-
-      {mode === 'admin' ? <RecentTransactionChainsCard vps={vps} basePath={basePath} /> : null}
-
-      <OverviewDiagnosticsCard vps={vps} basePath={basePath} />
-
-      {mode === 'admin' ? <OverviewAdminContextCard vps={vps} basePath={basePath} /> : null}
+      {isAdminView ? <OverviewAdminContextCard vps={vps} basePath={basePath} /> : null}
     </div>
   );
 }

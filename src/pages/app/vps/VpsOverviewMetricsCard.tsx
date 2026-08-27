@@ -7,6 +7,7 @@ import type { Vps } from '../../../lib/api/vps';
 import { fetchVpsStatuses } from '../../../lib/api/vps';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
+import { buttonClassName } from '../../../components/ui/buttonStyles';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { Spinner } from '../../../components/ui/Spinner';
 import { TimeSeriesChart } from '../../../components/ui/TimeSeriesChart';
@@ -63,7 +64,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
       if (!ts || !Number.isFinite(ts.getTime())) continue;
       const y = typeof s.loadavg1 === 'number' ? s.loadavg1 : Number.NaN;
       if (!Number.isFinite(y)) continue;
-      out.push({ x: ts.getTime(), y });
+      out.push({ x: ts.getTime() / 1000, y });
     }
     return out;
   }, [metricsRows]);
@@ -75,7 +76,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
       if (!ts || !Number.isFinite(ts.getTime())) continue;
       const y = typeof s.loadavg5 === 'number' ? s.loadavg5 : Number.NaN;
       if (!Number.isFinite(y)) continue;
-      out.push({ x: ts.getTime(), y });
+      out.push({ x: ts.getTime() / 1000, y });
     }
     return out;
   }, [metricsRows]);
@@ -88,7 +89,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
       const total = typeof s.total_memory === 'number' ? s.total_memory : props.vps.memory;
       const p = safePercent(s.used_memory, total);
       if (p == null) continue;
-      out.push({ x: ts.getTime(), y: p });
+      out.push({ x: ts.getTime() / 1000, y: p });
     }
     return out;
   }, [metricsRows, props.vps.memory]);
@@ -101,7 +102,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
       const total = typeof s.total_diskspace === 'number' ? s.total_diskspace : props.vps.diskspace;
       const p = safePercent(s.used_diskspace, total);
       if (p == null) continue;
-      out.push({ x: ts.getTime(), y: p });
+      out.push({ x: ts.getTime() / 1000, y: p });
     }
     return out;
   }, [metricsRows, props.vps.diskspace]);
@@ -139,7 +140,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
     const loadNow5 = metricsLast?.loadavg5 ?? props.vps.loadavg5;
 
     return (
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4" data-testid="vps.overview.metrics.grid">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2" data-testid="vps.overview.metrics.grid">
         <div className="space-y-2">
           <div className="flex items-baseline justify-between gap-2">
             <div className="text-sm font-medium">{t('vps.overview.metrics.chart.load1')}</div>
@@ -218,7 +219,7 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
   })();
 
   return (
-    <Card className="lg:col-span-2" testId="vps.overview.metrics.card">
+    <Card className="lg:col-span-12" testId="vps.overview.metrics.card">
       <CardHeader
         title={t('vps.overview.metrics.title')}
         subtitle={t('vps.overview.metrics.subtitle', { window: metricsWindow, samples: metricsRows.length })}
@@ -226,15 +227,19 @@ export function VpsOverviewMetricsCard(props: { vps: Vps }) {
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1">
               {(['24h', '7d', '30d'] as const).map((w) => (
-                <Button
+                <button
                   key={w}
-                  testId={`vps.overview.metrics.window.${w}`}
-                  size="sm"
-                  variant={metricsWindow === w ? 'primary' : 'secondary'}
+                  type="button"
+                  data-testid={`vps.overview.metrics.window.${w}`}
+                  className={buttonClassName({
+                    size: 'sm',
+                    variant: metricsWindow === w ? 'primary' : 'secondary',
+                  })}
+                  aria-pressed={metricsWindow === w}
                   onClick={() => setMetricsWindow(w)}
                 >
                   {w}
-                </Button>
+                </button>
               ))}
             </div>
             <Button

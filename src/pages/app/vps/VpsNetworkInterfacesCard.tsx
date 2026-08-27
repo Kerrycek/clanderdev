@@ -15,6 +15,7 @@ import { formatMbpsFromBytesPerSec, ipAddressLabel, ipIsRouted, ipPurposeLabel }
 
 export function VpsNetworkInterfacesCard(props: {
   canAdmin: boolean;
+  canMutate: boolean;
   isLoading: boolean;
   errorMessage: string | null;
   netifs: NetworkInterface[];
@@ -71,9 +72,9 @@ export function VpsNetworkInterfacesCard(props: {
                           <div className="mt-1 text-xs text-muted">{t('vps.network.interfaces.ip_count', { n: ips.length })}</div>
                         </div>
 
-                        <Button variant="secondary" size="sm" testId={`vps.network.interfaces.card.${ni.id}.edit`} onClick={() => props.onEdit(ni)}>
+                        {props.canMutate ? <Button variant="secondary" size="sm" testId={`vps.network.interfaces.card.${ni.id}.edit`} onClick={() => props.onEdit(ni)}>
                           {t('common.edit')}
-                        </Button>
+                        </Button> : null}
                       </div>
 
                       <div className="mt-3 grid gap-2 text-sm">
@@ -122,7 +123,7 @@ export function VpsNetworkInterfacesCard(props: {
                     {props.canAdmin ? <th className="px-4 py-3">{t('vps.network.interfaces.field.enabled')}</th> : null}
                     <th className="px-4 py-3">{t('vps.network.interfaces.field.max_tx')}</th>
                     <th className="px-4 py-3">{t('vps.network.interfaces.field.max_rx')}</th>
-                    <th className="px-4 py-3"></th>
+                    {props.canMutate ? <th className="px-4 py-3"></th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -150,11 +151,11 @@ export function VpsNetworkInterfacesCard(props: {
                         ) : null}
                         <td className="px-4 py-3 font-mono text-xs">{formatMbpsFromBytesPerSec(ni.max_tx)}</td>
                         <td className="px-4 py-3 font-mono text-xs">{formatMbpsFromBytesPerSec(ni.max_rx)}</td>
-                        <td className="px-4 py-3 text-right">
+                        {props.canMutate ? <td className="px-4 py-3 text-right">
                           <Button variant="secondary" size="sm" testId={`vps.network.interfaces.row.${ni.id}.edit`} onClick={() => props.onEdit(ni)}>
                             {t('common.edit')}
                           </Button>
-                        </td>
+                        </td> : null}
                       </tr>
                     );
                   })}

@@ -3,7 +3,15 @@ import { clsx } from './clsx';
 
 export interface InputProps {
   testId?: string;
+  inputId?: string;
   ariaLabel?: string;
+  ariaControls?: string;
+  ariaExpanded?: boolean;
+  ariaAutocomplete?: React.AriaAttributes['aria-autocomplete'];
+  ariaActiveDescendant?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
+  role?: React.AriaRole;
   value?: string;
   defaultValue?: string;
   placeholder?: string;
@@ -27,8 +35,16 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
   const input = (
     <input
       ref={ref}
+      id={props.inputId}
       data-testid={props.testId}
       aria-label={props.ariaLabel}
+      aria-controls={props.ariaControls}
+      aria-expanded={props.ariaExpanded}
+      aria-autocomplete={props.ariaAutocomplete}
+      aria-activedescendant={props.ariaActiveDescendant}
+      aria-invalid={props.ariaInvalid}
+      aria-describedby={props.ariaDescribedBy}
+      role={props.role}
       type={props.type ?? 'text'}
       name={props.name}
       inputMode={props.inputMode}

@@ -1,7 +1,7 @@
 import { expectArray, haveApiCall } from './haveapi';
 
 export interface UserRef {
-  id: number;
+  id: number | string;
   login?: string;
   label?: string;
   name?: string;
@@ -54,6 +54,7 @@ export interface RegistrationRequest extends UserRequestCommon {
   location?: unknown;
   currency?: string;
   language?: unknown;
+  time_zone?: string | null;
 
   // properties (IP/MAIL checks)
   ip_checked?: boolean;
@@ -100,6 +101,54 @@ export interface ChangeRequest extends UserRequestCommon {
   address?: string;
 }
 
+export interface MyRequestListOptions {
+  limit?: number;
+  fromId?: number;
+  state?: string;
+  count?: boolean;
+}
+
+export class UserRequestOwnershipError extends Error {
+  constructor() {
+    super('Request ownership could not be verified.');
+    this.name = 'UserRequestOwnershipError';
+  }
+}
+
+function requestOwnerId(request: UserRequestCommon): number | null {
+  const owner = request.user;
+  if (!owner || typeof owner !== 'object') return null;
+  const id = Number(owner.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  return id;
+}
+
+/**
+ * The API scopes request Index/Show to the signed-in owner for non-admin users.
+ * Keep this client-side check as a second fail-closed boundary: a malformed or
+ * unexpectedly unscoped response must never be rendered in the My requests UI.
+ */
+export function assertOwnedUserRequest<T extends UserRequestCommon>(
+  request: T,
+  expectedUserId: number,
+): T {
+  if (!Number.isSafeInteger(expectedUserId) || expectedUserId <= 0) {
+    throw new UserRequestOwnershipError();
+  }
+  if (requestOwnerId(request) !== expectedUserId) {
+    throw new UserRequestOwnershipError();
+  }
+  return request;
+}
+
+export function assertOwnedUserRequests<T extends UserRequestCommon>(
+  requests: T[],
+  expectedUserId: number,
+): T[] {
+  for (const request of requests) assertOwnedUserRequest(request, expectedUserId);
+  return requests;
+}
+
 export async function createChangeRequest(params: {
   change_reason: string;
   full_name?: string;
@@ -126,6 +175,7 @@ export async function fetchRegistrationRequests(opts?: {
   apiIpAddr?: string;
   clientIpAddr?: string;
   clientIpPtr?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -143,6 +193,7 @@ export async function fetchRegistrationRequests(opts?: {
     path: '/user_request/registrations',
     namespace: 'registration',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return {
@@ -156,6 +207,25 @@ export async function fetchRegistrationRequest(requestId: number) {
     method: 'GET',
     path: `/user_request/registrations/${requestId}`,
   });
+}
+
+export async function fetchMyRegistrationRequests(
+  expectedUserId: number,
+  opts?: MyRequestListOptions,
+) {
+  const res = await fetchRegistrationRequests({ ...opts, count: opts?.count });
+  return {
+    ...res,
+    data: assertOwnedUserRequests(res.data, expectedUserId),
+  };
+}
+
+export async function fetchMyRegistrationRequest(requestId: number, expectedUserId: number) {
+  const res = await fetchRegistrationRequest(requestId);
+  return {
+    ...res,
+    data: assertOwnedUserRequest(res.data, expectedUserId),
+  };
 }
 
 export async function resolveRegistrationRequest(
@@ -231,6 +301,7 @@ export async function fetchChangeRequests(opts?: {
   apiIpAddr?: string;
   clientIpAddr?: string;
   clientIpPtr?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -248,6 +319,7 @@ export async function fetchChangeRequests(opts?: {
     path: '/user_request/changes',
     namespace: 'change',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return {
@@ -261,6 +333,25 @@ export async function fetchChangeRequest(requestId: number) {
     method: 'GET',
     path: `/user_request/changes/${requestId}`,
   });
+}
+
+export async function fetchMyChangeRequests(
+  expectedUserId: number,
+  opts?: MyRequestListOptions,
+) {
+  const res = await fetchChangeRequests({ ...opts, count: opts?.count });
+  return {
+    ...res,
+    data: assertOwnedUserRequests(res.data, expectedUserId),
+  };
+}
+
+export async function fetchMyChangeRequest(requestId: number, expectedUserId: number) {
+  const res = await fetchChangeRequest(requestId);
+  return {
+    ...res,
+    data: assertOwnedUserRequest(res.data, expectedUserId),
+  };
 }
 
 export async function resolveChangeRequest(

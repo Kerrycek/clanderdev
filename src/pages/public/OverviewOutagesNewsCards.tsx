@@ -3,43 +3,14 @@ import { Link } from 'react-router-dom';
 
 import { useI18n } from '../../app/i18n';
 import { Alert } from '../../components/ui/Alert';
-import { Badge } from '../../components/ui/Badge';
+import { CompactOutageSummary } from '../../components/outages/CompactOutageSummary';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { NewsMessage } from '../../components/ui/NewsMessage';
 import { Spinner } from '../../components/ui/Spinner';
 import { StackedBar } from '../../components/ui/StackedBar';
-import { StatusDot } from '../../components/ui/StatusDot';
 import type { NewsLog, Outage } from '../../lib/api/public';
-import { outageBadges } from '../../lib/outageBadges';
 import { formatDateTime } from '../../lib/time';
-import { pickTranslation } from '../../lib/translations';
-import { dotVariantFromBadgeVariant } from '../../lib/variantMap';
 import type { PublicOutagesByCategory } from './OverviewModel';
-
-function OutageSummary(props: { outage: Outage }) {
-  const i18n = useI18n();
-  const summary = pickTranslation(props.outage, 'summary', i18n.preferredLanguageCodes);
-  const badges = outageBadges(props.outage, i18n.t);
-  const dotVariant = dotVariantFromBadgeVariant(badges.primaryVariant);
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <StatusDot variant={dotVariant} ariaLabel={badges.lifecycle.label} />
-        <div className="font-medium">
-          <Link to={`/outages/${props.outage.id}`} className="hover:underline">
-            {summary ?? i18n.t('public.outage.fallback_title', { id: props.outage.id })}
-          </Link>
-        </div>
-        <Badge variant={badges.lifecycle.variant}>{badges.lifecycle.label}</Badge>
-      </div>
-      <div className="text-xs text-muted">
-        {i18n.t('public.outage.field.begins')}: {formatDateTime(props.outage.begins_at)}
-        {props.outage.finished_at ? ` · ${i18n.t('public.outage.field.finished')}: ${formatDateTime(props.outage.finished_at)}` : null}
-      </div>
-    </div>
-  );
-}
 
 function visibleOutages(groups: PublicOutagesByCategory): Outage[] {
   if (groups.current.length > 0) return groups.current.slice(0, 3);
@@ -120,7 +91,11 @@ export function OverviewOutagesNewsCards(props: {
                     { value: props.outagesByCategory.unknown.length, variant: 'neutral', title: i18n.t('public.overview.outages.segment.other') },
                   ]}
                 />
-                {visibleOutages(props.outagesByCategory).map((outage) => <OutageSummary key={outage.id} outage={outage} />)}
+                <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
+                  {visibleOutages(props.outagesByCategory).map((outage) => (
+                    <CompactOutageSummary key={outage.id} outage={outage} to={`/outages/${outage.id}`} />
+                  ))}
+                </div>
               </div>
             )}
           </CardBody>

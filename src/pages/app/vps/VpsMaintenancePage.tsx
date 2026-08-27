@@ -131,7 +131,7 @@ export function VpsMaintenancePage() {
   const qc = useQueryClient();
   const { t } = useI18n();
 
-  const { vps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
   const vpsId = vps.id;
   const objectLabel = String((vps as any).hostname ?? '') || `#${vpsId}`;
 
@@ -190,6 +190,7 @@ export function VpsMaintenancePage() {
 
   const saveM = useMutation({
     mutationFn: async () => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflight();
 
       const changedDays = effective.filter((d) => dirtyWeekdays.includes(d.weekday));
@@ -264,7 +265,7 @@ export function VpsMaintenancePage() {
         <CardHeader
           title={t('vps.maintenance.title')}
           subtitle={t('vps.maintenance.subtitle_advanced')}
-          actions={
+          actions={canMutateVps ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 testId="vps.maintenance.reset"
@@ -286,11 +287,17 @@ export function VpsMaintenancePage() {
                 {dirty ? t('vps.maintenance.save_changes', { n: dirtyWeekdays.length }) : t('vps.maintenance.save_changes_empty')}
               </ActionButton>
             </div>
-          }
+          ) : null}
         />
 
         <CardBody>
-          {!gate.allowed ? (
+          {!canMutateVps ? (
+            <Alert title={t('gate.blocked.permission.title')} variant="warn">
+              <div data-testid="vps.maintenance.read_only">{t('gate.blocked.permission.body')}</div>
+            </Alert>
+          ) : null}
+
+          {canMutateVps && !gate.allowed ? (
             <Alert title={t(gate.reason.titleKey)} variant="warn">
               <div className="space-y-2">
                 {gate.reason.descriptionKey ? <div>{t(gate.reason.descriptionKey)}</div> : null}
@@ -308,7 +315,7 @@ export function VpsMaintenancePage() {
               <div className="text-xs text-muted">
                 {dirty ? t('vps.maintenance.unsaved', { n: dirtyWeekdays.length }) : t('vps.maintenance.saved')}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              {canMutateVps ? <div className="flex flex-wrap items-center gap-2">
                 <Button
                   testId="vps.maintenance.allow_anytime"
                   variant="secondary"
@@ -327,7 +334,7 @@ export function VpsMaintenancePage() {
                 >
                   {t('vps.maintenance.disallow_all')}
                 </Button>
-              </div>
+              </div> : null}
             </div>
 
             {q.isLoading ? (
@@ -368,7 +375,7 @@ export function VpsMaintenancePage() {
                             {isDirty ? <span className="ml-2 text-xs text-muted">{t('common.changed')}</span> : null}
                           </td>
                           <td className="px-4 py-3">
-                            <label className="flex items-center gap-2 text-sm">
+                            {canMutateVps ? <label className="flex items-center gap-2 text-sm">
                               <input
                                 data-testid={`vps.maintenance.day.${d.weekday}.open`}
                                 type="checkbox"
@@ -380,26 +387,26 @@ export function VpsMaintenancePage() {
                                 className="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-2 focus:ring-focus/35 focus:ring-offset-2 focus:ring-offset-bg disabled:opacity-60"
                               />
                               <span>{d.is_open ? t('vps.maintenance.open') : t('vps.maintenance.closed')}</span>
-                            </label>
+                            </label> : <span className="text-sm">{d.is_open ? t('vps.maintenance.open') : t('vps.maintenance.closed')}</span>}
                           </td>
                           <td className="px-4 py-3">
-                            <TimePick
+                            {canMutateVps ? <TimePick
                               testId={`vps.maintenance.day.${d.weekday}.opens`}
                               valueMinutes={d.opens_at}
                               onChange={(m) => updateDay(d.weekday, { opens_at: m })}
                               disabled={!d.is_open || !gate.allowed || saveM.isPending}
                               stepMinutes={5}
-                            />
+                            /> : <span className="font-mono text-sm">{d.is_open ? `${pad2(minutesToHM(d.opens_at).h)}:${pad2(minutesToHM(d.opens_at).m)}` : '—'}</span>}
                           </td>
                           <td className="px-4 py-3">
-                            <TimePick
+                            {canMutateVps ? <TimePick
                               testId={`vps.maintenance.day.${d.weekday}.closes`}
                               valueMinutes={d.closes_at}
                               onChange={(m) => updateDay(d.weekday, { closes_at: m })}
                               disabled={!d.is_open || !gate.allowed || saveM.isPending}
                               stepMinutes={5}
                               allow24
-                            />
+                            /> : <span className="font-mono text-sm">{d.is_open ? `${pad2(minutesToHM(d.closes_at).h)}:${pad2(minutesToHM(d.closes_at).m)}` : '—'}</span>}
                           </td>
                           <td className="px-4 py-3 text-xs text-muted">
                             {d.is_open

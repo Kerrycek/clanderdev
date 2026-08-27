@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   evacuateNode,
   fetchNode,
+  fetchNodePools,
   fetchNodes,
   fetchNodeStatuses,
   setNodeMaintenance,
@@ -38,12 +39,9 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { LockStateStaleAlert } from '../../../components/ui/LockStateStaleAlert';
 import { ObjectHeader } from '../../../components/ui/ObjectHeader';
 
-import { NodeEvacuationCard } from './nodeDetail/NodeEvacuationCard';
-import { NodeMaintenanceCard } from './nodeDetail/NodeMaintenanceCard';
-import { NodeMetricsCard } from './nodeDetail/NodeMetricsCard';
-import { NodeOverviewCards } from './nodeDetail/NodeOverviewCards';
-import { NodeStatusSamplesCard } from './nodeDetail/NodeStatusSamplesCard';
-import { NodeTransactionsCard } from './nodeDetail/NodeTransactionsCard';
+import { NodeDetailTabs, NodeMaintenanceSection, NodeOverviewSection } from './nodeDetail/NodeDetailSections';
+import { NodeStorageCard } from './nodeDetail/NodeStorageCard';
+import { parseNodeDetailSection, type NodeDetailSection } from './nodeDetail/NodeStorageModel';
 import {
   buildNodeStatusKeys,
   buildStatusIndex,
@@ -63,6 +61,7 @@ import {
 export function NodeDetailPage() {
   const { mode, basePath } = useAppMode();
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const chrome = useChrome();
   const online = useNetworkStatus();
   const params = useParams();
@@ -76,6 +75,13 @@ export function NodeDetailPage() {
   const busyLocalLock = nodeRef ? chrome.isLocallyLocked(nodeRef) : false;
 
   const [searchParams, setSearchParams] = useSearchParams();
+  const activeSection = parseNodeDetailSection(searchParams.get('section'));
+  const setActiveSection = (section: NodeDetailSection) => {
+    const next = new URLSearchParams(searchParams);
+    if (section === 'overview') next.delete('section');
+    else next.set('section', section);
+    setSearchParams(next, { replace: true });
+  };
   const metricsWindow = parseMetricsWindow(searchParams.get('metrics_window'));
   const metricsLimit = metricsLimitForWindow(metricsWindow);
   const setMetricsWindow = (w: '6h' | '24h' | '7d') => {
@@ -145,7 +151,7 @@ export function NodeDetailPage() {
   const statusesQ = useQuery({
     queryKey: ['nodes', 'statuses', { nodeId, limit: statusPg.limit, fromId: statusPg.fromId ?? null }],
     queryFn: async () => (await fetchNodeStatuses(nodeId, { limit: statusPg.limit, fromId: statusPg.fromId })).data,
-    enabled: Number.isFinite(nodeId) && nodeId > 0,
+    enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'overview',
     refetchInterval: tierCRefetchMs,
   });
 
@@ -161,14 +167,14 @@ export function NodeDetailPage() {
         return (await fetchNodeStatuses(nodeId, { limit: metricsLimit })).data;
       }
     },
-    enabled: Number.isFinite(nodeId) && nodeId > 0,
+    enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'overview',
     refetchInterval: tierSlowRefetchMs,
   });
 
   const txQ = useQuery({
     queryKey: ['transactions', 'list', { nodeId, limit: txPg.limit, fromId: txPg.fromId ?? null }],
     queryFn: async () => (await fetchTransactions({ nodeId, limit: txPg.limit, fromId: txPg.fromId })).data,
-    enabled: Number.isFinite(nodeId) && nodeId > 0,
+    enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'overview',
     refetchInterval: tierBRefetchMs,
   });
 
@@ -191,11 +197,38 @@ export function NodeDetailPage() {
   const nodesQ = useQuery({
     queryKey: ['nodes', 'index', { limit: 500 }],
     queryFn: async () => (await fetchNodes({ limit: 500 })).data,
+    enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'maintenance',
     staleTime: 60000,
+  });
+
+  const poolsQ = useQuery({
+    queryKey: ['nodes', 'pools', { nodeId, limit: 500 }],
+    queryFn: async () => (await fetchNodePools(nodeId, { limit: 500 })).data,
+    enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'storage',
+    refetchInterval: tierSlowRefetchMs,
   });
 
   const node = nodeQ.data;
   const title = node ? nodeTitle(node, nodeId) : `Node #${nodeId}`;
+
+  const refreshAfterNodeMutation = () => {
+    const activeOnly = { refetchType: 'active' as const };
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['nodes', 'show', { id: nodeId }], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({ queryKey: ['nodes', 'public_status'], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({ queryKey: ['nodes', 'index', { limit: 500 }], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({
+        queryKey: ['transaction_chain', 'list', { className: 'Node', rowId: nodeId, state: 'active', limit: 10 }],
+        exact: true,
+        ...activeOnly,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['transactions', 'list', { nodeId, limit: txPg.limit, fromId: txPg.fromId ?? null }],
+        exact: true,
+        ...activeOnly,
+      }),
+    ]);
+  };
 
   const maintenanceM = useMutation({
     mutationFn: async (lock: boolean) => {
@@ -219,10 +252,7 @@ export function NodeDetailPage() {
       }
       setNotice(lock ? t('admin.node.notice.maintenance_lock_requested') : t('admin.node.notice.maintenance_unlock_requested'));
       setConfirm(null);
-      void nodeQ.refetch();
-      void chainsQ.refetch();
-      void txQ.refetch();
-      void publicStatusQ.refetch();
+      refreshAfterNodeMutation();
     },
     onError: (err: unknown) => {
       if (typeof err === 'object' && err && 'code' in err && (err as { code?: unknown }).code === 'BUSY') {
@@ -264,10 +294,7 @@ export function NodeDetailPage() {
       setEvResult(res.data ?? null);
       setNotice(t('admin.node.notice.evacuation_started'));
       setConfirm(null);
-      void nodeQ.refetch();
-      void chainsQ.refetch();
-      void txQ.refetch();
-      void publicStatusQ.refetch();
+      refreshAfterNodeMutation();
     },
     onError: (err: unknown) => {
       if (typeof err === 'object' && err && 'code' in err && (err as { code?: unknown }).code === 'BUSY') {
@@ -385,10 +412,16 @@ export function NodeDetailPage() {
               onClick={() => {
                 void nodeQ.refetch();
                 void chainsQ.refetch();
-                void statusesQ.refetch();
-                void metricsQ.refetch();
-                void txQ.refetch();
                 void publicStatusQ.refetch();
+                if (activeSection === 'overview') {
+                  void statusesQ.refetch();
+                  void metricsQ.refetch();
+                  void txQ.refetch();
+                } else if (activeSection === 'storage') {
+                  void poolsQ.refetch();
+                } else {
+                  void nodesQ.refetch();
+                }
               }}
             >
               {t('common.refresh')}
@@ -418,6 +451,8 @@ export function NodeDetailPage() {
           {notice}
         </Alert>
       ) : null}
+
+      {Number.isFinite(nodeId) && nodeId > 0 ? <NodeDetailTabs active={activeSection} onChange={setActiveSection} t={t} /> : null}
 
       {!Number.isFinite(nodeId) || nodeId <= 0 ? (
         <ErrorState
@@ -454,108 +489,72 @@ export function NodeDetailPage() {
         />
       ) : (
         <>
-          <NodeOverviewCards node={node} loc={loc} statusRow={statusRow ?? undefined} t={t} />
-
-          <NodeMetricsCard
-            t={t}
-            metricsWindow={metricsWindow}
-            setMetricsWindow={setMetricsWindow}
-            metricsRows={metricsRows}
-            metricsLast={metricsLast}
-            node={node}
-            metricsLoading={metricsQ.isLoading}
-            metricsError={metricsQ.error}
-            load1Points={load1Points}
-            cpuIdlePoints={cpuIdlePoints}
-            memUsedPercentPoints={memUsedPercentPoints}
-          />
-
-          <NodeMaintenanceCard
-            t={t}
-            lock={lock}
-            lockReason={lockReason}
-            maintReason={maintReason}
-            onMaintReasonChange={setMaintReason}
-            maintenanceError={maintenanceM.error}
-            maintenanceLockGate={maintenanceLockGate}
-            maintenanceUnlockGate={maintenanceUnlockGate}
-            onRequestLock={() => setConfirm({ kind: 'lock' })}
-            onRequestUnlock={() => setConfirm({ kind: 'unlock' })}
-          />
-
-          <NodeEvacuationCard
-            t={t}
-            basePath={basePath}
-            nodesLoading={nodesQ.isLoading}
-            nodesError={nodesQ.isError}
-            destOptions={destOptions}
-            evDst={evDst}
-            onEvDstChange={setEvDst}
-            evConcurrency={evConcurrency}
-            onEvConcurrencyChange={setEvConcurrency}
-            evReason={evReason}
-            onEvReasonChange={setEvReason}
-            evStopOnError={evStopOnError}
-            onEvStopOnErrorChange={setEvStopOnError}
-            evMaintenanceWindow={evMaintenanceWindow}
-            onEvMaintenanceWindowChange={setEvMaintenanceWindow}
-            evCleanupData={evCleanupData}
-            onEvCleanupDataChange={setEvCleanupData}
-            evSendMail={evSendMail}
-            onEvSendMailChange={setEvSendMail}
-            evResult={evResult}
-            evacuateError={evacuateM.error}
-            canEvacuate={canEvacuate}
-            evacuateGate={evacuateGate}
-            onRequestEvacuate={() => setConfirm({ kind: 'evacuate' })}
-          />
-
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <NodeStatusSamplesCard
-              t={t}
-              nodeId={nodeId}
-              statusRows={statusRows}
-              loading={statusesQ.isLoading}
-              error={statusesQ.error}
-              fetching={statusesQ.isFetching}
-              onRefresh={() => {
-                void statusesQ.refetch();
+          {activeSection === 'overview' ? (
+            <NodeOverviewSection
+              overview={{ node, loc, statusRow: statusRow ?? undefined, t }}
+              metrics={{
+                t, metricsWindow, setMetricsWindow, metricsRows, metricsLast, node,
+                metricsLoading: metricsQ.isLoading, metricsError: metricsQ.error,
+                load1Points, cpuIdlePoints, memUsedPercentPoints,
               }}
-              page={statusPg.page}
-              pageCount={statusPg.stack.length}
-              canPrev={statusPg.canPrev}
-              canNext={statusCanNext}
-              onPrev={statusPg.goPrev}
-              onNext={() => statusPg.goNext(statusCursor)}
-              onGoToPage={statusPg.goToPage}
-              limit={statusPg.limit}
-              allowedLimits={statusPg.allowedLimits}
-              onLimitChange={statusPg.setLimit}
-            />
-
-            <NodeTransactionsCard
-              t={t}
-              basePath={basePath}
-              nodeId={nodeId}
-              txRows={txRows}
-              loading={txQ.isLoading}
-              error={txQ.error}
-              fetching={txQ.isFetching}
-              onRefresh={() => {
-                void txQ.refetch();
+              statuses={{
+                t, nodeId, statusRows, loading: statusesQ.isLoading, error: statusesQ.error,
+                fetching: statusesQ.isFetching, onRefresh: () => void statusesQ.refetch(),
+                page: statusPg.page, pageCount: statusPg.stack.length, canPrev: statusPg.canPrev,
+                canNext: statusCanNext, onPrev: statusPg.goPrev,
+                onNext: () => statusPg.goNext(statusCursor), onGoToPage: statusPg.goToPage,
+                limit: statusPg.limit, allowedLimits: statusPg.allowedLimits, onLimitChange: statusPg.setLimit,
               }}
-              page={txPg.page}
-              pageCount={txPg.stack.length}
-              canPrev={txPg.canPrev}
-              canNext={txCanNext}
-              onPrev={txPg.goPrev}
-              onNext={() => txPg.goNext(txCursor)}
-              onGoToPage={txPg.goToPage}
-              limit={txPg.limit}
-              allowedLimits={txPg.allowedLimits}
-              onLimitChange={txPg.setLimit}
+              transactions={{
+                t, basePath, nodeId, txRows, loading: txQ.isLoading, error: txQ.error,
+                fetching: txQ.isFetching, onRefresh: () => void txQ.refetch(),
+                page: txPg.page, pageCount: txPg.stack.length, canPrev: txPg.canPrev,
+                canNext: txCanNext, onPrev: txPg.goPrev,
+                onNext: () => txPg.goNext(txCursor), onGoToPage: txPg.goToPage,
+                limit: txPg.limit, allowedLimits: txPg.allowedLimits, onLimitChange: txPg.setLimit,
+              }}
             />
-          </div>
+          ) : null}
+
+          {activeSection === 'storage' ? (
+            <div
+              id="admin-node-panel-storage"
+              role="tabpanel"
+              aria-labelledby="admin-node-tab-storage"
+              data-testid="admin.node.panel.storage"
+            >
+              <NodeStorageCard
+                t={t}
+                node={node}
+                pools={poolsQ.data ?? []}
+                loading={poolsQ.isLoading}
+                fetching={poolsQ.isFetching}
+                error={poolsQ.error}
+                onRefresh={() => void poolsQ.refetch()}
+              />
+            </div>
+          ) : null}
+
+          {activeSection === 'maintenance' ? (
+            <NodeMaintenanceSection
+              maintenance={{
+                t, lock, lockReason, maintReason, onMaintReasonChange: setMaintReason,
+                maintenanceError: maintenanceM.error, maintenanceLockGate, maintenanceUnlockGate,
+                onRequestLock: () => setConfirm({ kind: 'lock' }), onRequestUnlock: () => setConfirm({ kind: 'unlock' }),
+              }}
+              evacuation={{
+                t, basePath, nodesLoading: nodesQ.isLoading, nodesError: nodesQ.isError,
+                destOptions, evDst, onEvDstChange: setEvDst, evConcurrency,
+                onEvConcurrencyChange: setEvConcurrency, evReason, onEvReasonChange: setEvReason,
+                evStopOnError, onEvStopOnErrorChange: setEvStopOnError,
+                evMaintenanceWindow, onEvMaintenanceWindowChange: setEvMaintenanceWindow,
+                evCleanupData, onEvCleanupDataChange: setEvCleanupData,
+                evSendMail, onEvSendMailChange: setEvSendMail, evResult,
+                evacuateError: evacuateM.error, canEvacuate, evacuateGate,
+                onRequestEvacuate: () => setConfirm({ kind: 'evacuate' }),
+              }}
+            />
+          ) : null}
         </>
       )}
 

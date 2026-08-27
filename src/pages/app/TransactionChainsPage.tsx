@@ -13,7 +13,6 @@ import { useObjectScope } from '../../app/objectScope';
 import { useToasts } from '../../app/toasts';
 import { LinkButton } from '../../components/ui/LinkButton';
 import {
-  chainFilterToneFromState,
   chainMatchesConcern,
   chainMatchesUser,
   chainMatchesUserSession,
@@ -670,7 +669,6 @@ export function TransactionChainsPage() {
           mode={uiMode}
           smartInputRef={smartInputRef}
           smart={smart}
-          smartNeedle={smartNeedle}
           smartErrorsCount={smartErrors.length}
           onSmartChange={(value) => {
             setSmart(value);

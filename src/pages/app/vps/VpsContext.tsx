@@ -1,11 +1,14 @@
 import React, { createContext, useContext } from 'react';
 
 import { type IpAddress } from '../../../lib/api/ipAddresses';
+import { type TransactionChain } from '../../../lib/api/transactions';
 import { type Vps } from '../../../lib/api/vps';
 import type { ObjectRef } from '../../../lib/objectRef';
 
 export interface VpsContextValue {
   vps: Vps;
+  /** Whether the current route and authenticated role may mutate this VPS. */
+  canMutateVps: boolean;
   refetch: () => void;
   refetchChains: () => void;
 
@@ -15,6 +18,9 @@ export interface VpsContextValue {
   chainsStale: boolean;
   busyLocalLock: boolean;
   activeChainIds: number[];
+  transactionChains: TransactionChain[];
+  transactionChainsLoading: boolean;
+  transactionChainsError: boolean;
   ipAddresses: IpAddress[];
   ipAddressesLoading: boolean;
   ipAddressesError: boolean;

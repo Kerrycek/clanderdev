@@ -65,13 +65,13 @@ export function UsersListTable({
     >
       <thead>
         <tr className="border-b border-border text-left text-xs text-muted">
-          <th className="w-8 px-4 py-2"><span className="sr-only">{t('common.state')}</span></th>
-          <th className="px-4 py-2">{t('admin.users.field.login')}</th>
-          <th className="px-4 py-2">{t('admin.users.field.name')}</th>
-          <th className="px-4 py-2">{t('admin.users.field.email')}</th>
-          <th className="px-4 py-2">{t('admin.users.field.role')}</th>
-          <th className="px-4 py-2">{t('admin.users.field.last_activity')}</th>
-          <th className="px-4 py-2">{t('admin.users.field.created')}</th>
+          <th className="w-8 px-2 py-2"><span className="sr-only">{t('common.state')}</span></th>
+          <th className="px-3 py-2">{t('admin.users.field.login')}</th>
+          <th className="px-3 py-2">{t('admin.users.field.name')}</th>
+          <th className="px-3 py-2">{t('admin.users.field.email')}</th>
+          <th className="px-3 py-2">{t('admin.users.field.role')}</th>
+          <th className="px-3 py-2">{t('admin.users.field.last_activity')}</th>
+          <th className="px-3 py-2">{t('admin.users.field.created')}</th>
         </tr>
       </thead>
       <tbody>
@@ -88,10 +88,10 @@ export function UsersListTable({
               variant={rowVariant}
               className="border-b border-border/60 last:border-b-0"
             >
-              <td className="px-4 py-2 align-top">
+              <td className="px-2 py-2 align-top">
                 <StatusDot variant={dotVariant} testId={`admin.users.row.${user.id}.dot`} ariaLabel={t('common.state')} />
               </td>
-              <td className="px-4 py-2 align-top">
+              <td className="px-3 py-2 align-top">
                 <Link className="font-medium text-accent hover:underline" to={`${basePath}/users/${user.id}`}>
                   {user.login ?? `#${user.id}`}
                 </Link>
@@ -106,13 +106,13 @@ export function UsersListTable({
                   </div>
                 ) : null}
               </td>
-              <td className="px-4 py-2 text-xs text-muted align-top">{user.full_name ? String(user.full_name) : na}</td>
-              <td className="px-4 py-2 text-xs text-muted align-top">{user.email ? String(user.email) : na}</td>
-              <td className="px-4 py-2 align-top">
+              <td className="px-3 py-2 text-xs text-muted align-top">{user.full_name ? String(user.full_name) : na}</td>
+              <td className="px-3 py-2 text-xs text-muted align-top">{user.email ? String(user.email) : na}</td>
+              <td className="px-3 py-2 align-top">
                 <Badge variant={role.variant}>{role.label}</Badge>
               </td>
-              <td className="px-4 py-2 text-xs text-muted align-top">{user.last_activity_at ? formatDateTime(String(user.last_activity_at)) : na}</td>
-              <td className="px-4 py-2 text-xs text-muted align-top">{user.created_at ? formatDateTime(String(user.created_at)) : na}</td>
+              <td className="px-3 py-2 text-xs text-muted align-top">{user.last_activity_at ? formatDateTime(String(user.last_activity_at)) : na}</td>
+              <td className="px-3 py-2 text-xs text-muted align-top">{user.created_at ? formatDateTime(String(user.created_at)) : na}</td>
             </TableRowLink>
           );
         })}

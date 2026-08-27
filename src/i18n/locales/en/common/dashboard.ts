@@ -88,6 +88,7 @@ export const enCommon_dashboard = {
   'dashboard.section.cluster.empty': 'No node status data available.',
   'dashboard.section.cluster.location_unknown': 'Unknown location',
   'dashboard.section.cluster.location_summary': '{up} up · {maintenance} maintenance · {down} down · {total} total',
+  'dashboard.section.cluster.location_summary_compact': '{up}/{total} online',
   'dashboard.section.cluster.location_bar_aria': 'Node status in {location}',
   'dashboard.section.cluster.more_locations': '+{count} more locations hidden from the dashboard',
   'dashboard.section.cluster.status.up': 'Online',

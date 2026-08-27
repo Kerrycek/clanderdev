@@ -3,9 +3,17 @@ import { expect, test } from '@playwright/test';
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
 test.describe('IP address environment filter', () => {
-  test('offers free addresses from each active location by default', async ({ page }) => {
+  test('offers a location-major free-address sample from each active location', async ({ page }, testInfo) => {
     const requestedLocations: string[] = [];
     const requestedAssigned: string[] = [];
+    const requestedOwners: Array<string | null> = [];
+    const requestedOrders: Array<string | null> = [];
+    const requestedRoles: Array<string | null> = [];
+    const requestedLimits: Array<string | null> = [];
+    const requestedCursors: Array<string | null> = [];
+    const requestedIncludes: Array<string | null> = [];
+    const itemKind = testInfo.project.name === 'mobile-chrome' ? 'card' : 'row';
+    const item = (id: number) => page.getByTestId(`admin.ip_addresses.${itemKind}.${id}`);
 
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     await installHaveApiMock(page, {
@@ -20,39 +28,54 @@ test.describe('IP address environment filter', () => {
         }),
         'GET ip_addresses': (ctx) => {
           const location = ctx.searchParams.get('ip_address[location]');
+          const version = ctx.searchParams.get('ip_address[version]');
+          const role = ctx.searchParams.get('ip_address[role]');
           if (location) requestedLocations.push(location);
           requestedAssigned.push(ctx.searchParams.get('ip_address[assigned_to_interface]') ?? '');
+          requestedOwners.push(ctx.searchParams.get('ip_address[user]'));
+          requestedOrders.push(ctx.searchParams.get('ip_address[order]'));
+          requestedRoles.push(role);
+          requestedLimits.push(ctx.searchParams.get('ip_address[limit]'));
+          requestedCursors.push(ctx.searchParams.get('ip_address[from_id]'));
+          requestedIncludes.push(ctx.searchParams.get('_meta[includes]'));
 
           const locations = {
-            '7': { id: 601, addr: '198.51.100.7', location: { id: 7, label: 'Brno', environment: { id: 3, label: 'Production' } } },
-            '8': { id: 501, addr: '10.8.0.20', location: { id: 8, label: 'Praha', environment: { id: 3, label: 'Production' } } },
-            '9': { id: 701, addr: '198.51.100.90', location: { id: 9, label: 'Playground', environment: { id: 4, label: 'Staging' } } },
+            '7': { id: 600, location: { id: 7, label: 'Brno', environment: { id: 3, label: 'Production' } } },
+            '8': { id: 500, location: { id: 8, label: 'Praha', environment: { id: 3, label: 'Production' } } },
+            '9': { id: 700, location: { id: 9, label: 'Playground', environment: { id: 4, label: 'Staging' } } },
           } as const;
           const selected = locations[location as keyof typeof locations];
-          return {
-            ip_addresses: selected ? [
-              {
-                ...selected,
-                prefix: 32,
-                network: {
-                  id: selected.id + 100,
-                  address: selected.addr.replace(/\d+$/, '0'),
-                  prefix: 24,
-                  primary_location: selected.location,
-                },
-              },
-              {
-                ...selected,
-                id: selected.id + 1_000,
-                user: { id: 99, login: 'already-owned' },
-              },
-              {
-                ...selected,
-                id: selected.id + 2_000,
-                vps: { id: 77, hostname: 'already-used' },
-              },
-            ] : [],
-          };
+          if (!selected) return { ip_addresses: [] };
+
+          const address = (id: number, addr: string, primaryLocation = selected.location) => ({
+            id,
+            addr,
+            prefix: addr.includes(':') ? 128 : 32,
+            network: {
+              id: id + 100,
+              address: addr,
+              prefix: addr.includes(':') ? 64 : 24,
+              primary_location: primaryLocation,
+            },
+          });
+
+          const items = version === '6'
+            ? [1, 2, 3].map((offset) =>
+              address(selected.id + 20 + offset, `2a03:3b40:${location}::${offset}`)
+            )
+            : role === 'private_access'
+              ? [1, 2, 3].map((offset) =>
+                address(selected.id + 10 + offset, `10.${location}.0.${offset}`)
+              )
+              : [
+                ...[1, 2, 3].map((offset) =>
+                  address(selected.id + offset, `198.51.${location}.${offset}`)
+                ),
+                { ...address(selected.id + 1_000, `198.51.${location}.100`), user: { id: 99, login: 'already-owned' } },
+                { ...address(selected.id + 2_000, `198.51.${location}.101`), vps: { id: 77, hostname: 'already-used' } },
+              ];
+
+          return { ip_addresses: items };
         },
       },
     });
@@ -62,19 +85,54 @@ test.describe('IP address environment filter', () => {
     await expect(page.getByTestId('admin.ip_addresses.page')).toBeVisible();
     await expect(page.getByTestId('admin.ip_addresses.quick.environment')).toHaveValue('');
     await expect(page.getByTestId('admin.ip_addresses.quick.occupancy.unassigned')).toHaveClass(/bg-surface/);
-    await expect(page.getByTestId('admin.ip_addresses.row.501')).toContainText('PRG');
-    await expect(page.getByTestId('admin.ip_addresses.row.501').locator('[title="Praha · Production"]')).toBeVisible();
-    await expect(page.getByTestId('admin.ip_addresses.row.501')).toContainText(/privátní|private/i);
-    await expect(page.getByTestId('admin.ip_addresses.row.601').locator('[title="Brno · Production"]')).toBeVisible();
-    await expect(page.getByTestId('admin.ip_addresses.row.701').locator('[title="Playground · Staging"]')).toBeVisible();
-    await expect(page.getByTestId('admin.ip_addresses.row.1501')).toHaveCount(0);
-    await expect(page.getByTestId('admin.ip_addresses.row.2501')).toHaveCount(0);
+    await expect(item(501)).toContainText(/PRG|Praha · Production/);
+    await expect(item(511)).toContainText(/privátní|private/i);
+    await expect(item(601)).toContainText(/BRN|Brno · Production/);
+    await expect(item(701)).toContainText(/PG|Playground · Staging/);
+    await expect(item(1_500)).toHaveCount(0);
+    await expect(item(2_500)).toHaveCount(0);
+
+    const renderedIds = await page
+      .locator(`[data-testid^="admin.ip_addresses.${itemKind}."]`)
+      .evaluateAll((nodes) => nodes.flatMap((node) => {
+        const match = node.getAttribute('data-testid')?.match(/\.(\d+)$/);
+        return match ? [Number(match[1])] : [];
+      }));
+    expect(renderedIds).toEqual([
+      501, 502, 503,
+      511, 512, 513,
+      521, 522, 523,
+      601, 602, 603,
+      611, 612, 613,
+      621, 622, 623,
+      701, 702, 703,
+      711, 712, 713,
+      721, 722, 723,
+    ]);
 
     expect([...new Set(requestedLocations)].sort()).toEqual(['7', '8', '9']);
     expect(requestedAssigned.every((value) => value === 'false')).toBe(true);
+    expect(requestedOwners.every((value) => value === '')).toBe(true);
+    expect(requestedOrders.every((value) => value === 'asc')).toBe(true);
+    expect(requestedLocations).toHaveLength(9);
+    expect(requestedRoles).toEqual([
+      'public_access', 'private_access', null,
+      'public_access', 'private_access', null,
+      'public_access', 'private_access', null,
+    ]);
+    expect(requestedLimits.every((value) => value === '50')).toBe(true);
+    expect(requestedCursors.every((value) => value === null)).toBe(true);
+    expect(requestedIncludes.every((value) => value === 'network__primary_location__environment')).toBe(true);
+
+    if (process.env.E2E_IP_SUGGESTIONS_PROOF_SCREENSHOT) {
+      await page.screenshot({
+        path: process.env.E2E_IP_SUGGESTIONS_PROOF_SCREENSHOT,
+        fullPage: true,
+      });
+    }
   });
 
-  test('shows a deliberately selected legacy subnet', async ({ page }) => {
+  test('shows a deliberately selected legacy subnet', async ({ page }, testInfo) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     await installHaveApiMock(page, {
       user: { id: 42, login: 'admin', level: 100 },
@@ -93,6 +151,7 @@ test.describe('IP address environment filter', () => {
 
     await page.goto('/admin/ip-addresses?network=24');
 
-    await expect(page.getByTestId('admin.ip_addresses.row.503')).toBeVisible();
+    const itemKind = testInfo.project.name === 'mobile-chrome' ? 'card' : 'row';
+    await expect(page.getByTestId(`admin.ip_addresses.${itemKind}.503`)).toBeVisible();
   });
 });

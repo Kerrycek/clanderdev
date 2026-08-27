@@ -1,4 +1,6 @@
 import React from 'react';
+import { Server } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 import { formatDateTime } from '../../../lib/format';
 import type { KeysetPaginationState } from '../../../lib/hooks/useKeysetPagination';
@@ -6,6 +8,7 @@ import { isMaintenanceLocked } from '../../../lib/nodeMaintenance';
 
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
+import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { CopyButton } from '../../../components/ui/CopyButton';
 import { EmptyState } from '../../../components/ui/EmptyState';
@@ -64,8 +67,39 @@ function NodeStatusBadge(props: { row: NodeRow; t: NodesPageTranslator }) {
   return <Badge variant={badge.variant}>{props.t(badge.labelKey)}</Badge>;
 }
 
-function NodesRowActions(props: { row: NodeRow; basePath: string; t: NodesPageTranslator }) {
-  const { row, basePath, t } = props;
+function NodesRowActions(props: { row: NodeRow; basePath: string; t: NodesPageTranslator; compact?: boolean }) {
+  const { row, basePath, t, compact = false } = props;
+  const copyValue = row.fqdn || row.name;
+
+  if (compact) {
+    return (
+      <div className="flex items-center justify-end gap-1">
+        {copyValue ? (
+          <CopyButton
+            text={copyValue}
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 px-0"
+            iconOnly
+            testId={typeof row.id === 'number' ? `admin.nodes.row.${row.id}.copy` : undefined}
+          />
+        ) : null}
+        {typeof row.id === 'number' ? (
+          <Button
+            to={`${basePath}/vps?node=${row.id}`}
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 px-0"
+            title={t('admin.node.action.show_vps.title')}
+            ariaLabel={t('admin.nodes.action.vpses')}
+            testId={`admin.nodes.row.${row.id}.vps`}
+          >
+            <Server className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -249,15 +283,15 @@ function NodesTable(props: {
     >
       <thead>
         <tr className="border-b border-border text-left text-xs text-muted">
-          <th className="w-8 px-4 py-2"><span className="sr-only">{t('common.state')}</span></th>
-          <th className="px-4 py-2">{t('common.node')}</th>
-          <th className="px-4 py-2">{t('admin.node.field.location')}</th>
-          <th className="px-4 py-2">{t('admin.node.field.status')}</th>
-          <th className="px-4 py-2">{t('common.vps')}</th>
-          <th className="px-4 py-2">{t('admin.node.field.cpu_idle')}</th>
-          <th className="px-4 py-2">{t('admin.node.field.last_report')}</th>
-          <th className="px-4 py-2">{t('admin.node.maintenance.title')}</th>
-          <th className="px-4 py-2">{t('common.actions')}</th>
+          <th className="w-8 px-2 py-2"><span className="sr-only">{t('common.state')}</span></th>
+          <th className="px-3 py-2">{t('common.node')}</th>
+          <th className="px-3 py-2">{t('admin.node.field.location')}</th>
+          <th className="px-3 py-2">{t('admin.node.field.status')}</th>
+          <th className="px-3 py-2">{t('common.vps')}</th>
+          <th className="px-3 py-2">{t('admin.node.field.cpu_idle')}</th>
+          <th className="px-3 py-2">{t('admin.node.field.last_report')}</th>
+          <th className="px-3 py-2">{t('admin.node.maintenance.title')}</th>
+          <th className="px-2 py-2 text-right">{t('common.actions')}</th>
         </tr>
       </thead>
       <tbody>
@@ -274,40 +308,50 @@ function NodesTable(props: {
               variant={nodeRowVariant(row)}
               className="border-b border-border/60 last:border-b-0"
             >
-              <td className="px-4 py-2">
+              <td className="px-2 py-2">
                 <StatusDot
                   variant={nodeDotVariant(row)}
                   testId={typeof row.id === 'number' ? `admin.nodes.row.${row.id}.dot` : undefined}
                   ariaLabel={t(badge.labelKey)}
                 />
               </td>
-              <td className="px-4 py-2">
-                <div className="font-medium text-fg">{row.name}</div>
+              <td className="px-3 py-2">
+                {typeof row.id === 'number' ? (
+                  <Link
+                    to={`${basePath}/nodes/${row.id}`}
+                    className="font-medium text-link hover:underline"
+                    data-testid={`admin.nodes.row.${row.id}.detail`}
+                  >
+                    {row.name}
+                  </Link>
+                ) : (
+                  <div className="font-medium text-fg">{row.name}</div>
+                )}
                 <div className="mt-1 text-xs text-faint">{nodeSecondaryLabel(row, t('common.na'))}</div>
               </td>
-              <td className="px-4 py-2 text-xs text-muted">{row.locationLabel ?? t('common.na')}</td>
-              <td className="px-4 py-2">
+              <td className="px-3 py-2 text-xs text-muted">{row.locationLabel ?? t('common.na')}</td>
+              <td className="px-3 py-2">
                 <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
               </td>
-              <td className="px-4 py-2 text-xs text-muted">
+              <td className="px-3 py-2 text-xs text-muted">
                 {typeof row.vps_count === 'number' ? row.vps_count : t('common.na')}
                 {typeof row.vps_free === 'number' ? (
                   <span className="text-faint"> · {t('common.free_count', { count: row.vps_free })}</span>
                 ) : null}
               </td>
-              <td className="px-4 py-2 text-xs text-muted">
+              <td className="px-3 py-2 text-xs text-muted">
                 {typeof row.cpu_idle === 'number' ? `${row.cpu_idle}%` : t('common.na')}
               </td>
-              <td className="px-4 py-2 text-xs text-muted">{formatDateTime(row.last_report)}</td>
-              <td className="px-4 py-2 text-xs">
+              <td className="px-3 py-2 text-xs text-muted">{formatDateTime(row.last_report)}</td>
+              <td className="px-3 py-2 text-xs">
                 {showMaintenance ? (
                   <LockBadge kind="maintenance" maintenanceReason={reason} t={t} />
                 ) : (
                   <span className="text-faint">{t('common.na')}</span>
                 )}
               </td>
-              <td className="px-4 py-2">
-                <NodesRowActions row={row} basePath={basePath} t={t} />
+              <td className="px-2 py-2">
+                <NodesRowActions row={row} basePath={basePath} t={t} compact />
               </td>
             </TableRowLink>
           );

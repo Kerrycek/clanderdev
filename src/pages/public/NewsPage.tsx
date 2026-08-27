@@ -38,7 +38,7 @@ export function NewsPage() {
             <Card key={n.id}>
               <CardHeader title={formatDateTime(n.published_at)} subtitle={`#${n.id}`} />
               <CardBody>
-                <NewsMessage html={pickLocalizedFieldFrom(n as any, ['message', 'body', 'text'], i18n.preferredLanguageCodes) ?? n.message} />
+                <NewsMessage html={pickLocalizedFieldFrom(n, ['message', 'body', 'text'], i18n.preferredLanguageCodes) ?? n.message} />
               </CardBody>
             </Card>
           ))}

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
 import { formatErrorMessage } from '../../../../lib/errors';
@@ -17,9 +16,7 @@ import {
 } from '../../../../lib/api/osTemplates';
 import { parseBoolParam, parsePositiveInt } from '../../../../lib/parse';
 import { parseNumericToken, splitKeyValueToken, unquoteSmartValue } from '../../../../lib/smartFilter';
-
 import { FilterBar } from '../../../../components/layout/FilterBar';
-
 import { Alert } from '../../../../components/ui/Alert';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
@@ -39,12 +36,10 @@ import { SmartInputHelp } from '../../../../components/ui/SmartInputHelp';
 import { SwitchRow } from '../../../../components/ui/SwitchRow';
 import { TableCard } from '../../../../components/ui/TableCard';
 import { Textarea } from '../../../../components/ui/Textarea';
-
 function osFamilyLabel(f: OsFamily): string {
   const label = typeof (f as any).label === 'string' ? String((f as any).label).trim() : '';
   return label || `#${f.id}`;
 }
-
 function tplOsFamilyLabel(tpl: OsTemplate): string {
   const f = (tpl as any).os_family;
   if (!f) return '—';
@@ -56,7 +51,6 @@ function tplOsFamilyLabel(tpl: OsTemplate): string {
   }
   return '—';
 }
-
 function boolBadge(v: boolean | undefined, onKey: string, offKey: string, t: (k: string) => string) {
   const b = Boolean(v);
   return {
@@ -64,7 +58,6 @@ function boolBadge(v: boolean | undefined, onKey: string, offKey: string, t: (k:
     variant: b ? ('ok' as const) : ('warn' as const),
   };
 }
-
 type EditorState =
   | null
   | {

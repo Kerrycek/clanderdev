@@ -11,8 +11,8 @@ const RULES = [
   { component: 'Modal', badProps: ['isOpen'] },
   { component: 'Drawer', badProps: ['onOpenChange'] },
   { component: 'SmartInputHelp', badProps: ['description'] },
-  { component: 'Select', badProps: ['label', 'description'] },
-  { component: 'Input', badProps: ['label', 'description'] },
+  { component: 'Select', badProps: ['description'] },
+  { component: 'Input', badProps: ['description'] },
 ];
 
 function walk(dir, acc = []) {

@@ -1,5 +1,7 @@
 import type { ResourceRef } from '../../../lib/api/payments';
 import type { PaidUntilStatus } from '../../../lib/paymentsBadges';
+import { safeContentUrl } from '../../../lib/safeUrl';
+import { sanitizeHtml, type HtmlSanitizerPolicy } from '../../../lib/sanitizeHtml';
 
 export type PaymentSubtitleToken =
   | { kind: 'text'; key: string }
@@ -186,81 +188,7 @@ const PAYMENT_ALLOWED_TAGS = new Set([
   'tr',
   'ul',
 ]);
-
-const PAYMENT_DROP_WITH_CONTENT = new Set(['iframe', 'object', 'script', 'style', 'template']);
-
-function isSafePaymentUrl(raw: string): boolean {
-  const value = raw.trim();
-  if (!value) return false;
-  if (value.startsWith('#') || value.startsWith('?') || value.startsWith('/')) return true;
-
-  try {
-    const url = new URL(value, 'https://example.invalid');
-    return ['http:', 'https:', 'mailto:'].includes(url.protocol);
-  } catch {
-    return false;
-  }
-}
-
-function unwrapPaymentElement(el: Element): void {
-  const parent = el.parentNode;
-  if (!parent) return;
-
-  while (el.firstChild) {
-    parent.insertBefore(el.firstChild, el);
-  }
-
-  parent.removeChild(el);
-}
-
-function sanitizePaymentElement(el: Element): void {
-  const tag = el.tagName.toLowerCase();
-
-  if (PAYMENT_DROP_WITH_CONTENT.has(tag)) {
-    el.remove();
-    return;
-  }
-
-  if (!PAYMENT_ALLOWED_TAGS.has(tag)) {
-    unwrapPaymentElement(el);
-    return;
-  }
-
-  const rawHref = el.getAttribute('href') ?? '';
-  const rawTarget = el.getAttribute('target') ?? '';
-  const rawSrc = el.getAttribute('src') ?? '';
-  const rawAlt = el.getAttribute('alt') ?? '';
-  const rawColspan = el.getAttribute('colspan') ?? '';
-  const rawRowspan = el.getAttribute('rowspan') ?? '';
-
-  for (const attr of Array.from(el.attributes)) {
-    el.removeAttribute(attr.name);
-  }
-
-  if (tag === 'a' && isSafePaymentUrl(rawHref)) {
-    el.setAttribute('href', rawHref.trim());
-    el.setAttribute('rel', 'noopener noreferrer');
-    if (rawTarget === '_blank') el.setAttribute('target', '_blank');
-  }
-
-  if (tag === 'img' && isSafePaymentUrl(rawSrc)) {
-    el.setAttribute('src', rawSrc.trim());
-    if (rawAlt.trim()) el.setAttribute('alt', rawAlt.trim());
-    else el.setAttribute('alt', 'QR');
-    el.setAttribute('loading', 'lazy');
-    el.setAttribute('width', '160');
-    el.setAttribute('height', '160');
-    el.setAttribute('data-payment-qr-image', 'true');
-  }
-
-  if ((tag === 'td' || tag === 'th') && /^\d{1,2}$/.test(rawColspan.trim())) {
-    el.setAttribute('colspan', rawColspan.trim());
-  }
-
-  if ((tag === 'td' || tag === 'th') && /^\d{1,2}$/.test(rawRowspan.trim())) {
-    el.setAttribute('rowspan', rawRowspan.trim());
-  }
-}
+const PAYMENT_MAILTO_ATTRIBUTES = new Set(['a.href']);
 
 function localizePaymentInstructionsFragment(fragment: DocumentFragment, lang: PaymentInstructionsLanguage): void {
   if (lang !== 'cs') return;
@@ -296,35 +224,52 @@ function markPaymentInstructionTables(fragment: DocumentFragment): void {
   }
 }
 
+function paymentInstructionsSanitizerPolicy(lang: PaymentInstructionsLanguage): HtmlSanitizerPolicy {
+  return {
+    allowedTags: PAYMENT_ALLOWED_TAGS,
+    allowMailtoAttributes: PAYMENT_MAILTO_ATTRIBUTES,
+    hardenLinks: true,
+    sanitizeAttributes: ({ tagName, sourceAttributes: attributes }) => {
+      if (tagName === 'a') return { href: attributes.get('href') };
+
+      if (tagName === 'img') {
+        const src = attributes.get('src');
+        if (!src || !safeContentUrl(src)) return {};
+
+        return {
+          src,
+          alt: attributes.get('alt')?.trim() || 'QR',
+          loading: 'lazy',
+          width: '160',
+          height: '160',
+          'data-payment-qr-image': 'true',
+        };
+      }
+
+      if (tagName === 'td' || tagName === 'th') {
+        const colspan = attributes.get('colspan')?.trim();
+        const rowspan = attributes.get('rowspan')?.trim();
+
+        return {
+          colspan: colspan && /^\d{1,2}$/.test(colspan) ? colspan : null,
+          rowspan: rowspan && /^\d{1,2}$/.test(rowspan) ? rowspan : null,
+        };
+      }
+
+      return {};
+    },
+    afterSanitize: (fragment) => {
+      localizePaymentInstructionsFragment(fragment, lang);
+      markPaymentInstructionTables(fragment);
+    },
+  };
+}
+
 export function sanitizePaymentInstructionsHtml(
   rawHtml: string,
   lang: PaymentInstructionsLanguage = 'en',
 ): string {
-  const raw = String(rawHtml ?? '');
-  if (!raw.trim()) return '';
-
-  if (typeof document === 'undefined') {
-    return raw
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-  }
-
-  const template = document.createElement('template');
-  template.innerHTML = raw;
-
-  for (const node of Array.from(template.content.querySelectorAll('*'))) {
-    sanitizePaymentElement(node);
-  }
-
-  for (const node of Array.from(template.content.childNodes)) {
-    if (node.nodeType === Node.COMMENT_NODE) node.remove();
-  }
-
-  localizePaymentInstructionsFragment(template.content, lang);
-  markPaymentInstructionTables(template.content);
-
-  return template.innerHTML;
+  return sanitizeHtml(rawHtml, paymentInstructionsSanitizerPolicy(lang));
 }
 
 function timestampOrNull(value: unknown): number | null {

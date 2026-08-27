@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { useAuth } from '../../app/auth';
 import { useAppMode } from '../../app/appMode';
 import { useI18n } from '../../app/i18n';
 import { useToasts } from '../../app/toasts';
@@ -12,10 +13,7 @@ import { getMetaActionStateId } from '../../lib/api/haveapi';
 import { fetchUserStateLogs, fetchVpsStateLogs } from '../../lib/api/lifetimes';
 import {
   adminDateTimeInputToIso,
-  dateToAdminDateTimeInput,
   isoToAdminDateTimeInput,
-  isoToLocalInput,
-  localInputToIso,
 } from '../../lib/datetimeLocal';
 import { formatErrorMessage } from '../../lib/errors';
 import { formatDateTime } from '../../lib/format';
@@ -32,48 +30,14 @@ import { Select } from '../ui/Select';
 import { Spinner } from '../ui/Spinner';
 import { TableCard } from '../ui/TableCard';
 import { Textarea } from '../ui/Textarea';
-
-type LifetimeKind = 'vps' | 'user';
-
-function stateHelpKey(state: string): string | null {
-  const st = state.trim();
-  if (st === 'active') return 'lifetimes.help.active';
-  if (st === 'suspended') return 'lifetimes.help.suspended';
-  if (st === 'soft_delete') return 'lifetimes.help.soft_delete';
-  if (st === 'hard_delete') return 'lifetimes.help.hard_delete';
-  if (st === 'deleted') return 'lifetimes.help.deleted';
-  return null;
-}
-
-type SnoozePreset = '1w' | '2w' | 'custom' | 'dont';
-
-function snoozeIso(preset: SnoozePreset, customLocal: string): { iso: string | null; valid: boolean } {
-  const now = Date.now();
-
-  if (preset === '1w') return { iso: new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-  if (preset === '2w') return { iso: new Date(now + 14 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-  if (preset === 'dont') return { iso: new Date(now + 365 * 24 * 60 * 60 * 1000).toISOString(), valid: true };
-
-  // custom
-  if (!customLocal.trim()) return { iso: null, valid: false };
-  const parsed = localInputToIso(customLocal);
-  if (!parsed.valid || !parsed.iso) return { iso: null, valid: false };
-  return { iso: parsed.iso, valid: true };
-}
-
-function normalizeStateLogValue<T>(v: any, ...keys: string[]): T | undefined {
-  for (const k of keys) {
-    if (v && Object.prototype.hasOwnProperty.call(v, k)) return v[k] as T;
-  }
-  return undefined;
-}
-
-function softDeleteExpirationInput(): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  d.setSeconds(0, 0);
-  return dateToAdminDateTimeInput(d);
-}
+import {
+  type LifetimeKind,
+  normalizeStateLogValue,
+  type SnoozePreset,
+  snoozeIso,
+  softDeleteExpirationInput,
+  stateHelpKey,
+} from './lifecycleSemantics';
 
 export function LifecyclePanel(props: {
   kind: LifetimeKind;
@@ -88,12 +52,15 @@ export function LifecyclePanel(props: {
   testId?: string;
 }) {
   const { t } = useI18n();
+  const auth = useAuth();
   const { mode } = useAppMode();
   const toasts = useToasts();
   const chrome = useChrome();
   const qc = useQueryClient();
 
-  const isAdminUi = mode === 'admin';
+  const isAdminView = mode === 'admin';
+  const canAdministerLifetime = isAdminView && auth.role === 'admin';
+  const canUseSelfServiceLifetime = !isAdminView;
   const st = String(props.objectState ?? '').trim() || 'unknown';
 
   const lifetimeObjectRef = useMemo(() => objectRef(props.kind === 'vps' ? 'Vps' : 'User', props.id), [props.id, props.kind]);
@@ -108,7 +75,7 @@ export function LifecyclePanel(props: {
   // User: Snooze reminders
   // ----------------------
 
-  const userCanSnooze = !isAdminUi && Boolean(expIso) && st === 'active';
+  const userCanSnooze = canUseSelfServiceLifetime && props.kind === 'vps' && Boolean(expIso) && st === 'active';
 
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozePreset, setSnoozePreset] = useState<SnoozePreset>('1w');
@@ -172,7 +139,7 @@ export function LifecyclePanel(props: {
   const remindParsed = useMemo(() => adminDateTimeInputToIso(adminRemindLocal), [adminRemindLocal]);
 
   const adminPayload = useMemo(() => {
-    if (!isAdminUi) return null;
+    if (!canAdministerLifetime) return null;
 
     const payload: Record<string, unknown> = {};
 
@@ -230,7 +197,7 @@ export function LifecyclePanel(props: {
     }
 
     return payload;
-  }, [adminReason, adminState, expIso, expParsed.iso, expParsed.valid, isAdminUi, remindIso, remindParsed.iso, remindParsed.valid, st]);
+  }, [adminReason, adminState, canAdministerLifetime, expIso, expParsed.iso, expParsed.valid, remindIso, remindParsed.iso, remindParsed.valid, st]);
 
   const adminPayloadHasChanges = Boolean(
     adminPayload &&
@@ -338,7 +305,7 @@ export function LifecyclePanel(props: {
       if (props.kind === 'vps') return (await fetchVpsStateLogs(props.id, { limit: logLimit, offset: logOffset })).data;
       return (await fetchUserStateLogs(props.id, { limit: logLimit, offset: logOffset })).data;
     },
-    enabled: isAdminUi && logOpen,
+    enabled: canAdministerLifetime && logOpen,
     staleTime: 10_000,
   });
 
@@ -366,7 +333,7 @@ export function LifecyclePanel(props: {
         <CardHeader
           title={t('lifetimes.panel.title')}
           actions={
-            isAdminUi ? (
+            canAdministerLifetime ? (
               <div className="flex flex-wrap items-center gap-2">
                 <Button size="sm" variant="secondary" onClick={openAdminEditor} testId="lifetimes.admin.edit">
                   {t('lifetimes.action.set_state')}
@@ -406,7 +373,7 @@ export function LifecyclePanel(props: {
             {helpKey ? t(helpKey) : t('lifetimes.help.unknown', { state: st })}
           </div>
 
-          {!isAdminUi && Boolean(expIso) && st !== 'active' ? (
+          {canUseSelfServiceLifetime && Boolean(expIso) && st !== 'active' ? (
             <div className="mt-2 text-xs text-faint">{t('lifetimes.user.snooze.disabled')}</div>
           ) : null}
         </CardBody>
@@ -520,7 +487,7 @@ export function LifecyclePanel(props: {
                     // If expiration is cleared, also clear remind-after in the form.
                     if (!e.target.value.trim()) setAdminRemindLocal('');
                   }}
-                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  placeholder={t('common.datetime.placeholder')}
                   testId="lifetimes.admin.expiration"
                 />
                 <Button
@@ -542,7 +509,7 @@ export function LifecyclePanel(props: {
                   value={adminRemindLocal}
                   onChange={(e) => setAdminRemindLocal(e.target.value)}
                   disabled={!adminExpirationLocal.trim()}
-                  placeholder="YYYY-MM-DD HH:MM:SS"
+                  placeholder={t('common.datetime.placeholder')}
                   testId="lifetimes.admin.remind_after"
                 />
                 <Button

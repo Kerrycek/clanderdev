@@ -73,7 +73,7 @@ test('admin node detail: stale lock state degrades busy transaction after ttl', 
     },
   });
 
-  await page.goto('/admin/nodes/5');
+  await page.goto('/admin/nodes/5?section=maintenance');
 
   const lockBtn = page.getByTestId('admin.node.maintenance.lock');
   await expect(lockBtn).toBeVisible();

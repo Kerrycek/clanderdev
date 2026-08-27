@@ -9,7 +9,6 @@ import { useI18n } from '../../app/i18n';
 import { useToasts } from '../../app/toasts';
 import { useObjectScope } from '../../app/objectScope';
 import { clusterSearch, type ClusterSearchHit } from '../../lib/api/clusterSearch';
-import { fetchVps, fetchVpsList, type Vps } from '../../lib/api/vps';
 import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import {
   clusterResourceHref,
@@ -19,6 +18,10 @@ import {
   normalizeClusterResource,
   parseClusterId,
 } from '../../lib/search/clusterSearchResults';
+import {
+  searchUserObjects,
+  type UserGlobalSearchGroup,
+} from '../../lib/search/userGlobalSearch';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Modal } from '../ui/Modal';
@@ -28,7 +31,7 @@ import { clsx } from '../ui/clsx';
 
 type PaletteResult = {
   key: string;
-  group: 'vps' | 'users' | 'ips' | 'tx_chains' | 'other';
+  group: 'vps' | 'users' | 'ips' | 'dns_zones' | 'tx_chains' | 'other';
   primary: string;
   secondary: string;
   href: string;
@@ -157,41 +160,11 @@ function pickDirectOpenCandidate(idToken: number, rows: PaletteResult[]): Palett
   return sorted[0] ?? null;
 }
 
-function parseVpsIdFromQuery(raw: string): number | null {
-  const q = String(raw ?? '').trim();
-  if (!q) return null;
-
-  // Accept a plain numeric ID ("123") and a few tolerant forms ("#123", "vps 123").
-  const m = q.match(/^(?:vps\s*)?#?(\d+)$/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  if (!Number.isFinite(n)) return null;
-  if (n <= 0) return null;
-  return Math.trunc(n);
-}
-
 function buildHrefWithBasename(path: string): string {
   const cfg = getRuntimeConfig();
   const base = (cfg.routerBasename ?? '').replace(/\/$/, '');
   if (!base) return path;
   return `${base}${path}`;
-}
-
-function vpsResultsFromList(
-  list: Vps[],
-  basePath: string,
-  t: (key: string, vars?: Record<string, unknown>) => string
-): PaletteResult[] {
-  return (list ?? []).map((v) => ({
-    key: `vps:${v.id}`,
-    group: 'vps',
-    primary: v.hostname ?? t('common.vps_ref', { id: v.id }),
-    secondary: t('common.vps_ref', { id: v.id }),
-    href: `${basePath}/vps/${v.id}`,
-    id: v.id,
-    resource: 'Vps',
-    raw: v,
-  }));
 }
 
 function resultsFromClusterSearch(
@@ -245,8 +218,17 @@ function groupLabel(group: PaletteResult['group'], t: (k: any) => string): strin
   if (group === 'vps') return t('palette.group.vps');
   if (group === 'users') return t('palette.group.users');
   if (group === 'ips') return t('palette.group.ip_addresses');
+  if (group === 'dns_zones') return t('palette.group.dns_zones');
   if (group === 'tx_chains') return t('palette.group.transaction_chains');
   return t('palette.group.other');
+}
+
+function userKindsForQualifier(key: QualifierKey | null): UserGlobalSearchGroup[] | undefined {
+  if (!key) return undefined;
+  if (key === 'vps') return ['vps'];
+  if (key === 'ip') return ['ips'];
+  if (key === 'dns' || key === 'zone') return ['dns_zones'];
+  return [];
 }
 
 export function CommandPalette(props: { open: boolean; onClose: () => void }) {
@@ -340,42 +322,19 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
           if (!alive || ac.signal.aborted) return;
           setResults(parsed);
         } else {
-          const maybeId = parseVpsIdFromQuery(searchValue);
-
-          if (maybeId !== null) {
-            try {
-              const one = await fetchVps(maybeId, { includes: 'user', signal: ac.signal });
-              const vps = one.data;
-
-              // If the admin is in "My view" (/app), keep the quick-jump safe by
-              // hiding objects that clearly belong to someone else.
-              if (
-                scope.mineUserId !== undefined &&
-                typeof (vps as any)?.user?.id === 'number' &&
-                (vps as any).user.id !== scope.mineUserId
-              ) {
-                if (!alive || ac.signal.aborted) return;
-                setResults([]);
-                return;
-              }
-
-              if (!alive || ac.signal.aborted) return;
-              setResults(vpsResultsFromList([vps], basePath, t));
-              return;
-            } catch (e: any) {
-              // Ignore show failures and fall back to a hostname-based search.
-              if (e?.name === 'AbortError') return;
-            }
-          }
-
-          const res = await fetchVpsList({
-            limit: 20,
-            hostnameAny: searchValue,
-            user: scope.mineUserId,
+          const kinds = userKindsForQualifier(parsedQualifier.key);
+          const parsed = kinds?.length === 0 ? [] : await searchUserObjects({
+            basePath,
+            query: searchValue,
+            t,
+            scopeUserId: scope.mineUserId,
+            expectedUserId: typeof auth.user?.id === 'number' ? auth.user.id : undefined,
+            kinds,
+            limitPerGroup: 5,
             signal: ac.signal,
           });
           if (!alive || ac.signal.aborted) return;
-          setResults(vpsResultsFromList(res.data ?? [], basePath, t));
+          setResults(parsed);
         }
       } catch (e: any) {
         if (e?.name === 'AbortError') return;
@@ -393,7 +352,7 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
       alive = false;
       ac.abort();
     };
-  }, [basePath, canUseClusterSearch, debouncedQuery, helpOpen, props.open, scope.mineUserId, t]);
+  }, [auth.user?.id, basePath, canUseClusterSearch, debouncedQuery, helpOpen, props.open, scope.mineUserId, t]);
 
   const visibleResults = results;
 
@@ -421,7 +380,7 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
       map.set(g, arr);
     }
 
-    const order: PaletteResult['group'][] = ['vps', 'users', 'ips', 'tx_chains', 'other'];
+    const order: PaletteResult['group'][] = ['vps', 'users', 'ips', 'dns_zones', 'tx_chains', 'other'];
     return order
       .map((g) => ({ group: g, rows: map.get(g) ?? [] }))
       .filter((x) => x.rows.length > 0);
@@ -534,9 +493,8 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
 
     return [
       { key: 'vps', description: t('palette.help.keys.vps'), example: 'vps3' },
+      { key: 'ip', description: t('palette.help.keys.ip'), example: 'ip:1.2.3.4' },
       { key: 'dns', description: t('palette.help.keys.dns'), example: 'dns:example.com' },
-      { key: 'dataset', description: t('palette.help.keys.dataset'), example: 'dataset:123' },
-      { key: 'chain', description: t('palette.help.keys.chain'), example: 'chain:123' },
     ];
   }, [canUseClusterSearch, t]);
 
@@ -550,18 +508,28 @@ export function CommandPalette(props: { open: boolean; onClose: () => void }) {
     ];
   }, [canUseClusterSearch, t]);
 
-  const helpExamples = useMemo(
-    () => [
+  const helpExamples = useMemo(() => {
+    const shared = [
       { example: '?', description: t('palette.help.examples.help') },
       { example: '123', description: t('palette.help.examples.id') },
       { example: '#123', description: t('palette.help.examples.hash_id') },
+    ];
+    if (!canUseClusterSearch) {
+      return [
+        ...shared,
+        { example: 'vps3', description: t('palette.help.examples.vps') },
+        { example: '1.2.3.4', description: t('palette.help.examples.ip') },
+        { example: 'example.com', description: t('palette.help.examples.domain') },
+      ];
+    }
+    return [
+      ...shared,
       { example: 'node15', description: t('palette.help.examples.node') },
       { example: '1.2.3.4', description: t('palette.help.examples.ip') },
       { example: 'example.com', description: t('palette.help.examples.domain') },
       { example: 'alice', description: t('palette.help.examples.user') },
-    ],
-    [t]
-  );
+    ];
+  }, [canUseClusterSearch, t]);
 
   const helpInference = useMemo(
     () => [

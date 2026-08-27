@@ -32,10 +32,10 @@ function serverName(x: any): string {
   return String(server.name ?? (typeof server.id === 'number' ? `#${server.id}` : '—'));
 }
 
-function zoneTypeLabel(v: unknown): string {
+function zoneTypeLabel(v: unknown, t: (key: string) => string): string {
   const s = String(v ?? '');
-  if (s === 'primary_type') return 'primary';
-  if (s === 'secondary_type') return 'secondary';
+  if (s === 'primary_type' || s === 'primary') return t('dns.zone.servers.type.primary');
+  if (s === 'secondary_type' || s === 'secondary') return t('dns.zone.servers.type.secondary');
   return s;
 }
 
@@ -164,7 +164,7 @@ export function DnsZoneServersPage() {
                 {rows.map((row) => (
                   <tr key={row.id} className="border-t border-border" data-testid={`dns.servers.row.${row.id}`}>
                     <td className="py-2 pl-4 pr-3 font-medium text-fg">{serverName(row as any)}</td>
-                    <td className="py-2 pr-3"><Badge variant="neutral">{zoneTypeLabel((row as any).type)}</Badge></td>
+                    <td className="py-2 pr-3"><Badge variant="neutral">{zoneTypeLabel((row as any).type, t)}</Badge></td>
                     <td className="py-2 pr-3">{typeof (row as any).serial === 'number' ? Number((row as any).serial) : t('common.na')}</td>
                     <td className="py-2 pr-3">{(row as any).loaded_at ? formatDateTime(String((row as any).loaded_at)) : t('common.na')}</td>
                     <td className="py-2 pr-3">{(row as any).refresh_at ? formatDateTime(String((row as any).refresh_at)) : t('common.na')}</td>

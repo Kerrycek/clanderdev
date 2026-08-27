@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
+import { useAuth } from '../../../app/auth';
 import { useAppMode } from '../../../app/appMode';
 import { useI18n, type TranslationKey } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -11,8 +12,8 @@ import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { LifecyclePanel } from '../../../components/lifetimes/LifecyclePanel';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { fetchLocations } from '../../../lib/api/infra';
-import { fetchNodes } from '../../../lib/api/nodes';
 import { fetchIpAddressesForVps } from '../../../lib/api/ipAddresses';
+import { fetchNodes } from '../../../lib/api/nodes';
 import { fetchOsTemplates } from '../../../lib/api/osTemplates';
 import {
   fetchVps,
@@ -113,13 +114,24 @@ function mutationErrorMessage(error: unknown, fallback: string) {
 
 export function VpsLifecyclePage() {
   const { t } = useI18n();
+  const auth = useAuth();
   const { mode, basePath } = useAppMode();
   const chrome = useChrome();
   const navigate = useNavigate();
   const routeParams = useParams();
   const [searchParams] = useSearchParams();
   const qc = useQueryClient();
-  const { vps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const {
+    vps,
+    refetch,
+    refetchChains,
+    vpsRef,
+    busyTransaction,
+    busyLocalLock,
+    ipAddresses,
+    ipAddressesLoading,
+    ipAddressesError,
+  } = useVps();
 
   const vpsId = Number(vps.id);
   const objectLabel = String((vps as any).hostname ?? '') || `#${vpsId}`;
@@ -127,18 +139,16 @@ export function VpsLifecyclePage() {
   const nodeId = resourceId((vps as any).node);
   const locationId = resourceId((vps as any).node?.location ?? (vps as any).location);
   const osTemplateId = resourceId((vps as any).os_template);
-  const isAdminMode = mode === 'admin';
+  const isAdminView = mode === 'admin';
+  const canAdministerVps = isAdminView && auth.role === 'admin';
+  const canUseSelfService = !isAdminView;
+  const canMutateVps = canUseSelfService || canAdministerVps;
   const routeActionRaw = routeParams['lifecycleAction'];
   const requestedActionRaw = routeActionRaw ?? searchParams.get('action');
-  const requestedAction = lifecycleActionKinds.has(requestedActionRaw as LifecycleActionKind)
-    ? (requestedActionRaw as LifecycleActionKind)
-    : null;
+  const requestedAction = lifecycleActionKinds.has(requestedActionRaw as LifecycleActionKind) ? (requestedActionRaw as LifecycleActionKind) : null;
   const invalidAction = Boolean(routeActionRaw && !requestedAction);
-  const templatesNeeded =
-    isAdminMode ||
-    requestedAction === 'template' ||
-    requestedAction === 'boot' ||
-    requestedAction === 'reinstall';
+  const templatesNeeded = canMutateVps && (requestedAction === 'reinstall'
+    || (canAdministerVps && (requestedAction === 'template' || requestedAction === 'boot')));
 
   const templatesQ = useQuery({
     queryKey: ['os_templates', 'vps-lifecycle', { limit: 500, enabled: true, hypervisorType: 'vpsadminos' }],
@@ -150,34 +160,25 @@ export function VpsLifecyclePage() {
   const locationsQ = useQuery({
     queryKey: ['locations', 'vps-lifecycle', { limit: 500, hasHypervisor: true, hypervisorType: 'vpsadminos', includes: 'environment' }],
     queryFn: async () => (await fetchLocations({ limit: 500, hasHypervisor: true, hypervisorType: 'vpsadminos', includes: 'environment' })).data,
-    enabled: !isAdminMode,
+    enabled: canUseSelfService && requestedAction === 'clone',
     staleTime: 60_000,
   });
 
   const nodesQ = useQuery({
     queryKey: ['nodes', 'vps-lifecycle-migrate', { limit: 500, includes: 'location__environment' }],
     queryFn: async () => (await fetchNodes({ limit: 500, includes: 'location__environment' })).data,
-    enabled: isAdminMode && requestedAction === 'migrate',
+    enabled: canAdministerVps && requestedAction === 'migrate',
     staleTime: 60_000,
   });
 
-  const sourceIpsQ = useQuery({
-    queryKey: ['ip_address', 'list', 'vps-lifecycle-source', { vpsId }],
-    queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 100 })).data,
-    staleTime: 30_000,
-  });
-
   const [clone, setClone] = useState<CloneForm>(() => defaultCloneForm(vps as Vps, { ownerId, nodeId, locationId }));
-
   const [swap, setSwap] = useState<SwapForm>(() => defaultSwapForm());
   const [replace, setReplace] = useState<ReplaceForm>(() => defaultReplaceForm(nodeId));
   const [replaceNodeLabel, setReplaceNodeLabel] = useState('');
   const [migrateNodeLabel, setMigrateNodeLabel] = useState('');
-
   const [templateForm, setTemplateForm] = useState<TemplateForm>(() =>
     defaultTemplateForm(osTemplateId, Boolean((vps as any).enable_os_template_auto_update))
   );
-
   const [boot, setBoot] = useState<BootForm>(() => defaultBootForm(osTemplateId));
 
   const [reinstall, setReinstall] = useState<ReinstallForm>(() => defaultReinstallForm(osTemplateId));
@@ -197,7 +198,7 @@ export function VpsLifecyclePage() {
   const targetVpsQ = useQuery({
     queryKey: ['vps', 'show', 'swap-target', { id: swap.targetVps ?? -1 }],
     queryFn: async () => (await fetchVps(swap.targetVps!, { includes: 'node__location,user' })).data,
-    enabled: Boolean(swap.targetVps),
+    enabled: canMutateVps && requestedAction === 'swap' && Boolean(swap.targetVps),
     staleTime: 30_000,
   });
 
@@ -219,18 +220,18 @@ export function VpsLifecyclePage() {
         })
         .slice(0, 6);
     },
-    enabled: Boolean(ownerId),
+    enabled: canMutateVps && requestedAction === 'swap' && Boolean(ownerId),
     staleTime: 30_000,
   });
 
   const targetIpsQ = useQuery({
     queryKey: ['ip_address', 'list', 'vps-lifecycle-target', { vpsId: swap.targetVps ?? -1 }],
     queryFn: async () => (await fetchIpAddressesForVps(swap.targetVps!, { limit: 100 })).data,
-    enabled: Boolean(swap.targetVps),
+    enabled: canMutateVps && requestedAction === 'swap' && Boolean(swap.targetVps),
     staleTime: 30_000,
   });
 
-  const cloneTargetReady = isCloneTargetReady(clone, isAdminMode);
+  const cloneTargetReady = isCloneTargetReady(clone, canAdministerVps);
   const migrateTargetNode = findMigrateTargetNode(migrate.node, nodesQ.data ?? []);
   const migrateTargetContext = buildMigrateTargetContext(vps as Vps, migrateTargetNode);
   const cloneLocationId = parseLookupIdLike(clone.location.trim());
@@ -239,6 +240,7 @@ export function VpsLifecyclePage() {
     : undefined;
 
   const preflight = async () => {
+    if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
     await preflightVpsNotBusy({ vpsId, t, knownBusy: busyLocalLock || busyTransaction });
   };
 
@@ -302,7 +304,7 @@ export function VpsLifecyclePage() {
   const cloneM = useMutation({
     mutationFn: async () => {
       await preflight();
-      return vpsClone(vpsId, buildVpsClonePayload(clone, { isAdminMode, location: cloneLocation }));
+      return vpsClone(vpsId, buildVpsClonePayload(clone, { isAdminMode: canAdministerVps, location: cloneLocation }));
     },
     onMutate: () => chrome.acquireLocalLock(vpsRef),
     onSuccess: (res) => {
@@ -319,7 +321,7 @@ export function VpsLifecyclePage() {
   const swapM = useMutation({
     mutationFn: async () => {
       await preflight();
-      return vpsSwapWith(vpsId, buildVpsSwapPayload(swap, isAdminMode));
+      return vpsSwapWith(vpsId, buildVpsSwapPayload(swap, canAdministerVps));
     },
     onMutate: () => chrome.acquireLocalLock(vpsRef),
     onSuccess: (res) => {
@@ -416,7 +418,7 @@ export function VpsLifecyclePage() {
   const deleteM = useMutation({
     mutationFn: async () => {
       await preflight();
-      return vpsDelete(vpsId, isAdminMode ? { lazy: deleteForm.lazy } : undefined);
+      return vpsDelete(vpsId, canAdministerVps ? { lazy: deleteForm.lazy } : undefined);
     },
     onMutate: () => chrome.acquireLocalLock(vpsRef),
     onSuccess: (res) => {
@@ -447,7 +449,7 @@ export function VpsLifecyclePage() {
   const stopGate = gateVpsAction('stop', { vps, busyLocal, busyTransaction });
   const restartGate = gateVpsAction('restart', { vps, busyLocal, busyTransaction });
 
-  const sourceIps = sourceIpsQ.data ?? [];
+  const sourceIps = ipAddresses;
   const targetIps = targetIpsQ.data ?? [];
 
   const runningStateLabel = (vps as any).is_running === true
@@ -517,7 +519,7 @@ export function VpsLifecyclePage() {
       templates={templatesQ.data ?? []}
       templatesLoading={templatesQ.isLoading}
       sourceIps={sourceIps}
-      sourceIpsLoading={sourceIpsQ.isLoading}
+      sourceIpsLoading={ipAddressesLoading}
       gate={gate}
       pending={reinstallM.isPending}
       succeeded={reinstallM.isSuccess}
@@ -528,7 +530,7 @@ export function VpsLifecyclePage() {
 
   const cloneCard = (
     <VpsCloneCard
-      isAdminMode={isAdminMode}
+      isAdminMode={canAdministerVps}
       sourceVps={vps as Vps}
       form={clone}
       onChange={setClone}
@@ -546,7 +548,7 @@ export function VpsLifecyclePage() {
 
   const swapCard = (
     <VpsSwapCard
-      isAdminMode={isAdminMode}
+      isAdminMode={canAdministerVps}
       vps={vps as Vps}
       vpsId={vpsId}
       ownerId={ownerId}
@@ -560,8 +562,8 @@ export function VpsLifecyclePage() {
       targetLoading={targetVpsQ.isLoading}
       targetError={targetVpsQ.isError}
       sourceIps={sourceIps}
-      sourceIpsLoading={sourceIpsQ.isLoading}
-      sourceIpsError={sourceIpsQ.isError}
+      sourceIpsLoading={ipAddressesLoading}
+      sourceIpsError={ipAddressesError}
       targetIps={targetIps}
       targetIpsLoading={targetIpsQ.isLoading}
       targetIpsError={targetIpsQ.isError}
@@ -576,7 +578,7 @@ export function VpsLifecyclePage() {
   const deleteCard = (
     <VpsDeleteCard
       vps={vps}
-      isAdminMode={isAdminMode}
+      isAdminMode={canAdministerVps}
       form={deleteForm}
       onChange={setDeleteForm}
       gate={gate}
@@ -667,18 +669,18 @@ export function VpsLifecyclePage() {
     { kind: 'stop', title: t('action.vps.stop.label'), description: t('vps.lifecycle.power.stop.subtitle'), danger: true },
     { kind: 'restart', title: t('action.vps.restart.label'), description: t('vps.lifecycle.power.restart.subtitle') },
     { kind: 'reinstall', title: t('vps.lifecycle.reinstall.title'), description: t('vps.lifecycle.reinstall.subtitle'), danger: true },
-    { kind: 'clone', title: t('vps.lifecycle.clone.title'), description: isAdminMode ? t('vps.lifecycle.clone.subtitle') : t('vps.lifecycle.clone.subtitle_user') },
-    { kind: 'swap', title: t('vps.lifecycle.swap.title'), description: isAdminMode ? t('vps.lifecycle.swap.subtitle') : t('vps.lifecycle.swap.subtitle_user'), danger: true },
+    { kind: 'clone', title: t('vps.lifecycle.clone.title'), description: canAdministerVps ? t('vps.lifecycle.clone.subtitle') : t('vps.lifecycle.clone.subtitle_user') },
+    { kind: 'swap', title: t('vps.lifecycle.swap.title'), description: canAdministerVps ? t('vps.lifecycle.swap.subtitle') : t('vps.lifecycle.swap.subtitle_user'), danger: true },
     { kind: 'delete', title: t('vps.lifecycle.delete.title'), description: t('vps.lifecycle.delete.subtitle'), danger: true },
-    { kind: 'lifetime', title: t('vps.lifecycle.lifetime.title'), description: isAdminMode ? t('vps.lifecycle.lifetime.subtitle_admin') : t('vps.lifecycle.lifetime.subtitle_user'), adminOnly: true },
+    { kind: 'lifetime', title: t('vps.lifecycle.lifetime.title'), description: canAdministerVps ? t('vps.lifecycle.lifetime.subtitle_admin') : t('vps.lifecycle.lifetime.subtitle_user'), adminOnly: true },
     { kind: 'template', title: t('vps.lifecycle.template.title'), description: t('vps.lifecycle.template.subtitle'), adminOnly: true },
     { kind: 'boot', title: t('vps.lifecycle.boot.title'), description: t('vps.lifecycle.boot.subtitle'), danger: true, adminOnly: true },
     { kind: 'replace', title: t('vps.lifecycle.replace.title'), description: t('vps.lifecycle.replace.subtitle'), danger: true, adminOnly: true },
     { kind: 'migrate', title: t('vps.lifecycle.migrate.title'), description: t('vps.lifecycle.migrate.subtitle'), adminOnly: true },
   ];
-  const actionChoices = allActionChoices.filter((choice) => isAdminMode || !choice.adminOnly);
+  const actionChoices = allActionChoices.filter((choice) => canAdministerVps || !choice.adminOnly);
   const dailyActionChoices = allActionChoices.filter((choice) => !choice.adminOnly);
-  const adminActionChoices = isAdminMode ? allActionChoices.filter((choice) => choice.adminOnly) : [];
+  const adminActionChoices = canAdministerVps ? allActionChoices.filter((choice) => choice.adminOnly) : [];
   const activeChoice = requestedAction ? actionChoices.find((choice) => choice.kind === requestedAction) : undefined;
   const renderActionButton = (choice: (typeof allActionChoices)[number]) => (
     <button
@@ -698,15 +700,16 @@ export function VpsLifecyclePage() {
     </button>
   );
 
-  if (invalidAction || (requestedAction && !actionChoices.some((choice) => choice.kind === requestedAction))) {
+  if (!canMutateVps || invalidAction || (requestedAction && !actionChoices.some((choice) => choice.kind === requestedAction))) {
+    const noPermission = !canMutateVps;
     return (
       <div className="space-y-4" data-testid="vps.lifecycle.page">
         <Card testId="vps.lifecycle.summary">
-          <CardHeader title={t('vps.lifecycle.title')} subtitle={t('vps.lifecycle.invalid_action')} />
+          <CardHeader title={t('vps.lifecycle.title')} subtitle={t(noPermission ? 'gate.blocked.permission.title' : 'vps.lifecycle.invalid_action')} />
           <CardBody>
-            <Button variant="primary" onClick={() => navigate(lifecycleBasePath)}>
-              {t('vps.lifecycle.back_to_actions')}
-            </Button>
+            {noPermission ? <Alert variant="neutral">{t('gate.blocked.permission.body')}</Alert> : (
+              <Button variant="primary" onClick={() => navigate(lifecycleBasePath)}>{t('vps.lifecycle.back_to_actions')}</Button>
+            )}
           </CardBody>
         </Card>
       </div>
@@ -717,10 +720,10 @@ export function VpsLifecyclePage() {
     return (
       <div className="space-y-4" data-testid="vps.lifecycle.page">
         <Card testId="vps.lifecycle.summary">
-          <CardHeader title={t('vps.lifecycle.title')} subtitle={isAdminMode ? t('vps.lifecycle.subtitle_admin') : t('vps.lifecycle.subtitle_user')} />
+          <CardHeader title={t('vps.lifecycle.title')} subtitle={canAdministerVps ? t('vps.lifecycle.subtitle_admin') : t('vps.lifecycle.subtitle_user')} />
           <CardBody className="space-y-4">
             <Alert variant="neutral">
-              {isAdminMode ? t('vps.lifecycle.action_index.summary_admin') : t('vps.lifecycle.action_index.summary_user')}
+              {canAdministerVps ? t('vps.lifecycle.action_index.summary_admin') : t('vps.lifecycle.action_index.summary_user')}
             </Alert>
             <div className="space-y-4" data-testid="vps.lifecycle.action_index">
               <section className="space-y-2" data-testid="vps.lifecycle.daily_actions">
@@ -751,7 +754,7 @@ export function VpsLifecyclePage() {
     );
   }
 
-  if (!isAdminMode) {
+  if (!canAdministerVps) {
     return (
       <div className="space-y-4" data-testid="vps.lifecycle.page">
         <Card testId="vps.lifecycle.summary">

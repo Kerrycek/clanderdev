@@ -50,12 +50,13 @@ export async function fetchIpAddresses(opts?: {
   addr?: string;
   prefix?: number;
   vps?: number;
-  user?: number;
+  user?: number | null;
   networkInterface?: number;
   assignedToInterface?: boolean;
   order?: string;
+  signal?: AbortSignal;
 }) {
-  const params: Record<string, string | number | boolean> = {};
+  const params: Record<string, string | number | boolean | null> = {};
 
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
@@ -81,6 +82,7 @@ export async function fetchIpAddresses(opts?: {
     namespace: 'ip_address',
     params,
     meta: opts?.includes ? { includes: opts.includes } : undefined,
+    signal: opts?.signal,
   });
 
   return { ...res, data: expectArray<IpAddress>(res.data, 'ip_addresses') };

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { bootstrapVpsAdminWindow, installHaveApiMock } from "../../fixtures";
 
 test.describe("Dashboard", () => {
-  test("shows operational overview, KPI cards and navigation actions", async ({
+  test("@pr-smoke @pr-smoke-mobile @smoke @smoke-mobile shows operational overview, KPI cards and navigation actions", async ({
     page,
   }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: "TEST" });
@@ -64,7 +64,7 @@ test.describe("Dashboard", () => {
               name: "node-a.prg",
               fqdn: "node-a.prg.example.test",
               status: true,
-              location: { label: "DC1" },
+              location: { label: "Praha" },
               last_report: new Date().toISOString(),
               vps_count: 100,
               vps_free: 10,
@@ -79,7 +79,7 @@ test.describe("Dashboard", () => {
               name: "node-b.prg",
               fqdn: "node-b.prg.example.test",
               status: false,
-              location: { label: "DC1" },
+              location: { label: "Brno" },
               last_report: new Date(Date.now() - 60_000).toISOString(),
               vps_count: 20,
               vps_free: 5,
@@ -100,11 +100,15 @@ test.describe("Dashboard", () => {
               state: "announced",
               type: "maintenance",
               impact: "network",
+              duration: 30,
               begins_at: new Date(Date.now() - 60_000).toISOString(),
               en_summary: "Network maintenance in DC1",
               cs_summary: "Údržba sítě v DC1",
             },
           ],
+        }),
+        "GET outages/55/entities": () => ({
+          entities: [{ id: 501, name: "Node", entity_id: 2, label: "node-b.prg" }],
         }),
         "GET news_logs": () => ({
           news_logs: [
@@ -163,6 +167,10 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("app.dashboard.outages.card")).toContainText(
       "Network maintenance in DC1",
     );
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("Maintenance");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("Network");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("30 min");
+    await expect(page.getByTestId("app.dashboard.outages.card")).toContainText("node-b.prg");
     await expect(page.getByTestId("app.dashboard.security.card")).toContainText(
       "OpenSSL advisory",
     );
@@ -172,30 +180,50 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("app.dashboard.news.card")).toContainText(
       "Maintenance window moved",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.card")).toContainText(
-      "DC1",
+    const clusterCard = page.getByTestId("app.dashboard.cluster.card");
+    const visibleLocationPanels = clusterCard.locator(
+      '[data-cluster-location][data-cluster-location-layout="panel"]:visible',
     );
+    const prahaPanel = clusterCard.locator(
+      '[data-cluster-location="Praha"][data-cluster-location-layout="panel"]:visible',
+    );
+    const brnoPanel = clusterCard.locator(
+      '[data-cluster-location="Brno"][data-cluster-location-layout="panel"]:visible',
+    );
+
+    await expect(visibleLocationPanels).toHaveCount(2);
+    await expect(prahaPanel).toBeVisible();
+    await expect(brnoPanel).toBeVisible();
+    await expect(prahaPanel).toContainText("node-a.prg");
+    await expect(prahaPanel).not.toContainText("node-b.prg");
+    await expect(brnoPanel).toContainText("node-b.prg");
+    await expect(brnoPanel).not.toContainText("node-a.prg");
     await expect(page.getByTestId("app.dashboard.cluster.card")).toContainText(
       "1 online",
     );
     await expect(page.getByTestId("app.dashboard.cluster.card")).toContainText(
       "1 maintenance",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).toContainText(
+    await expect(prahaPanel).toContainText(
       "node-a.prg",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).toContainText(
+    await expect(brnoPanel).toContainText(
       "node-b.prg",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).not.toContainText(
+    await expect(clusterCard).not.toContainText(
       "free",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).toContainText(
+    await expect(prahaPanel).toContainText(
       "ONLINE",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).toContainText(
+    await expect(prahaPanel).toContainText(
       "50.0%",
     );
+
+    const clusterProofScreenshot = process.env["E2E_CLUSTER_DASHBOARD_PROOF_SCREENSHOT"]?.trim();
+    if (clusterProofScreenshot) {
+      await page.screenshot({ path: clusterProofScreenshot, fullPage: true });
+    }
 
     await expect(page.getByTestId("app.dashboard.preferences.card")).toContainText(
       "Compact",
@@ -216,7 +244,7 @@ test.describe("Dashboard", () => {
     await expect(page.getByTestId("app.dashboard.cluster.card")).toContainText(
       "2 nodes total",
     );
-    await expect(page.getByTestId("app.dashboard.cluster.table")).toHaveCount(0);
+    await expect(page.getByTestId("app.dashboard.cluster.groups")).toHaveCount(0);
 
     await page.getByTestId("app.dashboard.widget.news.collapse").click();
     await expect(page.getByTestId("app.dashboard.news.card")).toContainText(

@@ -2,11 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
 import { formatErrorMessage } from '../../../../lib/errors';
 import { parseBoolParam, parsePositiveInt } from '../../../../lib/parse';
+import { safeAbsoluteHttpUrl } from '../../../../lib/safeUrl';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
 import {
   createLocation,
@@ -16,7 +16,6 @@ import {
   type Environment,
   type Location,
 } from '../../../../lib/api/infra';
-
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
 import { Alert } from '../../../../components/ui/Alert';
@@ -813,6 +812,7 @@ export function LocationsPage() {
             {locations.map((loc) => {
               const desc = typeof loc.description === 'string' ? loc.description.trim() : '';
               const remote = typeof (loc as any).remote_console_server === 'string' ? String((loc as any).remote_console_server).trim() : '';
+              const remoteHref = safeAbsoluteHttpUrl(remote);
               const hasIpv6 = Boolean((loc as any).has_ipv6);
               return (
                 <tr key={loc.id} data-testid={`admin.cluster.locations.row.${loc.id}`}>
@@ -826,8 +826,8 @@ export function LocationsPage() {
                     <Badge variant={hasIpv6 ? 'ok' : 'neutral'}>{hasIpv6 ? t('common.yes') : t('common.no')}</Badge>
                   </td>
                   <td className="px-3 py-2 text-sm">
-                    {remote ? (
-                      <a className="text-link hover:underline" href={remote} target="_blank" rel="noreferrer">
+                    {remoteHref ? (
+                      <a className="text-link hover:underline" href={remoteHref} target="_blank" rel="noopener noreferrer">
                         {t('admin.cluster.locations.remote_console_link')}
                       </a>
                     ) : (

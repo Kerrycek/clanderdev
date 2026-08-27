@@ -68,8 +68,68 @@ The audit writes screenshots, videos and `report.json` under
 `work/live-audits/<timestamp>/`. It fails on broken checks or JavaScript assets
 served with the wrong MIME type.
 
-Use a local Playwright storage state file or another locally approved auth
-setup. Do not commit that file.
+### Broad read-only route sweep
+
+For a much broader, mutation-free pass over the public, user and (when the
+token permits it) admin UI, run:
+
+```bash
+E2E_BASE_URL=https://dev.crucio.cz \
+E2E_LIVE_API_URL=https://dev.crucio.cz \
+E2E_LIVE_SESSION_TOKEN_FILE=/root/playwright-live-token \
+npm run e2e:live:routes
+```
+
+The runner has a hard guard for the exact `https://dev.crucio.cz` origin. It
+cannot be pointed at production, another host, a sub-path or a non-standard
+port. It performs no POST, PUT, PATCH or DELETE requests. It covers:
+
+- anonymous status, outage, news, advisory and 404 pages in English and Czech,
+- canonical list/static user routes,
+- canonical list/static admin routes allowed for the token's exact role;
+  administrator-only security advisory management is not swept with a support
+  token,
+- public detail routes discovered from an anonymous read-only API response,
+- admin detail routes discovered only from an unrestricted admin response (or
+  supplied through an `E2E_LIVE_*_ID` variable),
+- user detail routes only when an API response filtered to the current user
+  also exposes and confirms that same owner; optional
+  `E2E_LIVE_APP_*_ID` values are treated only as candidates and must pass that
+  ownership check,
+- desktop and mobile viewports, including a direct reload of every route,
+- an actual visible page surface (a visible main region and heading, or an
+  explicit test id), redirects, lingering loaders, HTTP 401/403/404/5xx,
+  visible errors, console/page errors, asset MIME types and document-level
+  horizontal overflow.
+
+Public screenshots and a redacted `report.json` are written below
+`work/live-audits/route-sweep-<timestamp>/`. Directories use mode `0700` and
+files mode `0600`; symlinked output paths (including symlinked ancestors) are
+rejected. Authenticated full-page screenshots are disabled by default because
+they can contain user data. Capture them only for an approved local run with
+`E2E_LIVE_SWEEP_AUTH_SCREENSHOTS=1`; screenshot failures are reported as test
+failures. Authenticated report entries contain route templates and presence
+flags, not real IDs, titles,
+headings, tokens, response bodies or user labels. To run only the anonymous
+portion without a token, use
+`E2E_LIVE_SWEEP_PUBLIC_ONLY=1`. Set `E2E_LIVE_SWEEP_RELOAD=0` only for a quick
+diagnostic run; the default audit reloads every page.
+
+Optional admin IDs include `E2E_LIVE_VPS_ID`, `E2E_LIVE_DATASET_ID`,
+`E2E_LIVE_NAS_DATASET_ID`, `E2E_LIVE_DNS_ZONE_ID`,
+`E2E_LIVE_TRANSACTION_CHAIN_ID`, `E2E_LIVE_TRANSACTION_ID`,
+`E2E_LIVE_ACTION_STATE_ID`, `E2E_LIVE_USER_ID`, `E2E_LIVE_NODE_ID` and the
+other variables declared in `scripts/live-route-sweep-manifest.mjs`. For app
+detail candidates, insert `APP` after `E2E_LIVE`, for example
+`E2E_LIVE_APP_VPS_ID`. App candidates are still ignored unless the user-scoped
+API result proves they belong to the current user. Use only disposable app
+objects with an obvious `webui-next-live-test-*` label. IDs are local run
+configuration and must not be committed.
+
+The route sweep authenticates only with
+`E2E_LIVE_SESSION_TOKEN`/`E2E_LIVE_SESSION_TOKEN_FILE`; it does not read a
+Playwright storage-state file. Keep the token file local with mode `0600` and
+never commit it.
 
 ## Mocked PR verification baseline
 

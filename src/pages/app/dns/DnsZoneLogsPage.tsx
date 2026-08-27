@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
-import { fetchDnsRecordLogs, type DnsRecordLog } from '../../../lib/api/dns';
+import { fetchDnsRecordLogs } from '../../../lib/api/dns';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
@@ -18,14 +18,6 @@ import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../components/ui/LoadingState';
 
 import { useDnsZoneContext } from './DnsZoneContext';
-
-function logHaystack(l: DnsRecordLog): string {
-  const chainId = l.transaction_chain && typeof l.transaction_chain === 'object' && 'id' in l.transaction_chain
-    ? String((l.transaction_chain as any).id)
-    : '';
-  const changes = l.attr_changes ? JSON.stringify(l.attr_changes) : '';
-  return `${l.id} ${l.change_type ?? ''} ${l.name ?? ''} ${l.type ?? ''} ${chainId} ${changes}`;
-}
 
 export function DnsZoneLogsPage() {
   const { basePath } = useAppMode();

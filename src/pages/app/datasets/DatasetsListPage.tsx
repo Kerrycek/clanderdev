@@ -14,8 +14,6 @@ import { fetchDatasets, type Dataset } from '../../../lib/api/datasets';
 import { searchUsers } from '../../../lib/api/users';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
-import { formatMiB } from '../../../lib/format';
-import { usageSeverityFromRatio } from '../../../lib/usage';
 import { objectStateBadge } from '../../../lib/taskStatus';
 import { dotVariantFromBadgeVariant, dotVariantFromRowVariant } from '../../../lib/variantMap';
 import { parsePositiveInt } from '../../../lib/parse';
@@ -40,50 +38,13 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { SmartFilterInput, type SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
 import { SmartInputHelp } from '../../../components/ui/SmartInputHelp';
 import { StatusDot } from '../../../components/ui/StatusDot';
-import { StackedBar } from '../../../components/ui/StackedBar';
 import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { VpsLookupInput } from '../../../components/ui/VpsLookupInput';
 import { toneSurfaceClass } from '../../../components/ui/tone';
 
-import { datasetUsageBreakdown } from './DatasetUsageModel';
-
-function DatasetUsage(props: { used?: number; refquota?: number; avail?: number }) {
-  const { t } = useI18n();
-  const usedRaw = typeof props.used === 'number' && Number.isFinite(props.used) ? props.used : undefined;
-  const quotaRaw =
-    typeof props.refquota === 'number' && Number.isFinite(props.refquota) && props.refquota > 0 ? props.refquota : undefined;
-
-  const usage = useMemo(
-    () => datasetUsageBreakdown(props),
-    [props.avail, props.refquota, props.used]
-  );
-
-  const segs = useMemo(() => {
-    if (usage === null) return [{ value: 1, variant: 'neutral' as const, title: t('datasets.usage.no_data') }];
-
-    const v = usageSeverityFromRatio(usage.ratio);
-    return [
-      { value: usage.used, variant: v, title: t('datasets.usage.used_mib', { mib: usage.used.toFixed(0) }) },
-      {
-        value: usage.free,
-        variant: 'neutral' as const,
-        title: t('datasets.usage.free_mib', { mib: usage.free.toFixed(0) }),
-      },
-    ];
-  }, [t, usage]);
-
-  return (
-    <div className="space-y-1">
-      <StackedBar ariaLabel={t('datasets.usage.aria_label')} segments={segs} />
-      <div className="flex items-center justify-between text-xs text-faint">
-        <span>{usedRaw !== undefined ? formatMiB(usedRaw) : t('common.na')}</span>
-        <span>{quotaRaw !== undefined ? formatMiB(quotaRaw) : '∞'}</span>
-      </div>
-    </div>
-  );
-}
+import { DatasetUsage } from './DatasetUsage';
 
 function datasetLabel(ds: Dataset): string {
   const label = ds.full_name ?? ds.name ?? ds.label;
@@ -801,14 +762,14 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
           >
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="w-8 px-4 py-2"><span className="sr-only">{t('common.state')}</span></th>
-                <th className="px-4 py-2">{t('common.name')}</th>
-                {showOwnerColumn ? <th className="px-4 py-2">{t('common.user')}</th> : showVpsFilter ? <th className="px-4 py-2">{t('common.vps')}</th> : null}
-                <th className="px-4 py-2">{t('dataset.field.usage')}</th>
-                {showSnapshotColumn ? <th className="px-4 py-2">{t('dataset.field.snapshots')}</th> : null}
-                {showMountColumn ? <th className="px-4 py-2">{t('dataset.field.mounts')}</th> : null}
-                {showExportColumn ? <th className="px-4 py-2">{t('dataset.field.exports')}</th> : null}
-                {showStateColumn ? <th className="px-4 py-2">{t('common.state')}</th> : null}
+                <th className="w-8 px-3 py-2"><span className="sr-only">{t('common.state')}</span></th>
+                <th className="px-3 py-2">{t('common.name')}</th>
+                {showOwnerColumn ? <th className="px-3 py-2">{t('common.user')}</th> : showVpsFilter ? <th className="px-3 py-2">{t('common.vps')}</th> : null}
+                <th className="px-3 py-2">{t('dataset.field.usage')}</th>
+                {showSnapshotColumn ? <th className="px-3 py-2">{t('dataset.field.snapshots')}</th> : null}
+                {showMountColumn ? <th className="px-3 py-2">{t('dataset.field.mounts')}</th> : null}
+                {showExportColumn ? <th className="px-3 py-2">{t('dataset.field.exports')}</th> : null}
+                {showStateColumn ? <th className="px-3 py-2">{t('common.state')}</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -833,17 +794,17 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                     variant={rowVariant}
                     className="border-b border-border/60 last:border-b-0"
                   >
-                    <td className="px-4 py-2 align-top">
+                    <td className="px-3 py-2 align-top">
                       <StatusDot variant={dotVariant} testId={`datasets.row.${ds.id}.dot`} />
                     </td>
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       <Link className="font-medium text-accent hover:underline" to={`${basePath}/${detailSection}/${ds.id}`}>
                         {label}
                       </Link>
                       <div className="mt-0.5 text-xs text-faint">#{ds.id}</div>
                     </td>
                     {showOwnerColumn ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {ownerId ? (
                           <Link className="text-accent hover:underline" to={`${basePath}/users/${ownerId}`}>
                             {ownerLogin ? ownerLogin : `#${ownerId}`}
@@ -853,7 +814,7 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                         )}
                       </td>
                     ) : showVpsFilter ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {vpsId ? (
                           <Link className="text-accent hover:underline" to={`${basePath}/vps/${vpsId}`}>
                             {vpsHostname ? vpsHostname : `#${vpsId}`}
@@ -863,14 +824,14 @@ export function DatasetsListPage(props: DatasetsListPageProps = {}) {
                         )}
                       </td>
                     ) : null}
-                    <td className="px-4 py-2">
+                    <td className="px-3 py-2">
                       <DatasetUsage used={ds.used} refquota={ds.refquota} avail={ds.avail} />
                     </td>
-                    {showSnapshotColumn ? <td className="px-4 py-2">{ds.snapshots_count ?? 0}</td> : null}
-                    {showMountColumn ? <td className="px-4 py-2">{ds.mount_count ?? 0}</td> : null}
-                    {showExportColumn ? <td className="px-4 py-2">{ds.export_count ?? 0}</td> : null}
+                    {showSnapshotColumn ? <td className="px-3 py-2">{ds.snapshots_count ?? 0}</td> : null}
+                    {showMountColumn ? <td className="px-3 py-2">{ds.mount_count ?? 0}</td> : null}
+                    {showExportColumn ? <td className="px-3 py-2">{ds.export_count ?? 0}</td> : null}
                     {showStateColumn ? (
-                      <td className="px-4 py-2">
+                      <td className="px-3 py-2">
                         {state ? <Badge variant={state.variant}>{state.label}</Badge> : <span className="text-faint">—</span>}
                       </td>
                     ) : null}

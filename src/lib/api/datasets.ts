@@ -130,6 +130,7 @@ export async function fetchDatasets(opts?: {
   subtree?: number;
   withoutSnapshotIn?: number;
   includes?: string;
+  count?: boolean;
   reversed?: boolean;
   role?: 'primary' | 'hypervisor';
 }) {
@@ -149,7 +150,13 @@ export async function fetchDatasets(opts?: {
     path: '/datasets',
     namespace: 'dataset',
     params,
-    meta: opts?.includes ? { includes: opts.includes } : undefined,
+    meta:
+      opts?.includes || opts?.count
+        ? {
+            ...(opts.includes ? { includes: opts.includes } : {}),
+            ...(opts.count ? { count: true } : {}),
+          }
+        : undefined,
   });
 
   return { ...res, data: expectArray<Dataset>(res.data, 'datasets#index') };
@@ -170,7 +177,7 @@ export type DatasetEditablePayload = {
   recordsize?: number;
   atime?: boolean;
   relatime?: boolean;
-  sync?: 'standard' | 'disabled';
+  sync?: 'standard' | 'always' | 'disabled';
   sharenfs?: string;
   admin_override?: boolean;
   admin_lock_type?: 'no_lock' | 'absolute' | 'not_less' | 'not_more';
@@ -252,6 +259,8 @@ export async function fetchSnapshotDownloads(opts?: {
   dataset?: number;
   snapshot?: number;
   q?: string;
+  includes?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
@@ -265,6 +274,13 @@ export async function fetchSnapshotDownloads(opts?: {
     path: '/snapshot_downloads',
     namespace: 'snapshot_download',
     params,
+    meta:
+      opts?.includes || opts?.count
+        ? {
+            ...(opts.includes ? { includes: opts.includes } : {}),
+            ...(opts.count ? { count: true } : {}),
+          }
+        : undefined,
   });
 
   return { ...res, data: expectArray<SnapshotDownload>(res.data, 'snapshot_downloads#index') };

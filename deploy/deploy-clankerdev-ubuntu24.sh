@@ -5,6 +5,8 @@ set -euo pipefail
 # Target: Ubuntu 24.04 LTS
 # Host: https://clankerdev.vpsfree.cz/
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 DOMAIN="clankerdev.vpsfree.cz"
 EXPECTED_IPV4="37.205.15.4"
 EXPECTED_IPV6="2a03:3b40:fe:438::1"
@@ -154,6 +156,30 @@ server {
     proxy_set_header Host \$host;
     proxy_set_header X-Forwarded-Proto \$scheme;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header Cache-Control "no-store, max-age=0" always;
+    add_header Cross-Origin-Resource-Policy same-origin always;
+    add_header X-Content-Type-Options nosniff always;
+  }
+
+  location = /session.json {
+    proxy_pass http://127.0.0.1:${BFF_PORT};
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header Cache-Control "no-store, max-age=0" always;
+    add_header Cross-Origin-Resource-Policy same-origin always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+  }
+
+  location = /healthz {
+    proxy_pass http://127.0.0.1:${BFF_PORT}/healthz;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto \$scheme;
   }
 
   location ^~ /oauth/ {
@@ -214,7 +240,10 @@ server {
 
   add_header X-Content-Type-Options nosniff always;
   add_header X-Frame-Options SAMEORIGIN always;
-  add_header Referrer-Policy no-referrer-when-downgrade always;
+  add_header Referrer-Policy strict-origin-when-cross-origin always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+  add_header Strict-Transport-Security "max-age=31536000" always;
 
   location ^~ /.well-known/acme-challenge/ {
     default_type "text/plain";
@@ -228,6 +257,35 @@ server {
     proxy_set_header Host \$host;
     proxy_set_header X-Forwarded-Proto https;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header Cache-Control "no-store, max-age=0" always;
+    add_header Cross-Origin-Resource-Policy same-origin always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+  }
+
+  location = /session.json {
+    proxy_pass http://127.0.0.1:${BFF_PORT};
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header Cache-Control "no-store, max-age=0" always;
+    add_header Cross-Origin-Resource-Policy same-origin always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+  }
+
+  location = /healthz {
+    proxy_pass http://127.0.0.1:${BFF_PORT}/healthz;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Proto https;
   }
 
   location ^~ /oauth/ {
@@ -239,12 +297,24 @@ server {
 
   location ^~ /assets/ {
     expires 30d;
-    add_header Cache-Control "public, immutable";
+    add_header Cache-Control "public, immutable" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
     try_files \$uri =404;
   }
 
   location = /index.html {
-    add_header Cache-Control "no-cache";
+    add_header Cache-Control "no-cache" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-wyf6w6jZL1nQnvQ3z5xyWt1FnxVZMXcEAzprShSzkQY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https: wss:; frame-src 'self' https:; form-action 'self'; frame-ancestors 'self'; object-src 'none'; base-uri 'self'" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
   }
 
   location / {
@@ -471,6 +541,14 @@ if obtain_cert_if_dns_ready; then
   nginx -t
   systemctl reload nginx
 fi
+
+PUBLIC_URL="http://${DOMAIN}"
+if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+  PUBLIC_URL="https://${DOMAIN}"
+fi
+
+echo "==> Checking public authentication endpoints..."
+bash "${SCRIPT_DIR}/smoke-auth-endpoints.sh" "${PUBLIC_URL}"
 
 echo
 echo "✅ Deployment complete."

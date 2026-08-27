@@ -1,8 +1,8 @@
 import type React from 'react';
 import type { ResourceRef } from '../../../lib/api/appTypes';
+import type { IpAddress } from '../../../lib/api/ipAddresses';
 import type { TransactionChain } from '../../../lib/api/transactions';
 import type { Vps, VpsStatus } from '../../../lib/api/vps';
-import { isFailedChainState } from '../../../lib/taskStatus';
 
 export type ManagementAction = {
   to: string;
@@ -89,6 +89,168 @@ export function usageValue(value: unknown): number | undefined {
   return undefined;
 }
 
+export type VpsOverviewIpKind = 'ipv4_public' | 'ipv4_private' | 'ipv6';
+
+export function ipAddressDisplayLabel(ip: IpAddress): string {
+  const address = String(ip.addr ?? '').trim();
+  if (!address) return `#${ip.id}`;
+
+  const prefix = typeof ip.prefix === 'number' ? ip.prefix : Number.NaN;
+  if (!address.includes('/') && Number.isInteger(prefix) && prefix >= 0) {
+    return `${address}/${prefix}`;
+  }
+
+  return address;
+}
+
+export function classifyIpAddress(ip: IpAddress): VpsOverviewIpKind {
+  const version = Number(ip.network?.ip_version);
+  const address = String(ip.addr ?? '').trim();
+
+  if (version === 6 || (version !== 4 && address.includes(':'))) return 'ipv6';
+  return String(ip.network?.role ?? '') === 'private_access' ? 'ipv4_private' : 'ipv4_public';
+}
+
+export function selectOverviewIpAddresses(ipAddresses: IpAddress[], limit = 3): IpAddress[] {
+  if (limit <= 0) return [];
+
+  const selected: IpAddress[] = [];
+  const selectedIds = new Set<number>();
+  const kinds: VpsOverviewIpKind[] = ['ipv4_public', 'ipv4_private', 'ipv6'];
+
+  for (const kind of kinds) {
+    const candidate = ipAddresses.find((ip) => classifyIpAddress(ip) === kind && !selectedIds.has(ip.id));
+    if (!candidate) continue;
+    selected.push(candidate);
+    selectedIds.add(candidate.id);
+    if (selected.length >= limit) return selected;
+  }
+
+  for (const ip of ipAddresses) {
+    if (selectedIds.has(ip.id)) continue;
+    selected.push(ip);
+    selectedIds.add(ip.id);
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
+}
+
+function addressWithoutPrefix(value: unknown): string {
+  return String(value ?? '').trim().split('/', 1)[0] ?? '';
+}
+
+function isPrivateIpv4(address: string): boolean {
+  const octets = address.split('.').map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+
+  const first = octets[0];
+  const second = octets[1];
+  if (first === undefined || second === undefined) return false;
+  return first === 10
+    || first === 127
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
+function isPrivateIpAddress(address: string): boolean {
+  const normalized = addressWithoutPrefix(address).toLowerCase();
+  if (!normalized) return true;
+  if (!normalized.includes(':')) return isPrivateIpv4(normalized);
+  return normalized === '::1'
+    || normalized.startsWith('fe80:')
+    || normalized.startsWith('fc')
+    || normalized.startsWith('fd');
+}
+
+export function primarySshIpAddress(ipAddresses: IpAddress[] | undefined): string | null {
+  const usable = (ipAddresses ?? [])
+    .map((ip) => ({ ip, address: addressWithoutPrefix(ip.addr) }))
+    .filter((item) => item.address.length > 0);
+
+  if (usable.length === 0) return null;
+
+  const explicitlyPublic = usable.find(({ ip }) => {
+    const role = String(ip.network?.role ?? '');
+    const purpose = String(ip.network?.purpose ?? '');
+    return role === 'public_access' || role === 'public' || purpose === 'public_access' || purpose === 'public';
+  });
+  if (explicitlyPublic) return explicitlyPublic.address;
+
+  const publicCandidate = usable.find(({ address }) => !isPrivateIpAddress(address));
+  return publicCandidate?.address ?? usable[0]?.address ?? null;
+}
+
+export type VpsOverviewUsage = {
+  state: 'known' | 'unknown';
+  used: number | null;
+  max: number | null;
+  percent: number | null;
+};
+
+export function overviewUsageMetric(usedValue: unknown, maxValue: unknown): VpsOverviewUsage {
+  const used = usageValue(usedValue);
+  const max = usageValue(maxValue);
+
+  if (used === undefined || max === undefined || used < 0 || max <= 0) {
+    return { state: 'unknown', used: null, max: null, percent: null };
+  }
+
+  return {
+    state: 'known',
+    used,
+    max,
+    percent: (used / max) * 100,
+  };
+}
+
+export type VpsOverviewHealthState = 'stale' | 'busy' | 'running' | 'stopped' | 'unknown';
+
+export type VpsOverviewHealthKey =
+  | Exclude<VpsOverviewHealthState, 'running'>
+  | 'ready'
+  | 'running_no_access'
+  | 'network_disabled'
+  | 'access_loading'
+  | 'access_error';
+
+export function overviewHealthState(input: {
+  running: unknown;
+  busy: boolean;
+  stale: boolean;
+}): VpsOverviewHealthState {
+  if (input.stale) return 'stale';
+  if (input.busy) return 'busy';
+  if (input.running === true) return 'running';
+  if (input.running === false) return 'stopped';
+  return 'unknown';
+}
+
+export function overviewHealthKey(input: {
+  running: unknown;
+  busy: boolean;
+  stale: boolean;
+  networkEnabled: boolean;
+  sshCommand?: string | null;
+  ipAddressesLoading: boolean;
+  ipAddressesError: boolean;
+}): VpsOverviewHealthKey {
+  const state = overviewHealthState(input);
+  if (state !== 'running') return state;
+
+  if (!input.networkEnabled) return 'network_disabled';
+  if (input.sshCommand) return 'ready';
+  if (input.ipAddressesError) return 'access_error';
+  if (input.ipAddressesLoading) return 'access_loading';
+  return 'running_no_access';
+}
+
+export function isRemoteConsoleAvailable(vps: Vps): boolean {
+  const server = String(vps.node?.location?.remote_console_server ?? '').trim();
+  return Boolean(vps.node && server);
+}
+
 export function formatLoadavg(vps: Vps): string {
   const a1 = typeof vps.loadavg1 === 'number' ? vps.loadavg1 : undefined;
   const a5 = typeof vps.loadavg5 === 'number' ? vps.loadavg5 : undefined;
@@ -114,12 +276,7 @@ export function safePercent(num: unknown, den: unknown): number | null {
 }
 
 export function sortChainsForOverview(list: TransactionChain[]): TransactionChain[] {
-  return list.slice().sort((a, b) => {
-    const aErr = isFailedChainState(a.state);
-    const bErr = isFailedChainState(b.state);
-    if (aErr !== bErr) return aErr ? -1 : 1;
-    return (b.id ?? 0) - (a.id ?? 0);
-  });
+  return list.slice().sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
 }
 
 export type MetricsWindow = '24h' | '7d' | '30d';

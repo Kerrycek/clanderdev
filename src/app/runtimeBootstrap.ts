@@ -1,6 +1,17 @@
 export type OptionalRuntimeScriptName = 'config.js' | 'config.local.js';
 export type RuntimeScriptLoader = (src: string) => Promise<void>;
 
+export interface RuntimeSessionTarget {
+  vpsAdmin?: Window['vpsAdmin'];
+}
+
+export interface LoadBffRuntimeSessionOptions {
+  baseUrl?: string;
+  origin?: string;
+  fetchImpl?: typeof fetch;
+  target?: RuntimeSessionTarget;
+}
+
 function currentWindowOrigin(): string {
   if (typeof window === 'undefined') return 'http://localhost';
   return window.location.origin;
@@ -118,4 +129,52 @@ export async function loadOptionalRuntimeScripts(
   }
 
   return loadedScripts;
+}
+
+export async function loadBffRuntimeSession(
+  options: LoadBffRuntimeSessionOptions = {},
+): Promise<string | null> {
+  const origin = options.origin ?? currentWindowOrigin();
+  const target = options.target ?? (typeof window !== 'undefined' ? window : undefined);
+  const fetchImpl = options.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : undefined);
+  if (!target?.vpsAdmin || !fetchImpl) return null;
+
+  const normalizedBaseUrl = normalizeBaseUrl(options.baseUrl ?? import.meta.env.BASE_URL);
+  const candidates = [new URL('session.json', `${origin}${normalizedBaseUrl}`).toString()];
+  if (normalizedBaseUrl !== '/') candidates.push(new URL('/session.json', origin).toString());
+
+  for (const url of Array.from(new Set(candidates))) {
+    try {
+      const response = await fetchImpl(url, {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) continue;
+      if (!response.headers.get('content-type')?.toLowerCase().includes('application/json')) continue;
+
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
+      const values = payload as Record<string, unknown>;
+      const accessToken = typeof values['accessToken'] === 'string' && values['accessToken'].trim()
+        ? values['accessToken'].trim()
+        : undefined;
+      const rawExpiresAt = values['sessionExpiresAt'];
+      const sessionExpiresAt = typeof rawExpiresAt === 'number' && Number.isFinite(rawExpiresAt) && rawExpiresAt > 0
+        ? rawExpiresAt
+        : null;
+
+      target.vpsAdmin.accessToken = accessToken;
+      target.vpsAdmin.webuiNext = {
+        ...target.vpsAdmin.webuiNext,
+        sessionExpiresAt,
+      };
+      return url;
+    } catch {
+      // Optional BFF session bootstrap. Static/legacy deployments do not expose it.
+    }
+  }
+
+  return null;
 }

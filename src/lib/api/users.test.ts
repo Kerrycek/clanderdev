@@ -15,7 +15,7 @@ function makeUsersResponse(rows: unknown[]) {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  (window as any).vpsAdmin = undefined;
+  window.vpsAdmin = undefined;
 });
 
 describe('fetchUsers', () => {

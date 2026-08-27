@@ -56,7 +56,7 @@ export function VpsListTable({
             page={pagination.page}
             pageCount={pagination.stack.length}
             canPrev={pagination.canPrev}
-            canNext={hasMore}
+            canNext={pagination.hasForward || hasMore}
             onPrev={pagination.goPrev}
             onNext={() => pagination.goNext(pageCursor)}
             onGoToPage={pagination.goToPage}

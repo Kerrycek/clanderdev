@@ -4,9 +4,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppMode } from '../../../app/appMode';
 import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
+import { useObjectScope } from '../../../app/objectScope';
 import { useChrome } from '../../../components/layout/ChromeContext';
+import { Alert } from '../../../components/ui/Alert';
 import { fetchDataset } from '../../../lib/api/datasets';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { datasetCapabilities } from '../../../lib/gates/dataset';
 import { createVpsMount, deleteVpsMount, fetchVpsMounts, findDatasetByName, updateVpsMount, type Dataset, type VpsMount } from '../../../lib/api/vpsMounts';
 import { gateVpsMutation } from '../../../lib/gates/vps';
 import { preflightVpsNotBusy } from './vpsPreflight';
@@ -51,10 +54,11 @@ function firstValidationError(issues: MountValidationIssue[], t: (key: string) =
 export function VpsStoragePage() {
   const { basePath, mode } = useAppMode();
   const auth = useAuth();
+  const scope = useObjectScope();
   const chrome = useChrome();
   const qc = useQueryClient();
   const { t } = useI18n();
-  const { vps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
 
   const canAdmin = mode === 'admin' && auth.role === 'admin';
   const vpsId = vps.id;
@@ -67,7 +71,10 @@ export function VpsStoragePage() {
   });
 
   const invalidateMounts = () => qc.invalidateQueries({ queryKey: ['vps', vpsId, 'mounts'] });
-  const preflight = async () => preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
+  const preflight = async () => {
+    if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
+    return preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
+  };
 
   const createMountM = useMutation({
     mutationFn: async (params: Record<string, unknown>) => {
@@ -175,6 +182,7 @@ export function VpsStoragePage() {
 
   const findDatasetM = useMutation({
     mutationFn: async (name: string) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       const q = name.trim();
       if (!q) throw new Error(t('vps.storage.dataset_find.validation.empty'));
       return findDatasetByName(q);
@@ -265,15 +273,31 @@ export function VpsStoragePage() {
   const rootDatasetQ = useQuery({
     queryKey: ['datasets', 'show', rootDatasetId, 'vps-storage-root'],
     enabled: rootDatasetId !== null,
-    queryFn: async () => (await fetchDataset(rootDatasetId as number, { includes: 'vps,environment' })).data,
+    queryFn: async () => (
+      await fetchDataset(rootDatasetId as number, { includes: 'vps,environment,user,parent' })
+    ).data,
     refetchOnWindowFocus: false,
   });
   const root = rootDatasetSummary(rootDatasetQ.data ?? null, vps.dataset ?? null);
+  const rootCapabilities = rootDatasetQ.data
+    ? datasetCapabilities(rootDatasetQ.data, {
+        role: auth.role,
+        scope: scope.scope,
+        userId: auth.user?.id,
+      })
+    : null;
   const overview = storageOverviewSummary(mounts);
 
   return (
     <div data-testid="vps.storage.page" className="space-y-4">
+      {!canMutateVps ? (
+        <Alert title={t('gate.blocked.permission.title')} variant="warn">
+          <div data-testid="vps.storage.read_only">{t('gate.blocked.permission.body')}</div>
+        </Alert>
+      ) : null}
+
       <VpsStorageOverviewCard
+        canMutate={canMutateVps}
         gate={gate}
         root={root}
         summary={overview}
@@ -287,6 +311,7 @@ export function VpsStoragePage() {
       <VpsStorageRootDatasetCard
         basePath={basePath}
         canAdmin={canAdmin}
+        canCreateSubdataset={canMutateVps && rootCapabilities?.canCreateSubdataset === true}
         root={root}
         loading={rootDatasetQ.isLoading}
         error={rootDatasetQ.isError ? errorMessage(rootDatasetQ.error) : null}
@@ -295,6 +320,7 @@ export function VpsStoragePage() {
       <VpsStorageMountsCard
         basePath={basePath}
         canAdmin={canAdmin}
+        canMutate={canMutateVps}
         mounts={mounts}
         loading={mountsQ.isLoading}
         error={mountsQ.isError ? errorMessage(mountsQ.error) : null}
@@ -303,7 +329,7 @@ export function VpsStoragePage() {
         onDelete={openDelete}
       />
 
-      <VpsStorageMountCreateModal
+      {canMutateVps ? <VpsStorageMountCreateModal
         open={createOpen}
         draft={draft}
         canAdmin={canAdmin}
@@ -321,9 +347,9 @@ export function VpsStoragePage() {
         onDatasetNameChange={setDatasetName}
         onDraftPatch={patchDraft}
         onSubmit={() => void submitCreate()}
-      />
+      /> : null}
 
-      <VpsStorageMountEditModal
+      {canMutateVps ? <VpsStorageMountEditModal
         open={editOpen}
         draft={draft}
         mount={editMount}
@@ -336,9 +362,9 @@ export function VpsStoragePage() {
         onClose={() => setEditOpen(false)}
         onDraftPatch={patchDraft}
         onSubmit={() => void submitEdit()}
-      />
+      /> : null}
 
-      <VpsStorageMountDeleteDialog
+      {canMutateVps ? <VpsStorageMountDeleteDialog
         open={deleteOpen}
         target={deleteTarget}
         gate={gate}
@@ -348,7 +374,7 @@ export function VpsStoragePage() {
           setDeleteOpen(false);
         }}
         onConfirm={() => void submitDelete()}
-      />
+      /> : null}
     </div>
   );
 }

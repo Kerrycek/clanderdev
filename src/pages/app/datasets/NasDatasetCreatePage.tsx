@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
 import { useAppMode } from '../../../app/appMode';
+import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
 import { useObjectScope } from '../../../app/objectScope';
 import { useToasts } from '../../../app/toasts';
@@ -17,6 +18,7 @@ import { Input } from '../../../components/ui/Input';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { Select } from '../../../components/ui/Select';
 import { createDataset, fetchDatasets, type Dataset } from '../../../lib/api/datasets';
+import { datasetCapabilities } from '../../../lib/gates/dataset';
 
 function datasetLabel(dataset: Dataset): string {
   return String(dataset.full_name ?? dataset.name ?? dataset.label ?? `#${dataset.id}`);
@@ -42,6 +44,7 @@ function parseRecordsize(raw: string): number | undefined {
 
 export function NasDatasetCreatePage() {
   const { basePath } = useAppMode();
+  const auth = useAuth();
   const scope = useObjectScope();
   const { t } = useI18n();
   const { pushToast } = useToasts();
@@ -54,6 +57,7 @@ export function NasDatasetCreatePage() {
   const [recordsizeKiB, setRecordsizeKiB] = useState('128');
   const [atime, setAtime] = useState(false);
   const [relatime, setRelatime] = useState(false);
+  const [includeAdvanced, setIncludeAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const parentUserId = scope.scope === 'mine' ? scope.mineUserId : undefined;
@@ -63,10 +67,21 @@ export function NasDatasetCreatePage() {
     queryKey: ['datasets', 'nas', 'create-parents', { user: parentUserId ?? null }],
     enabled: !waitForAdminScope,
     queryFn: async () => (
-      await fetchDatasets({ role: 'primary', limit: 100, user: parentUserId })
+      await fetchDatasets({ role: 'primary', limit: 100, user: parentUserId, includes: 'user,parent' })
     ).data,
   });
-  const parents = parentsQ.data ?? [];
+  const parents = useMemo(
+    () =>
+      (parentsQ.data ?? []).filter(
+        (dataset) =>
+          datasetCapabilities(dataset, {
+            role: auth.role,
+            scope: scope.scope,
+            userId: auth.user?.id,
+          }).canCreateSubdataset
+      ),
+    [auth.role, auth.user?.id, parentsQ.data, scope.scope]
+  );
   const parentOptions = useMemo(
     () => [
       { value: '', label: t('nas.create.parent.placeholder'), disabled: true },
@@ -87,11 +102,15 @@ export function NasDatasetCreatePage() {
         name: childName,
         automount,
         refquota: parseGiB(refquotaGiB),
-        compression,
-        recordsize: parseRecordsize(recordsizeKiB),
-        atime,
-        relatime,
-        sync: 'standard',
+        ...(includeAdvanced
+          ? {
+              compression,
+              recordsize: parseRecordsize(recordsizeKiB),
+              atime,
+              relatime,
+              sync: 'standard' as const,
+            }
+          : {}),
       });
     },
     onSuccess: (res) => {
@@ -169,7 +188,7 @@ export function NasDatasetCreatePage() {
                 />
               </div>
 
-              <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+              <div className="border-t border-border pt-4">
                 <Input
                   testId="nas.create.refquota"
                   label={t('nas.create.refquota')}
@@ -178,21 +197,40 @@ export function NasDatasetCreatePage() {
                   placeholder="10"
                   inputMode="decimal"
                 />
-                <Input
-                  testId="nas.create.recordsize"
-                  label={t('nas.create.recordsize')}
-                  value={recordsizeKiB}
-                  onChange={(event) => setRecordsizeKiB(event.target.value)}
-                  inputMode="numeric"
-                />
               </div>
 
-              <div className="grid gap-2 border-t border-border pt-4 sm:grid-cols-2">
+              <div className="border-t border-border pt-4">
                 <Checkbox testId="nas.create.automount" checked={automount} onChange={setAutomount} label={t('nas.create.automount')} />
-                <Checkbox testId="nas.create.compression" checked={compression} onChange={setCompression} label={t('nas.create.compression')} />
-                <Checkbox testId="nas.create.atime" checked={atime} onChange={setAtime} label={t('nas.create.atime')} />
-                <Checkbox testId="nas.create.relatime" checked={relatime} onChange={setRelatime} label={t('nas.create.relatime')} />
               </div>
+
+              <details
+                className="rounded-lg border border-border bg-surface-2"
+                data-testid="nas.create.advanced_properties"
+                onToggle={(event) => {
+                  if (event.currentTarget.open) setIncludeAdvanced(true);
+                }}
+              >
+                <summary
+                  className="cursor-pointer select-none px-3 py-3 text-sm font-medium text-fg"
+                  data-testid="nas.create.advanced_properties.summary"
+                >
+                  {t('filters.advanced.label')} ZFS
+                </summary>
+                <div className="space-y-4 border-t border-border px-3 py-4">
+                  <Input
+                    testId="nas.create.recordsize"
+                    label={t('nas.create.recordsize')}
+                    value={recordsizeKiB}
+                    onChange={(event) => setRecordsizeKiB(event.target.value)}
+                    inputMode="numeric"
+                  />
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Checkbox testId="nas.create.compression" checked={compression} onChange={setCompression} label={t('nas.create.compression')} />
+                    <Checkbox testId="nas.create.atime" checked={atime} onChange={setAtime} label={t('nas.create.atime')} />
+                    <Checkbox testId="nas.create.relatime" checked={relatime} onChange={setRelatime} label={t('nas.create.relatime')} />
+                  </div>
+                </div>
+              </details>
 
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
                 <Button testId="nas.create.submit" onClick={submit} loading={createM.isPending} disabled={!parentId || !name.trim()}>

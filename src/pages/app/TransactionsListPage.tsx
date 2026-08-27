@@ -1,8 +1,8 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
-import { fetchTransactions, type Transaction } from '../../lib/api/transactions';
+import { fetchTransactions } from '../../lib/api/transactions';
 import { searchUsers } from '../../lib/api/users';
 import { useAppMode } from '../../app/appMode';
 import { useI18n } from '../../app/i18n';
@@ -26,7 +26,6 @@ import { useDebouncedValue } from '../../lib/hooks/useDebouncedValue';
 import { TransactionItemsFilters } from './transactions/TransactionItemsFilters';
 import { TransactionItemsTable } from './transactions/TransactionItemsTable';
 import {
-  buildTransactionItemFilterHref,
   buildTransactionItemRow,
   canonicalTransactionItemKey,
   inferDoneToken,

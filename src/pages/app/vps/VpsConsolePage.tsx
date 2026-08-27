@@ -19,18 +19,31 @@ import {
   normalizeRemoteConsoleServer,
 } from '../../../lib/consoleToken';
 import { useVps } from './VpsContext';
-
 type ConsoleConnectionState =
-  | 'connecting'
-  | 'connected'
-  | 'disconnected'
-  | 'failed'
-  | 'reconnecting'
-  | 'expired'
-  | 'revoked'
-  | 'unavailable';
-
+  | 'connecting' | 'connected' | 'disconnected' | 'failed'
+  | 'reconnecting' | 'expired' | 'revoked' | 'unavailable';
 export function VpsConsolePage() {
+  const { canMutateVps } = useVps();
+  const { t } = useI18n();
+
+  if (!canMutateVps) {
+    return (
+      <div className="space-y-3" data-testid="vps.console.page">
+        <div>
+          <h2 className="text-base font-semibold">{t('vps.console.title')}</h2>
+          <div className="mt-1 text-sm text-muted">{t('vps.console.subtitle')}</div>
+        </div>
+        <Alert variant="warn" title={t('gate.blocked.permission.title')} testId="vps.console.read_only">
+          {t('gate.blocked.permission.body')}
+        </Alert>
+      </div>
+    );
+  }
+
+  return <MutableVpsConsolePage />;
+}
+
+function MutableVpsConsolePage() {
   const { vps, sshCommand } = useVps();
   const { t } = useI18n();
   const qc = useQueryClient();

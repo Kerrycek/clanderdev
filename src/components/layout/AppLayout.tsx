@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-
 import { useAuth } from '../../app/auth';
 import { useAppMode } from '../../app/appMode';
 import { useUiSettings } from '../../app/uiSettings';
@@ -46,7 +45,6 @@ import { AppHeader } from './AppHeader';
 import { AppSidebar, buildSidebarNavItems } from './AppSidebar';
 import { SidebarTips } from './SidebarTips';
 import { FrontendFreshnessGuard } from './FrontendFreshnessGuard';
-
 function useOutsideClick(ref: React.RefObject<HTMLElement | null>, onOutside: () => void, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
@@ -323,12 +321,8 @@ export function AppLayout(props: { children: React.ReactNode }) {
 
   const navItems = useMemo(
     () =>
-      buildSidebarNavItems({
-        basePath,
-        appMode: mode,
-        t: i18n.t,
-      }),
-    [basePath, i18n, mode]
+      buildSidebarNavItems({ basePath, appMode: mode, role: auth.role, t: i18n.t }),
+    [auth.role, basePath, i18n, mode]
   );
 
   const chainsQ = useQuery({

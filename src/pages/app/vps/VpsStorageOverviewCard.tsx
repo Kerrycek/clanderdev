@@ -16,6 +16,7 @@ function percentLabel(value: number | null): string {
 }
 
 export function VpsStorageOverviewCard(props: {
+  canMutate: boolean;
   gate: GateDecision;
   root: RootDatasetSummary;
   summary: StorageOverviewSummary;
@@ -31,7 +32,7 @@ export function VpsStorageOverviewCard(props: {
       <CardHeader
         title={t('vps.storage.title')}
         subtitle={t('vps.storage.subtitle')}
-        actions={
+        actions={props.canMutate ? (
           <ActionButton
             testId="vps.storage.mounts.add"
             variant="primary"
@@ -42,10 +43,10 @@ export function VpsStorageOverviewCard(props: {
           >
             {t('vps.storage.add_mount')}
           </ActionButton>
-        }
+        ) : null}
       />
       <CardBody className="space-y-4">
-        {!gate.allowed ? (
+        {props.canMutate && !gate.allowed ? (
           <Alert title={t(gate.reason.titleKey)} variant="warn">
             <div className="space-y-2">
               {gate.reason.descriptionKey ? <div>{t(gate.reason.descriptionKey)}</div> : null}

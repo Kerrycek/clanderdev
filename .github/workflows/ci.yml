@@ -7,6 +7,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   checks:
     name: Static checks and unit tests
@@ -15,10 +18,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -31,12 +34,20 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=dev
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Audit BFF production dependencies
+        run: |
+          npm ci --omit=dev --prefix bff
+          npm audit --omit=dev --audit-level=high --prefix bff
+
       - name: Run CI checks
         run: npm run ci:pr
 
       - name: Upload audit artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: audit-artifacts
           path: work/audits

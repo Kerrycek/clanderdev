@@ -55,6 +55,10 @@ const checks = [
   {
     file: 'src/components/layout/AppHeader.tsx',
     mustInclude: ['data-overlay="popover"', 'data-overlay-surface="overlay"', 'bg-overlay-surface'],
+  },
+  {
+    file: 'src/components/layout/AppHeaderMenus.tsx',
+    mustInclude: ['data-overlay="popover"', 'data-overlay-surface="overlay"', 'bg-overlay-surface'],
     minimumCounts: { 'data-overlay="popover"': 2 },
   },
   {

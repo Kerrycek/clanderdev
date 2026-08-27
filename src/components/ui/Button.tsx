@@ -7,6 +7,7 @@ import { buttonClassName, type ButtonSize, type ButtonVariant } from './buttonSt
 export type { ButtonSize, ButtonVariant } from './buttonStyles';
 
 type BaseProps = {
+  id?: string;
   testId?: string;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -18,6 +19,10 @@ type BaseProps = {
   disabledReason?: string;
   ariaLabel?: string;
   'aria-label'?: string;
+  role?: React.AriaRole;
+  'aria-selected'?: boolean;
+  'aria-controls'?: string;
+  tabIndex?: number;
   children: React.ReactNode;
 };
 
@@ -72,11 +77,16 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
   if (to) {
     return (
       <Link
+        id={props.id}
         data-testid={props.testId}
         to={to}
         onClick={props.onClick}
         title={title}
         aria-label={ariaLabel}
+        role={props.role}
+        aria-selected={props['aria-selected']}
+        aria-controls={props['aria-controls']}
+        tabIndex={props.tabIndex}
         aria-disabled={disabled}
         className={clsx(cls, disabled ? 'pointer-events-none cursor-not-allowed opacity-50' : undefined)}
       >
@@ -88,6 +98,7 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
   if ('href' in props) {
     return (
       <a
+        id={props.id}
         data-testid={props.testId}
         href={props.href}
         target={props.target}
@@ -95,6 +106,10 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
         onClick={props.onClick}
         title={title}
         aria-label={ariaLabel}
+        role={props.role}
+        aria-selected={props['aria-selected']}
+        aria-controls={props['aria-controls']}
+        tabIndex={props.tabIndex}
         aria-disabled={disabled}
         className={clsx(cls, disabled ? 'pointer-events-none cursor-not-allowed opacity-50' : undefined)}
       >
@@ -105,6 +120,7 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
 
   return (
     <button
+      id={props.id}
       data-testid={props.testId}
       type={props.type ?? 'button'}
       className={cls}
@@ -112,6 +128,10 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
       onClick={props.onClick}
       title={title}
       aria-label={ariaLabel}
+      role={props.role}
+      aria-selected={props['aria-selected']}
+      aria-controls={props['aria-controls']}
+      tabIndex={props.tabIndex}
     >
       {content}
     </button>

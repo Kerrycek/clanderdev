@@ -23,6 +23,7 @@ export function UserLookupInput(props: {
   disabled?: boolean;
   testId?: string;
   ariaLabel?: string;
+  label?: React.ReactNode;
   className?: string;
 
   /** Suggestion count limit. */
@@ -136,6 +137,7 @@ export function UserLookupInput(props: {
         disabled={props.disabled}
         testId={props.testId}
         ariaLabel={props.ariaLabel}
+        label={props.label}
         autoComplete="off"
       />
 

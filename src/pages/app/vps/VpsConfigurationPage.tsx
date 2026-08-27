@@ -73,7 +73,8 @@ export function VpsConfigurationPage() {
   const auth = useAuth();
   const { mode } = useAppMode();
   const isAdminMode = mode === 'admin';
-  const canEditAdminConfig = isAdminMode && auth.canUseAdminUi;
+  const canEditAdminConfig = isAdminMode && auth.role === 'admin';
+  const canMutateVps = !isAdminMode || canEditAdminConfig;
   const chrome = useChrome();
   const qc = useQueryClient();
   const { t } = useI18n();
@@ -109,6 +110,7 @@ export function VpsConfigurationPage() {
 
   const saveM = useMutation({
     mutationFn: async (payload: Record<string, unknown>) => {
+      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
       await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
       return updateVps(vpsId, payload);
     },
@@ -146,7 +148,7 @@ export function VpsConfigurationPage() {
   const busyLocal = busyLocalLock || saveM.isPending;
   const gate = gateVpsMutation({ vps, busyLocal, busyTransaction });
   const dirty = result.changedKeys.length > 0;
-  const saveDisabled = !dirty || Boolean(result.validationError) || !gate.allowed || saveM.isPending;
+  const saveDisabled = !canMutateVps || !dirty || Boolean(result.validationError) || !gate.allowed || saveM.isPending;
 
   const dnsOptions = useMemo<SelectOption[]>(() => {
     const options: SelectOption[] = [
@@ -228,6 +230,14 @@ export function VpsConfigurationPage() {
 
   return (
     <div className="space-y-4">
+      {!canMutateVps ? (
+        <Alert variant="neutral" title={t('gate.blocked.permission.title')}>
+          {t('gate.blocked.permission.body')}
+        </Alert>
+      ) : null}
+
+      <fieldset disabled={!canMutateVps} className="m-0 min-w-0 border-0 p-0">
+      <div className="space-y-4">
       <Card>
         <CardHeader
           title={t('vps.config.title')}
@@ -481,6 +491,8 @@ export function VpsConfigurationPage() {
       >
         <VpsConfigChangesList changes={changes} compact />
       </ConfirmDialog>
+      </div>
+      </fieldset>
     </div>
   );
 }

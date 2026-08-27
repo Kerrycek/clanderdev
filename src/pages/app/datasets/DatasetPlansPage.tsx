@@ -26,6 +26,8 @@ import {
   type DatasetInPoolPlan,
   type EnvironmentDatasetPlan,
 } from '../../../lib/api/datasets';
+import { fetchTransactionChains } from '../../../lib/api/transactions';
+import { hasActiveChains } from '../../../lib/taskStatus';
 
 import { useDatasetContext } from './DatasetContext';
 
@@ -63,7 +65,17 @@ function allowedRemove(mode: 'user' | 'admin', plan: DatasetInPoolPlan): boolean
 }
 
 export function DatasetPlansPage() {
-  const { dataset, refetch, datasetRef, busyTransaction, busyLocalLock, refetchChains } = useDatasetContext();
+  const {
+    dataset,
+    refetch,
+    datasetRef,
+    busyTransaction,
+    busyLocalLock,
+    chainsLoading,
+    chainsError,
+    chainsStale,
+    refetchChains,
+  } = useDatasetContext();
   const { mode } = useAppMode();
   const { t } = useI18n();
   const { pushToast } = useToasts();
@@ -101,10 +113,29 @@ export function DatasetPlansPage() {
     return availableRows.filter((p) => typeof p.id === 'number' && !used.has(p.id) && allowedAdd(mode, p));
   }, [assignedRows, availableRows, mode]);
 
-  const busy = busyTransaction || busyLocalLock;
+  const busy =
+    busyTransaction || busyLocalLock || chainsLoading || chainsError !== null || chainsStale;
+
+  async function preflightDatasetNotBusy() {
+    const chainsRes = await fetchTransactionChains({
+      className: 'Dataset',
+      rowId: dataset.id,
+      limit: 10,
+    });
+    if (hasActiveChains(chainsRes.data)) {
+      const err: any = new Error(t('toast.action_blocked.body'));
+      err.code = 'BUSY';
+      throw err;
+    }
+  }
 
   const assignM = useMutation({
-    mutationFn: async () => assignDatasetPlan(dataset.id, { environment_dataset_plan: Number(selectedEnvPlanId) }),
+    mutationFn: async () => {
+      await preflightDatasetNotBusy();
+      return assignDatasetPlan(dataset.id, {
+        environment_dataset_plan: Number(selectedEnvPlanId),
+      });
+    },
     onMutate: () => chrome.acquireLocalLock(datasetRef),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['datasets', dataset.id, 'plans'] });
@@ -122,7 +153,10 @@ export function DatasetPlansPage() {
   });
 
   const removeM = useMutation({
-    mutationFn: async (planId: number) => deleteDatasetPlan(dataset.id, planId),
+    mutationFn: async (planId: number) => {
+      await preflightDatasetNotBusy();
+      return deleteDatasetPlan(dataset.id, planId);
+    },
     onMutate: () => chrome.acquireLocalLock(datasetRef),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['datasets', dataset.id, 'plans'] });

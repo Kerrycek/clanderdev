@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
-import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
 
@@ -26,7 +25,6 @@ import { Card } from '../../../components/ui/Card';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Input } from '../../../components/ui/Input';
-import { LinkButton } from '../../../components/ui/LinkButton';
 import { LoadingState } from '../../../components/ui/LoadingState';
 
 import { useDnsZoneContext } from './DnsZoneContext';
@@ -66,6 +64,20 @@ function deleteMapValue<K, V>(map: ReadonlyMap<K, V>, key: K): Map<K, V> {
   return next;
 }
 
+function matchesRecordSearch(record: DnsRecord, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+
+  return [
+    record.id,
+    `#${record.id}`,
+    record.name,
+    record.type,
+    record.content,
+    record.comment,
+  ].some((value) => String(value ?? '').toLocaleLowerCase().includes(needle));
+}
+
 export function DnsZoneRecordsPage() {
   const { zone } = useDnsZoneContext();
   if (isSecondaryDnsZone(zone)) return <SecondaryDnsZoneRecordsPage />;
@@ -73,26 +85,9 @@ export function DnsZoneRecordsPage() {
 }
 
 function SecondaryDnsZoneRecordsPage() {
-  const { t } = useI18n();
-  const { basePath } = useAppMode();
-  const { zone } = useDnsZoneContext();
-
-  return (
-    <Card testId="dns.records.secondary_notice">
-      <div className="p-5">
-        <h2 className="text-xl font-semibold text-fg">{t('dns.zone.records.secondary.title')}</h2>
-        <p className="mt-2 max-w-2xl text-sm text-muted">{t('dns.zone.records.secondary.description')}</p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <LinkButton to={`${basePath}/dns/zones/${zone.id}/servers`} variant="primary">
-            {t('dns.zone.records.secondary.action.servers')}
-          </LinkButton>
-          <LinkButton to={`${basePath}/dns/zones/${zone.id}/transfers`} variant="secondary">
-            {t('dns.zone.records.secondary.action.transfers')}
-          </LinkButton>
-        </div>
-      </div>
-    </Card>
-  );
+  // Secondary zones have no record CRUD in HaveAPI. Keep the canonical detail
+  // URL useful while landing directly on their primary-peer/transfer surface.
+  return <Navigate to="transfers" replace />;
 }
 
 function PrimaryDnsZoneRecordsPage() {
@@ -131,33 +126,35 @@ function PrimaryDnsZoneRecordsPage() {
   const [rowErrors, setRowErrors] = useState<Map<number, string>>(() => new Map());
 
   const recordsQ = useQuery({
-    queryKey: ['dns_records', 'index', { dns_zone: zone.id, limit: pagination.limit, fromId: pagination.fromId, q: qstr.trim() }],
+    queryKey: ['dns_records', 'index', { dns_zone: zone.id, limit: pagination.limit, fromId: pagination.fromId }],
     queryFn: async () =>
       fetchDnsRecords({
         dns_zone: zone.id,
         limit: pagination.limit,
         fromId: pagination.fromId,
-        q: qstr.trim() || undefined,
       }),
   });
 
   const pageData = recordsQ.data?.data ?? [];
   const totalCount =
     typeof recordsQ.data?.meta?.['total_count'] === 'number' ? Number(recordsQ.data.meta['total_count']) : pageData.length;
-  const rows = pageData;
+  const rows = useMemo(
+    () => pageData.filter((record) => matchesRecordSearch(record, qstr)),
+    [pageData, qstr]
+  );
 
   const pageCursor = useMemo(() => cursorFromDescendingPage(pageData), [pageData]);
   const hasMore = pageData.length >= pagination.limit;
   const filtersActive = Boolean(qstr.trim());
 
   const validationById = useMemo(() => {
-    return new Map(rows.map((record) => [record.id, validateExistingDnsRecord(record, rows)]));
-  }, [rows]);
+    return new Map(rows.map((record) => [record.id, validateExistingDnsRecord(record, pageData)]));
+  }, [pageData, rows]);
 
-  const createValidation = useMemo(() => validateDnsRecordDraft(createDraft, rows), [createDraft, rows]);
+  const createValidation = useMemo(() => validateDnsRecordDraft(createDraft, pageData), [createDraft, pageData]);
   const editValidation = useMemo(
-    () => validateDnsRecordDraft(editDraft, rows, { editingRecordId: edit?.id }),
-    [edit?.id, editDraft, rows]
+    () => validateDnsRecordDraft(editDraft, pageData, { editingRecordId: edit?.id }),
+    [edit?.id, editDraft, pageData]
   );
   const createPreview = useMemo(() => dnsRecordCreatePreview(createDraft), [createDraft]);
   const editPreview = useMemo(() => (edit ? dnsRecordUpdatePreview(edit, editDraft) : []), [edit, editDraft]);
@@ -169,7 +166,7 @@ function PrimaryDnsZoneRecordsPage() {
 
   const createM = useMutation({
     mutationFn: async () => {
-      const validation = validateDnsRecordDraft(createDraft, rows);
+      const validation = validateDnsRecordDraft(createDraft, pageData);
       if (validation.hasErrors) throw new Error(t('dns.zone.records.validation.local_failed'));
       await preflightDnsZoneNotBusy({ zoneId: zone.id, t, concernClasses, knownBusy: busyTransaction || busyLocalLock });
       return createDnsRecord(buildDnsRecordCreatePayload(zone.id, createDraft));
@@ -204,7 +201,7 @@ function PrimaryDnsZoneRecordsPage() {
   const updateM = useMutation({
     mutationFn: async () => {
       if (!edit) throw new Error('No record selected');
-      const validation = validateDnsRecordDraft(editDraft, rows, { editingRecordId: edit.id });
+      const validation = validateDnsRecordDraft(editDraft, pageData, { editingRecordId: edit.id });
       if (validation.hasErrors) throw new Error(t('dns.zone.records.validation.local_failed'));
       await preflightDnsZoneNotBusy({ zoneId: zone.id, t, concernClasses, knownBusy: busyTransaction || busyLocalLock });
       return updateDnsRecord(edit.id, buildDnsRecordUpdatePayload(editDraft));

@@ -1,14 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-
 import { useAuth } from '../../../app/auth';
 import { getRuntimeConfig } from '../../../app/config';
 import { useI18n } from '../../../app/i18n';
 
 import { useChrome } from '../../../components/layout/ChromeContext';
-import { useObjectScope } from '../../../app/objectScope';
-
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 import { ActionButton } from '../../../components/ui/ActionButton';
@@ -35,7 +32,6 @@ import {
 
 import { formatErrorMessage } from '../../../lib/errors';
 import { formatDateTime } from '../../../lib/format';
-import { gateDatasetAction } from '../../../lib/gates/dataset';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { hasActiveChains } from '../../../lib/taskStatus';
@@ -51,11 +47,11 @@ import {
   DatasetDownloadStateBadge,
   datasetDownloadStatusHelp,
 } from './DatasetDownloadStatusView';
+import { datasetSnapshotActionGates } from './DatasetSnapshotActionGates';
 
 function snapshotLabel(s: Snapshot): string {
   return String(s.label ?? s.name ?? `#${s.id}`);
 }
-
 
 type ConfirmState =
   | null
@@ -64,11 +60,24 @@ type ConfirmState =
       snapshot: Snapshot;
     };
 
-export function DatasetSnapshotsPage() {
+/** Empty prefix preserves the existing dataset-detail URL contract. */
+export type DatasetSnapshotsPageProps = { queryParamPrefix?: string };
+
+export function datasetSnapshotQueryParamKeys(prefix = '') {
+  return {
+    search: `${prefix}q`,
+    action: `${prefix}action`,
+  } as const;
+}
+
+export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshotsPageProps = {}) {
   const {
     dataset,
     refetch: refetchDataset,
     busyTransaction,
+    chainsLoading,
+    chainsError,
+    chainsStale,
     refetchChains,
     datasetRef,
     busyLocalLock,
@@ -76,28 +85,28 @@ export function DatasetSnapshotsPage() {
   } = useDatasetContext();
   const chrome = useChrome();
   const { t } = useI18n();
-  const { role } = useAuth();
-  const scope = useObjectScope();
-  const isAdmin = role === 'admin' && scope.scope === 'all';
+  const { role, user } = useAuth();
+  const queryKeys = useMemo(() => datasetSnapshotQueryParamKeys(queryParamPrefix), [queryParamPrefix]);
 
   const datasetLabelForToast = String((dataset as any).label ?? (dataset as any).name ?? `Dataset #${dataset.id}`);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const [qstr, setQstr] = useState(() => searchParams.get('q') ?? '');
+  const qstr = searchParams.get(queryKeys.search) ?? '';
 
-  useEffect(() => {
+  function changeQuery(nextQuery: string) {
     const next = new URLSearchParams(searchParams);
-    const trimmed = qstr.trim();
-    if (trimmed) next.set('q', trimmed);
-    else next.delete('q');
+    const trimmed = nextQuery.trim();
+    if (trimmed) next.set(queryKeys.search, trimmed);
+    else next.delete(queryKeys.search);
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
-  }, [qstr, searchParams, setSearchParams]);
+  }
 
   const pagination = useKeysetPagination({
-    id: 'dataset.snapshots.list',
+    id: `dataset.snapshots.list${queryParamPrefix ? `.${queryParamPrefix}` : ''}`,
     filterKey: JSON.stringify({ datasetId: dataset.id, q: qstr.trim() }),
     searchParams,
     setSearchParams,
+    paramPrefix: queryParamPrefix,
     defaultLimit: 50,
     allowedLimits: [25, 50, 100],
   });
@@ -106,14 +115,14 @@ export function DatasetSnapshotsPage() {
   const [createLabel, setCreateLabel] = useState('');
 
   useEffect(() => {
-    if (searchParams.get('action') !== 'create') return;
+    if (searchParams.get(queryKeys.action) !== 'create') return;
     setCreateOpen(true);
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      next.delete('action');
+      next.delete(queryKeys.action);
       return next;
     }, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [queryKeys.action, searchParams, setSearchParams]);
 
   const [createdDownload, setCreatedDownload] = useState<SnapshotDownload | null>(null);
 
@@ -283,18 +292,12 @@ export function DatasetSnapshotsPage() {
     setConfirm(next);
   }
 
-  const busyLocal =
-    busyLocalLock ||
-    createSnap.isPending ||
-    rollbackSnap.isPending ||
-    deleteSnap.isPending ||
-    createDl.isPending ||
-    confirmBusy;
-
-  const createGate = gateDatasetAction('snapshot.create', { dataset, busyLocal, busyTransaction, role });
-  const downloadGate = gateDatasetAction('download.create', { dataset, busyLocal, busyTransaction, role });
-  const rollbackGate = gateDatasetAction('snapshot.rollback', { dataset, busyLocal, busyTransaction, role });
-  const deleteGate = gateDatasetAction('snapshot.delete', { dataset, busyLocal, busyTransaction, role });
+  const busyLocal = [busyLocalLock, createSnap.isPending, rollbackSnap.isPending,
+    deleteSnap.isPending, createDl.isPending, confirmBusy].some(Boolean);
+  const { createGate, downloadGate, rollbackGate, deleteGate } = datasetSnapshotActionGates({
+    dataset, role, userId: user?.id, busyLocal, busyTransaction,
+    lockStateUnknown: chainsLoading || chainsError !== null || chainsStale,
+  });
 
   const confirmGate = confirm?.kind === 'rollback' ? rollbackGate : confirm?.kind === 'delete' ? deleteGate : null;
   const confirmTestId =
@@ -343,7 +346,7 @@ export function DatasetSnapshotsPage() {
           <div className="w-full sm:w-72">
             <Input
               value={qstr}
-              onChange={(e) => setQstr(e.target.value)}
+              onChange={(e) => changeQuery(e.target.value)}
               placeholder={t('dataset.snapshots.search.placeholder')}
               autoComplete="off"
               testId="dataset.snapshots.search.input"
@@ -428,30 +431,26 @@ export function DatasetSnapshotsPage() {
                       >
                         {t('common.download')}
                       </ActionButton>
-                      {isAdmin ? (
-                        <>
-                          <ActionButton
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => openConfirm({ kind: 'rollback', snapshot: s })}
-                            disabled={!rollbackGate.allowed}
-                            disabledReason={!rollbackGate.allowed ? rollbackGate.reason : undefined}
-                            testId={`dataset.snapshots.card.${s.id}.rollback`}
-                          >
-                            {t('common.rollback')}
-                          </ActionButton>
-                          <ActionButton
-                            size="sm"
-                            variant="danger"
-                            onClick={() => openConfirm({ kind: 'delete', snapshot: s })}
-                            disabled={!deleteGate.allowed}
-                            disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
-                            testId={`dataset.snapshots.card.${s.id}.delete`}
-                          >
-                            {t('common.delete')}
-                          </ActionButton>
-                        </>
-                      ) : null}
+                      <ActionButton
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => openConfirm({ kind: 'rollback', snapshot: s })}
+                        disabled={!rollbackGate.allowed}
+                        disabledReason={!rollbackGate.allowed ? rollbackGate.reason : undefined}
+                        testId={`dataset.snapshots.card.${s.id}.rollback`}
+                      >
+                        {t('common.rollback')}
+                      </ActionButton>
+                      <ActionButton
+                        size="sm"
+                        variant="danger"
+                        onClick={() => openConfirm({ kind: 'delete', snapshot: s })}
+                        disabled={!deleteGate.allowed}
+                        disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
+                        testId={`dataset.snapshots.card.${s.id}.delete`}
+                      >
+                        {t('common.delete')}
+                      </ActionButton>
                     </div>
                   </div>
                 </Card>
@@ -502,30 +501,26 @@ export function DatasetSnapshotsPage() {
                             >
                               {t('common.download')}
                             </ActionButton>
-                            {isAdmin ? (
-                              <>
-                                <ActionButton
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => openConfirm({ kind: 'rollback', snapshot: s })}
-                                  disabled={!rollbackGate.allowed}
-                                  disabledReason={!rollbackGate.allowed ? rollbackGate.reason : undefined}
-                                  testId={`dataset.snapshots.row.${s.id}.rollback`}
-                                >
-                                  {t('common.rollback')}
-                                </ActionButton>
-                                <ActionButton
-                                  size="sm"
-                                  variant="danger"
-                                  onClick={() => openConfirm({ kind: 'delete', snapshot: s })}
-                                  disabled={!deleteGate.allowed}
-                                  disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
-                                  testId={`dataset.snapshots.row.${s.id}.delete`}
-                                >
-                                  {t('common.delete')}
-                                </ActionButton>
-                              </>
-                            ) : null}
+                            <ActionButton
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => openConfirm({ kind: 'rollback', snapshot: s })}
+                              disabled={!rollbackGate.allowed}
+                              disabledReason={!rollbackGate.allowed ? rollbackGate.reason : undefined}
+                              testId={`dataset.snapshots.row.${s.id}.rollback`}
+                            >
+                              {t('common.rollback')}
+                            </ActionButton>
+                            <ActionButton
+                              size="sm"
+                              variant="danger"
+                              onClick={() => openConfirm({ kind: 'delete', snapshot: s })}
+                              disabled={!deleteGate.allowed}
+                              disabledReason={!deleteGate.allowed ? deleteGate.reason : undefined}
+                              testId={`dataset.snapshots.row.${s.id}.delete`}
+                            >
+                              {t('common.delete')}
+                            </ActionButton>
                             <Badge variant="neutral">#{s.id}</Badge>
                           </div>
                         </td>

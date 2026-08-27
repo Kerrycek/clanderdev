@@ -50,7 +50,7 @@ export const enVps_core = {
   'vps.power.error.task_failed': 'The operation failed (task #{id}). Check Tasks for details.',
   'vps.tabs.overview': 'Overview',
   'vps.tabs.network': 'Network',
-  'vps.tabs.storage': 'Storage',
+  'vps.tabs.storage': 'Storage & backups',
   'vps.tabs.features': 'Features',
   'vps.tabs.maintenance': 'Maintenance',
   'vps.tabs.lifecycle': 'Lifecycle',

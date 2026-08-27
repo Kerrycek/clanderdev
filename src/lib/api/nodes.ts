@@ -98,6 +98,27 @@ export interface NodeEvacuateResult {
   [k: string]: unknown;
 }
 
+export interface NodePool {
+  id: number;
+  node?: { id?: number; name?: string; domain_name?: string } | number;
+  label?: string;
+  name?: string;
+  filesystem?: string;
+  role?: string | number;
+  state?: string | number;
+  scan?: string | number;
+  scan_percent?: number;
+  // Current upstream returns allocation metrics to admins, but omits them from
+  // limited-role output and older deployments may not have them. A device
+  // inventory is not part of the upstream Pool contract at all. Keep these
+  // fields optional so missing data is never mistaken for zero capacity.
+  total_space?: number;
+  used_space?: number;
+  available_space?: number;
+  checked_at?: string;
+  [k: string]: unknown;
+}
+
 // Nodes (admin)
 
 export async function fetchNodes(
@@ -145,6 +166,27 @@ export async function fetchNode(nodeId: number) {
     method: 'GET',
     path: `/nodes/${nodeId}`,
   });
+}
+
+export async function fetchNodePools(nodeId: number, opts?: { limit?: number }) {
+  const params: Record<string, number> = { node: nodeId };
+  if (opts?.limit !== undefined) params['limit'] = opts.limit;
+
+  const res = await haveApiCall<unknown>({
+    method: 'GET',
+    path: '/pools',
+    namespace: 'pool',
+    params,
+  });
+
+  const raw = res.data as unknown;
+  let list: unknown = raw;
+  if (!Array.isArray(raw) && raw && typeof raw === 'object') {
+    const maybePools = (raw as { pools?: unknown }).pools;
+    if (Array.isArray(maybePools)) list = maybePools;
+  }
+
+  return { ...res, data: expectArray<NodePool>(list, `nodes/${nodeId}/pools`) };
 }
 
 export async function setNodeMaintenance(nodeId: number, opts: { lock: boolean; reason?: string }) {

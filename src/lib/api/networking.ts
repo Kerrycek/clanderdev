@@ -1,5 +1,6 @@
 import type { ResourceRef, User, Vps, NetworkInterface } from './app';
 import { expectArray, haveApiCall } from './haveapi';
+import type { IpAddress } from './ipAddresses';
 
 export interface HostIpAddress {
   id: number;
@@ -13,7 +14,7 @@ export interface HostIpAddress {
 
 export interface IpAddressAssignment {
   id: number;
-  ip_address?: ResourceRef & { id?: number; addr?: string; ip_addr?: string };
+  ip_address?: IpAddress | (ResourceRef & { id?: number; addr?: string; ip_addr?: string });
   ip_addr?: string;
   ip_prefix?: number;
   user?: User | ResourceRef;
@@ -150,6 +151,7 @@ export async function fetchIpAddressAssignments(opts?: {
   location?: number;
   network?: number;
   order?: 'newest' | 'oldest';
+  includes?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
@@ -167,14 +169,15 @@ export async function fetchIpAddressAssignments(opts?: {
     path: '/ip_address_assignments',
     namespace: 'ip_address_assignment',
     params,
-    meta: { includes: 'user,vps,assigned_by_chain,unassigned_by_chain,ip_address' },
+    meta: {
+      includes: opts?.includes ?? 'user,vps,assigned_by_chain,unassigned_by_chain,ip_address',
+    },
   });
   return { ...res, data: expectArray<IpAddressAssignment>(res.data, 'ip_address_assignments#index') };
 }
 
 export async function fetchNetworkInterfaceMonitor(opts?: {
   limit?: number;
-  q?: string;
   user?: number;
   environment?: number;
   location?: number;
@@ -182,10 +185,10 @@ export async function fetchNetworkInterfaceMonitor(opts?: {
   vps?: number;
   networkInterface?: number;
   order?: string;
+  includes?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q) params['q'] = opts.q;
   if (opts?.user !== undefined) params['user'] = opts.user;
   if (opts?.environment !== undefined) params['environment'] = opts.environment;
   if (opts?.location !== undefined) params['location'] = opts.location;
@@ -199,7 +202,9 @@ export async function fetchNetworkInterfaceMonitor(opts?: {
     path: '/network_interface_monitors',
     namespace: 'network_interface_monitor',
     params,
-    meta: { includes: 'network_interface,network_interface.vps,network_interface.vps.user,network_interface.vps.node' },
+    meta: {
+      includes: opts?.includes ?? 'network_interface__vps',
+    },
   });
   return { ...res, data: expectArray<NetworkInterfaceMonitorRow>(res.data, 'network_interface_monitors#index') };
 }

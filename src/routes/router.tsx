@@ -6,52 +6,13 @@ import { getRuntimeConfig } from '../app/config';
 import { PublicLayout } from '../components/layout/PublicLayout';
 import { RouteProvidersLayout } from './RouteProvidersLayout';
 import { lazyRoute } from './lazyRoute';
+import * as CoreRoutes from './coreRouteComponents';
+import { securityAdvisoryAdminRoutes } from './securityAdvisoryAdminRoutes';
 
 import { ErrorPage } from '../pages/ErrorPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 import { RootErrorPage } from '../pages/RootErrorPage';
 
-const AppShell = lazyRoute(() => import('../components/layout/AppShell'), 'AppShell');
-const OverviewPage = lazyRoute(() => import('../pages/public/OverviewPage'), 'OverviewPage');
-const OutagesPage = lazyRoute(() => import('../pages/public/OutagesPage'), 'OutagesPage');
-const OutageDetailPage = lazyRoute(() => import('../pages/public/OutageDetailPage'), 'OutageDetailPage');
-const NewsPage = lazyRoute(() => import('../pages/public/NewsPage'), 'NewsPage');
-const SecurityAdvisoriesPage = lazyRoute(
-  () => import('../pages/public/SecurityAdvisoriesPage'),
-  'SecurityAdvisoriesPage',
-);
-const RegistrationCorrectionPage = lazyRoute(() => import('../pages/public/RegistrationCorrectionPage'), 'RegistrationCorrectionPage');
-const DashboardPage = lazyRoute(() => import('../pages/app/DashboardPage'), 'DashboardPage');
-const VpsListPage = lazyRoute(() => import('../pages/app/VpsListPage'), 'VpsListPage');
-const TransactionChainsPage = lazyRoute(() => import('../pages/app/TransactionChainsPage'), 'TransactionChainsPage');
-const TransactionChainDetailPage = lazyRoute(() => import('../pages/app/TransactionChainDetailPage'), 'TransactionChainDetailPage');
-const TransactionsListPage = lazyRoute(() => import('../pages/app/TransactionsListPage'), 'TransactionsListPage');
-const TransactionDetailPage = lazyRoute(() => import('../pages/app/TransactionDetailPage'), 'TransactionDetailPage');
-const ActionStatesPage = lazyRoute(() => import('../pages/app/ActionStatesPage'), 'ActionStatesPage');
-const ActionStateDetailPage = lazyRoute(() => import('../pages/app/ActionStateDetailPage'), 'ActionStateDetailPage');
-const MonitoringEventsPage = lazyRoute(() => import('../pages/app/MonitoringEventsPage'), 'MonitoringEventsPage');
-const IncidentsPage = lazyRoute(() => import('../pages/app/incidents/IncidentsPage'), 'IncidentsPage');
-const IncidentReportDetailPage = lazyRoute(() => import('../pages/app/incidents/IncidentReportDetailPage'), 'IncidentReportDetailPage');
-const IncidentReportNewPage = lazyRoute(() => import('../pages/app/admin/IncidentReportNewPage'), 'IncidentReportNewPage');
-const OomReportsPage = lazyRoute(() => import('../pages/app/oom/OomReportsPage'), 'OomReportsPage');
-const OomReportLayout = lazyRoute(() => import('../pages/app/oom/OomReportLayout'), 'OomReportLayout');
-const OomReportOverviewPage = lazyRoute(() => import('../pages/app/oom/OomReportOverviewPage'), 'OomReportOverviewPage');
-const OomReportStatsPage = lazyRoute(() => import('../pages/app/oom/OomReportStatsPage'), 'OomReportStatsPage');
-const OomReportTasksPage = lazyRoute(() => import('../pages/app/oom/OomReportTasksPage'), 'OomReportTasksPage');
-const OomReportRulesPage = lazyRoute(() => import('../pages/app/oom/OomReportRulesPage'), 'OomReportRulesPage');
-const MonitoringEventDetailPage = lazyRoute(() => import('../pages/app/MonitoringEventDetailPage'), 'MonitoringEventDetailPage');
-const VpsLayout = lazyRoute(() => import('../pages/app/vps/VpsLayout'), 'VpsLayout');
-const VpsCreatePage = lazyRoute(() => import('../pages/app/vps/VpsCreatePage'), 'VpsCreatePage');
-const VpsOverviewPage = lazyRoute(() => import('../pages/app/vps/VpsOverviewPage'), 'VpsOverviewPage');
-const VpsConfigurationPage = lazyRoute(() => import('../pages/app/vps/VpsConfigurationPage'), 'VpsConfigurationPage');
-const VpsAccessPage = lazyRoute(() => import('../pages/app/vps/VpsAccessPage'), 'VpsAccessPage');
-const VpsConsolePage = lazyRoute(() => import('../pages/app/vps/VpsConsolePage'), 'VpsConsolePage');
-const VpsNetworkPage = lazyRoute(() => import('../pages/app/vps/VpsNetworkPage'), 'VpsNetworkPage');
-const UserNetworkPage = lazyRoute(() => import('../pages/app/networking/UserNetworkPage'), 'UserNetworkPage');
-const VpsStoragePage = lazyRoute(() => import('../pages/app/vps/VpsStoragePage'), 'VpsStoragePage');
-const VpsFeaturesPage = lazyRoute(() => import('../pages/app/vps/VpsFeaturesPage'), 'VpsFeaturesPage');
-const VpsMaintenancePage = lazyRoute(() => import('../pages/app/vps/VpsMaintenancePage'), 'VpsMaintenancePage');
-const VpsLifecyclePage = lazyRoute(() => import('../pages/app/vps/VpsLifecyclePage'), 'VpsLifecyclePage');
 const DatasetsListPage = lazyRoute(() => import('../pages/app/datasets/DatasetsListPage'), 'DatasetsListPage');
 const DatasetLayout = lazyRoute(() => import('../pages/app/datasets/DatasetLayout'), 'DatasetLayout');
 const DatasetOverviewPage = lazyRoute(() => import('../pages/app/datasets/DatasetOverviewPage'), 'DatasetOverviewPage');
@@ -61,6 +22,7 @@ const DatasetPlansPage = lazyRoute(() => import('../pages/app/datasets/DatasetPl
 const DatasetExpansionPage = lazyRoute(() => import('../pages/app/datasets/DatasetExpansionPage'), 'DatasetExpansionPage');
 const NasDatasetsPage = lazyRoute(() => import('../pages/app/datasets/NasDatasetsPage'), 'NasDatasetsPage');
 const NasDatasetCreatePage = lazyRoute(() => import('../pages/app/datasets/NasDatasetCreatePage'), 'NasDatasetCreatePage');
+const BackupCenterPage = lazyRoute(() => import('../pages/app/backups/BackupCenterPage'), 'BackupCenterPage');
 const DatasetExportsPage = lazyRoute(() => import('../pages/app/exports/DatasetExportsPage'), 'DatasetExportsPage');
 const ExportsListPage = lazyRoute(() => import('../pages/app/exports/ExportsListPage'), 'ExportsListPage');
 const ExportDetailPage = lazyRoute(() => import('../pages/app/exports/ExportDetailPage'), 'ExportDetailPage');
@@ -72,6 +34,7 @@ const DnsZoneLogsPage = lazyRoute(() => import('../pages/app/dns/DnsZoneLogsPage
 const DnsZoneTransfersPage = lazyRoute(() => import('../pages/app/dns/DnsZoneTransfersPage'), 'DnsZoneTransfersPage');
 const DnsZoneDnssecPage = lazyRoute(() => import('../pages/app/dns/DnsZoneDnssecPage'), 'DnsZoneDnssecPage');
 const DnsZoneServersPage = lazyRoute(() => import('../pages/app/dns/DnsZoneServersPage'), 'DnsZoneServersPage');
+const DnsTsigKeysPage = lazyRoute(() => import('../pages/app/dns/DnsTsigKeysPage'), 'DnsTsigKeysPage');
 const ProfilePage = lazyRoute(() => import('../pages/app/profile/ProfilePage'), 'ProfilePage');
 const ProfileResourcesPage = lazyRoute(() => import('../pages/app/profile/ProfileResourcesPage'), 'ProfileResourcesPage');
 const ProfileMailPage = lazyRoute(() => import('../pages/app/profile/ProfileMailPage'), 'ProfileMailPage');
@@ -119,6 +82,8 @@ const NetworkLivePage = lazyRoute(() => import('../pages/app/admin/networking/Ne
 const NetworkTrafficUsersPage = lazyRoute(() => import('../pages/app/admin/networking/NetworkTrafficUsersPage'), 'NetworkTrafficUsersPage');
 const RequestsPage = lazyRoute(() => import('../pages/app/admin/RequestsPage'), 'RequestsPage');
 const RequestDetailPage = lazyRoute(() => import('../pages/app/admin/RequestDetailPage'), 'RequestDetailPage');
+const MyRequestsPage = lazyRoute(() => import('../pages/app/requests/MyRequestsPage'), 'MyRequestsPage');
+const MyRequestDetailPage = lazyRoute(() => import('../pages/app/requests/MyRequestDetailPage'), 'MyRequestDetailPage');
 const IncomingPaymentsPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentsPage'), 'IncomingPaymentsPage');
 const IncomingPaymentDetailPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentDetailPage'), 'IncomingPaymentDetailPage');
 const MailLogsPage = lazyRoute(() => import('../pages/app/admin/mailer/MailLogsPage'), 'MailLogsPage');
@@ -144,7 +109,7 @@ const ResourcePackageDetailPage = lazyRoute(() => import('../pages/app/admin/clu
 const SystemConfigPage = lazyRoute(() => import('../pages/app/admin/cluster/SystemConfigPage'), 'SystemConfigPage');
 const DnsResolversPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsResolversPage'), 'DnsResolversPage');
 const DnsServersPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsServersPage'), 'DnsServersPage');
-const DnsTsigKeysPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsTsigKeysPage'), 'DnsTsigKeysPage');
+const AdminDnsTsigKeysPage = lazyRoute(() => import('../pages/app/admin/cluster/DnsTsigKeysPage'), 'DnsTsigKeysPage');
 const AdminNewsPage = lazyRoute(() => import('../pages/app/admin/content/AdminNewsPage'), 'AdminNewsPage');
 const AdminHelpBoxesPage = lazyRoute(() => import('../pages/app/admin/content/AdminHelpBoxesPage'), 'AdminHelpBoxesPage');
 const AdminUserNamespacesLayout = lazyRoute(() => import('../pages/app/admin/userNamespaces/AdminUserNamespacesLayout'), 'AdminUserNamespacesLayout');
@@ -183,43 +148,45 @@ export const router = createBrowserRouter([
           element: <PublicLayout />,
           errorElement: <ErrorPage />,
           children: [
-            { index: true, element: <OverviewPage /> },
-            { path: 'outages', element: <OutagesPage /> },
-            { path: 'outages/:outageId', element: <OutageDetailPage /> },
-            { path: 'news', element: <NewsPage /> },
-            { path: 'security-advisories', element: <SecurityAdvisoriesPage /> },
-            { path: 'requests/registrations/:requestId/:token', element: <RegistrationCorrectionPage /> },
+            { index: true, element: <CoreRoutes.OverviewPage /> },
+            { path: 'outages', element: <CoreRoutes.OutagesPage /> },
+            { path: 'outages/:outageId', element: <CoreRoutes.OutageDetailPage /> },
+            { path: 'news', element: <CoreRoutes.NewsPage /> },
+            { path: 'security-advisories', element: <CoreRoutes.SecurityAdvisoriesPage /> },
+            { path: 'security-advisories/:advisoryId', element: <CoreRoutes.SecurityAdvisoryDetailPage /> },
+            { path: 'requests/registrations/:requestId/:token', element: <CoreRoutes.RegistrationCorrectionPage /> },
             { path: '*', element: <NotFoundPage /> },
             // The old webui has a useful index page. We keep public status pages accessible.
           ],
         },
         {
           path: '/app',
-          element: <AppShell mode="user" />,
+          element: <CoreRoutes.AppShell mode="user" />,
           errorElement: <ErrorPage />,
           children: [
-            { index: true, element: <DashboardPage /> },
-            { path: 'vps', element: <VpsListPage /> },
-            { path: 'vps/new', element: <VpsCreatePage /> },
+            { index: true, element: <CoreRoutes.DashboardPage /> },
+            { path: 'vps', element: <CoreRoutes.VpsListPage /> },
+            { path: 'vps/new', element: <CoreRoutes.VpsCreatePage /> },
             {
               path: 'vps/:vpsId',
-              element: <VpsLayout />,
+              element: <CoreRoutes.VpsLayout />,
               children: [
-                { index: true, element: <VpsOverviewPage /> },
-                { path: 'config', element: <VpsConfigurationPage /> },
-                { path: 'access', element: <VpsAccessPage /> },
-                { path: 'network', element: <VpsNetworkPage /> },
-                { path: 'storage', element: <VpsStoragePage /> },
-                { path: 'features', element: <VpsFeaturesPage /> },
-                { path: 'maintenance', element: <VpsMaintenancePage /> },
-                { path: 'lifecycle', element: <VpsLifecyclePage /> },
-                { path: 'lifecycle/:lifecycleAction', element: <VpsLifecyclePage /> },
-                { path: 'console', element: <VpsConsolePage /> },
+                { index: true, element: <CoreRoutes.VpsOverviewPage /> },
+                { path: 'config', element: <CoreRoutes.VpsConfigurationPage /> },
+                { path: 'access', element: <CoreRoutes.VpsAccessPage /> },
+                { path: 'network', element: <CoreRoutes.VpsNetworkPage /> },
+                { path: 'storage', element: <CoreRoutes.VpsStoragePage /> },
+                { path: 'features', element: <CoreRoutes.VpsFeaturesPage /> },
+                { path: 'maintenance', element: <CoreRoutes.VpsMaintenancePage /> },
+                { path: 'lifecycle', element: <CoreRoutes.VpsLifecyclePage /> },
+                { path: 'lifecycle/:lifecycleAction', element: <CoreRoutes.VpsLifecyclePage /> },
+                { path: 'console', element: <CoreRoutes.VpsConsolePage /> },
               ],
             },
             { path: 'datasets', element: <DatasetsListPage /> },
             { path: 'nas', element: <NasDatasetsPage /> },
             { path: 'nas/new', element: <NasDatasetCreatePage /> },
+            { path: 'backups', element: <BackupCenterPage /> },
             { path: 'exports', element: <ExportsListPage /> },
             { path: 'exports/:exportId', element: <ExportDetailPage /> },
             {
@@ -247,7 +214,8 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'dns', element: <DnsZonesPage /> },
-            { path: 'networking', element: <UserNetworkPage /> },
+            { path: 'dns/tsig-keys', element: <DnsTsigKeysPage /> },
+            { path: 'networking', element: <CoreRoutes.UserNetworkPage /> },
             {
               path: 'dns/zones/:zoneId',
               element: <DnsZoneLayout />,
@@ -260,32 +228,33 @@ export const router = createBrowserRouter([
                 { path: 'logs', element: <DnsZoneLogsPage /> },
               ],
             },
-            { path: 'transactions', element: <TransactionChainsPage /> },
-            { path: 'transactions/items', element: <TransactionsListPage /> },
-            { path: 'transactions/items/:transactionId', element: <TransactionDetailPage /> },
-            { path: 'transactions/:chainId', element: <TransactionChainDetailPage /> },
-            { path: 'action-states', element: <ActionStatesPage /> },
-            { path: 'action-states/:actionStateId', element: <ActionStateDetailPage /> },
+            { path: 'transactions', element: <CoreRoutes.TransactionChainsPage /> },
+            { path: 'transactions/items', element: <CoreRoutes.TransactionsListPage /> },
+            { path: 'transactions/items/:transactionId', element: <CoreRoutes.TransactionDetailPage /> },
+            { path: 'transactions/:chainId', element: <CoreRoutes.TransactionChainDetailPage /> },
+            { path: 'action-states', element: <CoreRoutes.ActionStatesPage /> },
+            { path: 'action-states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
             { path: 'action_states', element: <Navigate to="../action-states" replace /> },
-            { path: 'action_states/:actionStateId', element: <ActionStateDetailPage /> },
-            { path: 'monitoring', element: <MonitoringEventsPage /> },
-            { path: 'monitoring/:eventId', element: <MonitoringEventDetailPage /> },
-            { path: 'incidents', element: <IncidentsPage /> },
-            { path: 'incidents/:incidentId', element: <IncidentReportDetailPage /> },
-            { path: 'oom-reports', element: <OomReportsPage /> },
-            { path: 'oom-reports/rules/:vpsId', element: <OomReportRulesPage /> },
+            { path: 'action_states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'monitoring', element: <CoreRoutes.MonitoringEventsPage /> },
+            { path: 'monitoring/:eventId', element: <CoreRoutes.MonitoringEventDetailPage /> },
+            { path: 'incidents', element: <CoreRoutes.IncidentsPage /> },
+            { path: 'incidents/new', element: <CoreRoutes.IncidentReportNewPage /> },
+            { path: 'incidents/:incidentId', element: <CoreRoutes.IncidentReportDetailPage /> },
+            { path: 'oom-reports', element: <CoreRoutes.OomReportsPage /> },
+            { path: 'oom-reports/rules/:vpsId', element: <CoreRoutes.OomReportRulesPage /> },
             {
               path: 'oom-reports/:oomReportId',
-              element: <OomReportLayout />,
+              element: <CoreRoutes.OomReportLayout />,
               children: [
-                { index: true, element: <OomReportOverviewPage /> },
-                { path: 'stats', element: <OomReportStatsPage /> },
-                { path: 'tasks', element: <OomReportTasksPage /> },
+                { index: true, element: <CoreRoutes.OomReportOverviewPage /> },
+                { path: 'stats', element: <CoreRoutes.OomReportStatsPage /> },
+                { path: 'tasks', element: <CoreRoutes.OomReportTasksPage /> },
               ],
             },
             { path: 'payments', element: <PaymentsPage /> },
-            { path: 'requests', element: <RequestsPage /> },
-            { path: 'requests/:type/:requestId', element: <RequestDetailPage /> },
+            { path: 'requests', element: <MyRequestsPage /> },
+            { path: 'requests/:type/:requestId', element: <MyRequestDetailPage /> },
             { path: 'profile', element: <ProfilePage /> },
             { path: 'profile/resources', element: <ProfileResourcesPage /> },
             { path: 'profile/security', element: <ProfileSecurityPage /> },
@@ -312,12 +281,13 @@ export const router = createBrowserRouter([
         },
         {
           path: '/admin',
-          element: <AppShell mode="admin" />,
+          element: <CoreRoutes.AppShell mode="admin" />,
           errorElement: <ErrorPage />,
           children: [
-            { index: true, element: <DashboardPage /> },
+            { index: true, element: <CoreRoutes.DashboardPage /> },
             { path: 'outages', element: <AdminOutagesPage /> },
             { path: 'outages/:outageId', element: <AdminOutagesPage /> },
+            ...securityAdvisoryAdminRoutes,
             { path: 'nodes', element: <NodesPage /> },
             { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
             { path: 'migration-plans', element: <MigrationPlansPage /> },
@@ -350,7 +320,7 @@ export const router = createBrowserRouter([
                 { path: 'system-config', element: <SystemConfigPage /> },
                 { path: 'dns-resolvers', element: <DnsResolversPage /> },
                 { path: 'dns-servers', element: <DnsServersPage /> },
-                { path: 'dns-tsig-keys', element: <DnsTsigKeysPage /> },
+                { path: 'dns-tsig-keys', element: <AdminDnsTsigKeysPage /> },
               ],
             },
             { path: 'users', element: <UsersPage /> },
@@ -388,22 +358,22 @@ export const router = createBrowserRouter([
             },
             { path: 'ip-addresses', element: <IpAddressesPage /> },
             { path: 'ip-addresses/:ipAddressId', element: <IpAddressDetailPage /> },
-            { path: 'vps', element: <VpsListPage /> },
-            { path: 'vps/new', element: <VpsCreatePage /> },
+            { path: 'vps', element: <CoreRoutes.VpsListPage /> },
+            { path: 'vps/new', element: <CoreRoutes.VpsCreatePage /> },
             {
               path: 'vps/:vpsId',
-              element: <VpsLayout />,
+              element: <CoreRoutes.VpsLayout />,
               children: [
-                { index: true, element: <VpsOverviewPage /> },
-                { path: 'config', element: <VpsConfigurationPage /> },
-                { path: 'access', element: <VpsAccessPage /> },
-                { path: 'network', element: <VpsNetworkPage /> },
-                { path: 'storage', element: <VpsStoragePage /> },
-                { path: 'features', element: <VpsFeaturesPage /> },
-                { path: 'maintenance', element: <VpsMaintenancePage /> },
-                { path: 'lifecycle', element: <VpsLifecyclePage /> },
-                { path: 'lifecycle/:lifecycleAction', element: <VpsLifecyclePage /> },
-                { path: 'console', element: <VpsConsolePage /> },
+                { index: true, element: <CoreRoutes.VpsOverviewPage /> },
+                { path: 'config', element: <CoreRoutes.VpsConfigurationPage /> },
+                { path: 'access', element: <CoreRoutes.VpsAccessPage /> },
+                { path: 'network', element: <CoreRoutes.VpsNetworkPage /> },
+                { path: 'storage', element: <CoreRoutes.VpsStoragePage /> },
+                { path: 'features', element: <CoreRoutes.VpsFeaturesPage /> },
+                { path: 'maintenance', element: <CoreRoutes.VpsMaintenancePage /> },
+                { path: 'lifecycle', element: <CoreRoutes.VpsLifecyclePage /> },
+                { path: 'lifecycle/:lifecycleAction', element: <CoreRoutes.VpsLifecyclePage /> },
+                { path: 'console', element: <CoreRoutes.VpsConsolePage /> },
               ],
             },
             { path: 'datasets', element: <DatasetsListPage /> },
@@ -436,7 +406,7 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'dns', element: <DnsZonesPage /> },
-            { path: 'dns/tsig-keys', element: <DnsTsigKeysPage /> },
+            { path: 'dns/tsig-keys', element: <AdminDnsTsigKeysPage /> },
             {
               path: 'dns/zones/:zoneId',
               element: <DnsZoneLayout />,
@@ -449,28 +419,28 @@ export const router = createBrowserRouter([
                 { path: 'logs', element: <DnsZoneLogsPage /> },
               ],
             },
-            { path: 'transactions', element: <TransactionChainsPage /> },
-            { path: 'transactions/items', element: <TransactionsListPage /> },
-            { path: 'transactions/items/:transactionId', element: <TransactionDetailPage /> },
-            { path: 'transactions/:chainId', element: <TransactionChainDetailPage /> },
-            { path: 'action-states', element: <ActionStatesPage /> },
-            { path: 'action-states/:actionStateId', element: <ActionStateDetailPage /> },
+            { path: 'transactions', element: <CoreRoutes.TransactionChainsPage /> },
+            { path: 'transactions/items', element: <CoreRoutes.TransactionsListPage /> },
+            { path: 'transactions/items/:transactionId', element: <CoreRoutes.TransactionDetailPage /> },
+            { path: 'transactions/:chainId', element: <CoreRoutes.TransactionChainDetailPage /> },
+            { path: 'action-states', element: <CoreRoutes.ActionStatesPage /> },
+            { path: 'action-states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
             { path: 'action_states', element: <Navigate to="../action-states" replace /> },
-            { path: 'action_states/:actionStateId', element: <ActionStateDetailPage /> },
-            { path: 'monitoring', element: <MonitoringEventsPage /> },
-            { path: 'monitoring/:eventId', element: <MonitoringEventDetailPage /> },
-            { path: 'incidents', element: <IncidentsPage /> },
-            { path: 'incidents/new', element: <IncidentReportNewPage /> },
-            { path: 'incidents/:incidentId', element: <IncidentReportDetailPage /> },
-            { path: 'oom-reports', element: <OomReportsPage /> },
-            { path: 'oom-reports/rules/:vpsId', element: <OomReportRulesPage /> },
+            { path: 'action_states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'monitoring', element: <CoreRoutes.MonitoringEventsPage /> },
+            { path: 'monitoring/:eventId', element: <CoreRoutes.MonitoringEventDetailPage /> },
+            { path: 'incidents', element: <CoreRoutes.IncidentsPage /> },
+            { path: 'incidents/new', element: <CoreRoutes.IncidentReportNewPage /> },
+            { path: 'incidents/:incidentId', element: <CoreRoutes.IncidentReportDetailPage /> },
+            { path: 'oom-reports', element: <CoreRoutes.OomReportsPage /> },
+            { path: 'oom-reports/rules/:vpsId', element: <CoreRoutes.OomReportRulesPage /> },
             {
               path: 'oom-reports/:oomReportId',
-              element: <OomReportLayout />,
+              element: <CoreRoutes.OomReportLayout />,
               children: [
-                { index: true, element: <OomReportOverviewPage /> },
-                { path: 'stats', element: <OomReportStatsPage /> },
-                { path: 'tasks', element: <OomReportTasksPage /> },
+                { index: true, element: <CoreRoutes.OomReportOverviewPage /> },
+                { path: 'stats', element: <CoreRoutes.OomReportStatsPage /> },
+                { path: 'tasks', element: <CoreRoutes.OomReportTasksPage /> },
               ],
             },
             { path: 'mailer/templates', element: <MailTemplatesPage /> },

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { createExport, fetchExports } from './exports';
+import { createExport, fetchExports, fetchHostIpAddresses } from './exports';
 
 function setMockRuntime() {
   window.vpsAdmin = {
@@ -79,5 +79,31 @@ describe('exports API wrappers', () => {
         rw: true,
       },
     });
+  });
+
+  test('fetchHostIpAddresses sends real transfer eligibility filters without unsupported search params', async () => {
+    setMockRuntime();
+    const fetchMock = mockFetchOk({
+      host_ip_addresses: [{ id: 11, addr: '203.0.113.10' }],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchHostIpAddresses({
+      limit: 100,
+      user: 55,
+      purpose: 'vps',
+      routed: true,
+    });
+
+    const [url] = firstFetchCall(fetchMock);
+    const u = new URL(String(url));
+
+    expect(u.pathname).toBe('/v7.0/host_ip_addresses');
+    expect(u.searchParams.get('host_ip_address[limit]')).toBe('100');
+    expect(u.searchParams.get('host_ip_address[user]')).toBe('55');
+    expect(u.searchParams.get('host_ip_address[purpose]')).toBe('vps');
+    expect(u.searchParams.get('host_ip_address[routed]')).toBe('true');
+    expect(u.searchParams.has('host_ip_address[q]')).toBe(false);
+    expect(u.searchParams.has('host_ip_address[assigned]')).toBe(false);
   });
 });

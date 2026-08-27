@@ -12,6 +12,7 @@ import type { GateDecision } from '../../../lib/gates/types';
 import { hostAddr, hostAssigned, hostPtrState, hostPtrValue, hostRouteLabel } from './VpsNetworkModel';
 
 export function VpsNetworkHostAddressesCard(props: {
+  canMutate: boolean;
   gate: GateDecision;
   isLoading: boolean;
   errorMessage: string | null;
@@ -96,7 +97,7 @@ export function VpsNetworkHostAddressesCard(props: {
                           </div>
                         </div>
 
-                        <div className="flex flex-wrap justify-end gap-2">
+                        {props.canMutate ? <div className="flex flex-wrap justify-end gap-2">
                           <ActionButton
                             variant="secondary"
                             size="sm"
@@ -119,7 +120,7 @@ export function VpsNetworkHostAddressesCard(props: {
                           >
                             {t('vps.network.host_addresses.action.free')}
                           </ActionButton>
-                        </div>
+                        </div> : null}
                       </div>
                     </div>
                   );
@@ -144,7 +145,7 @@ export function VpsNetworkHostAddressesCard(props: {
                             {t('vps.network.host_addresses.field.route')}: <span className="font-mono">{hostRouteLabel(row)}</span>
                           </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        {props.canMutate ? <div className="flex flex-wrap gap-2">
                           <ActionButton
                             variant="primary"
                             size="sm"
@@ -169,7 +170,7 @@ export function VpsNetworkHostAddressesCard(props: {
                               {t('common.delete')}
                             </ActionButton>
                           ) : null}
-                        </div>
+                        </div> : null}
                       </div>
                     );
                   })}

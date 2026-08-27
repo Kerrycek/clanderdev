@@ -3,15 +3,29 @@
  * Responsibilities:
  * - Perform OAuth2 authorization-code exchange server-side (keeps client_secret secret).
  * - Store per-user access/refresh tokens in a server-side session.
- * - Expose /config.js for the SPA to read runtime config and access token.
+ * - Expose public runtime config and same-origin session JSON to the SPA.
  *
  * This service does NOT proxy HaveAPI calls. The SPA calls https://api.vpsfree.cz directly.
  */
 
-const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const FileStoreFactory = require('session-file-store');
+const {
+  consumeOAuthState,
+  createFixedWindowRateLimiter,
+  createOAuthState,
+  clearSessionCookie,
+  destroySession,
+  fetchLimitedResponseText,
+  isSameOriginRequest,
+  regenerateSession,
+  sanitizeNext,
+  saveSession,
+  setRuntimeConfigSecurityHeaders,
+  setRuntimeSessionSecurityHeaders,
+  validateOAuthTokenResponse,
+} = require('./security');
 
 const FileStore = FileStoreFactory(session);
 
@@ -57,41 +71,43 @@ const REFRESH_SKEW_MS = parseInt(process.env.REFRESH_SKEW_MS || '60000', 10); //
 // Session lifetime
 const SESSION_MAX_AGE_MS = parseInt(process.env.SESSION_MAX_AGE_MS || String(30 * 24 * 60 * 60 * 1000), 10); // 30d
 
-// ---- Helpers ----
-function randomState() {
-  return crypto.randomBytes(24).toString('base64url');
-}
+// OAuth authorization responses must be completed shortly after login starts.
+const OAUTH_STATE_MAX_AGE_MS = parseInt(process.env.OAUTH_STATE_MAX_AGE_MS || String(10 * 60 * 1000), 10); // 10m
 
-function sanitizeNext(next) {
-  if (!next || typeof next !== 'string') return '/app';
+// Pre-auth sessions contain no useful long-lived state. Keeping them short and
+// rate-limiting login starts prevents anonymous requests from filling the
+// file-backed session store.
+const PREAUTH_SESSION_MAX_AGE_MS = parseInt(
+  process.env.PREAUTH_SESSION_MAX_AGE_MS || String(10 * 60 * 1000),
+  10,
+);
+const LOGIN_RATE_LIMIT_WINDOW_MS = parseInt(
+  process.env.LOGIN_RATE_LIMIT_WINDOW_MS || String(10 * 60 * 1000),
+  10,
+);
+const LOGIN_RATE_LIMIT_MAX = parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '20', 10);
 
-  // Only allow same-origin *paths* to avoid open redirects
-  try {
-    const u = new URL(next, 'http://local.invalid');
-    const path = `${u.pathname}${u.search}${u.hash}`;
-    if (!path.startsWith('/')) return '/app';
-    // avoid protocol-relative weirdness
-    if (path.startsWith('//')) return '/app';
-    if (u.searchParams.get('session') === 'expired') return '/app';
-    return path;
-  } catch {
-    return '/app';
-  }
-}
+const OAUTH_FETCH_TIMEOUT_MS = parseInt(process.env.OAUTH_FETCH_TIMEOUT_MS || '10000', 10);
+const OAUTH_RESPONSE_MAX_BYTES = parseInt(process.env.OAUTH_RESPONSE_MAX_BYTES || String(64 * 1024), 10);
 
 async function oauthTokenRequest(params) {
   const body = new URLSearchParams(params);
 
-  const res = await fetch(OAUTH_TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      accept: 'application/json',
+  const { response: res, text } = await fetchLimitedResponseText(
+    OAUTH_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+      },
+      body,
     },
-    body,
-  });
-
-  const text = await res.text();
+    {
+      timeoutMs: OAUTH_FETCH_TIMEOUT_MS,
+      maxBytes: OAUTH_RESPONSE_MAX_BYTES,
+    },
+  );
   let data;
   try {
     data = JSON.parse(text);
@@ -109,7 +125,7 @@ async function oauthTokenRequest(params) {
     throw err;
   }
 
-  return data;
+  return validateOAuthTokenResponse(data);
 }
 
 async function oauthRevokeToken(token) {
@@ -123,14 +139,21 @@ async function oauthRevokeToken(token) {
       client_secret: OAUTH_CLIENT_SECRET,
     });
 
-    await fetch(OAUTH_REVOKE_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        accept: 'application/json',
+    await fetchLimitedResponseText(
+      OAUTH_REVOKE_URL,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          accept: 'application/json',
+        },
+        body,
       },
-      body,
-    });
+      {
+        timeoutMs: OAUTH_FETCH_TIMEOUT_MS,
+        maxBytes: OAUTH_RESPONSE_MAX_BYTES,
+      },
+    );
   } catch {
     // best-effort
   }
@@ -197,6 +220,7 @@ async function ensureFreshToken(req) {
 
 // ---- App ----
 const app = express();
+app.disable('x-powered-by');
 
 // We're behind nginx, so trust X-Forwarded-* for secure cookies & redirect building if needed
 app.set('trust proxy', 1);
@@ -229,19 +253,14 @@ app.get('/healthz', (_req, res) => {
 });
 
 // config bootstrap for SPA
-app.get('/config.js', async (req, res) => {
-  const oauth = await ensureFreshToken(req);
-
+app.get('/config.js', (_req, res) => {
   // Always set login/logout URLs so the SPA doesn't fall back to legacy /?page=login
   const cfg = {
     api: { url: API_URL, version: API_VERSION },
-    accessToken: oauth?.access_token || null,
-    sessionToken: null,
     webuiNext: {
       loginUrl: '/oauth/login',
       logoutUrl: '/oauth/logout',
       basePath: '',
-      sessionExpiresAt: oauth?.access_token ? currentSessionExpiresAt(req) : null,
       haveApi: {
         authHeader: HAVEAPI_AUTH_HEADER,
         metaNamespace: HAVEAPI_META_NAMESPACE,
@@ -252,31 +271,52 @@ app.get('/config.js', async (req, res) => {
   const js = [
     'window.vpsAdmin = window.vpsAdmin || {};',
     `window.vpsAdmin.api = ${JSON.stringify(cfg.api)};`,
-    `window.vpsAdmin.accessToken = ${cfg.accessToken ? JSON.stringify(cfg.accessToken) : 'undefined'};`,
-    `window.vpsAdmin.sessionToken = undefined;`,
     'window.vpsAdmin.webuiNext = window.vpsAdmin.webuiNext || {};',
     `Object.assign(window.vpsAdmin.webuiNext, ${JSON.stringify(cfg.webuiNext)});`,
   ].join('\n');
 
-  res.setHeader('content-type', 'application/javascript; charset=utf-8');
-  res.setHeader('cache-control', 'no-store');
+  setRuntimeConfigSecurityHeaders(res);
   res.send(js);
 });
 
+// Same-origin JSON is deliberately separate from executable runtime config.
+// This prevents a sibling origin from stealing the token with a script tag.
+app.get('/session.json', async (req, res) => {
+  const webOrigin = new URL(OAUTH_REDIRECT_URI).origin;
+  if (!isSameOriginRequest(req, webOrigin)) {
+    setRuntimeSessionSecurityHeaders(res);
+    return res.status(403).send(JSON.stringify({ error: 'same_origin_required' }));
+  }
+
+  const oauth = await ensureFreshToken(req);
+  setRuntimeSessionSecurityHeaders(res);
+  return res.send(JSON.stringify({
+    accessToken: oauth?.access_token || null,
+    sessionExpiresAt: oauth?.access_token ? currentSessionExpiresAt(req) : null,
+  }));
+});
+
 // start login
-app.get('/oauth/login', (req, res) => {
+const loginRateLimit = createFixedWindowRateLimiter({
+  windowMs: LOGIN_RATE_LIMIT_WINDOW_MS,
+  max: LOGIN_RATE_LIMIT_MAX,
+});
+
+app.get('/oauth/login', loginRateLimit, (req, res) => {
   const nextPath = sanitizeNext(req.query.next);
   req.session.next = nextPath;
+  req.session.cookie.maxAge = PREAUTH_SESSION_MAX_AGE_MS;
 
-  const state = randomState();
-  req.session.oauth_state = state;
+  const state = createOAuthState();
+  req.session.oauth_state = state.value;
+  req.session.oauth_state_issued_at = state.issuedAt;
 
   const u = new URL(OAUTH_AUTHORIZE_URL);
   u.searchParams.set('client_id', OAUTH_CLIENT_ID);
   u.searchParams.set('redirect_uri', OAUTH_REDIRECT_URI);
   u.searchParams.set('response_type', 'code');
   u.searchParams.set('scope', OAUTH_SCOPE);
-  u.searchParams.set('state', state);
+  u.searchParams.set('state', state.value);
   if (OAUTH_TYPE) u.searchParams.set('type', OAUTH_TYPE);
 
   res.redirect(u.toString());
@@ -303,14 +343,18 @@ app.get('/oauth/callback', async (req, res) => {
     return res.status(400).type('text/html').send('<h1>Missing code</h1>');
   }
 
-  if (!state || state !== req.session.oauth_state) {
+  const nextPath = sanitizeNext(req.session.next);
+  req.session.next = undefined;
+
+  if (!consumeOAuthState(req.session, state, { maxAgeMs: OAUTH_STATE_MAX_AGE_MS })) {
     return res.status(400).type('text/html').send('<h1>Invalid state</h1>');
   }
 
-  // clear state
-  req.session.oauth_state = undefined;
-
   try {
+    // Persist state consumption before contacting the provider so a callback
+    // cannot be replayed concurrently with the same authorization response.
+    await saveSession(req);
+
     const data = await oauthTokenRequest({
       grant_type: 'authorization_code',
       code,
@@ -318,6 +362,10 @@ app.get('/oauth/callback', async (req, res) => {
       client_id: OAUTH_CLIENT_ID,
       client_secret: OAUTH_CLIENT_SECRET,
     });
+
+    // Rotate the session id after authentication to prevent session fixation.
+    await regenerateSession(req);
+    req.session.cookie.maxAge = SESSION_MAX_AGE_MS;
 
     req.session.oauth = {
       access_token: data.access_token,
@@ -328,31 +376,47 @@ app.get('/oauth/callback', async (req, res) => {
       expires_at: computeExpiresAt(data.expires_in),
     };
 
-    const nextPath = req.session.next || '/app';
-    req.session.next = undefined;
-
     res.redirect(nextPath);
   } catch (e) {
-    const msg = e && typeof e.message === 'string' ? e.message : 'Token exchange failed';
-    res.status(500).type('text/html').send(`<h1>OAuth token exchange failed</h1><pre>${escapeHtml(msg)}</pre>`);
+    const status = e && Number.isInteger(e.status) ? e.status : undefined;
+    console.error('[webui-next-bff] OAuth callback failed', { status });
+    res.status(500).type('text/html').send('<h1>OAuth token exchange failed</h1><p>Please try signing in again.</p>');
   }
 });
 
 // logout
 app.get('/oauth/logout', async (req, res) => {
+  const webOrigin = new URL(OAUTH_REDIRECT_URI).origin;
+  if (!isSameOriginRequest(req, webOrigin)) {
+    res.setHeader('cache-control', 'no-store');
+    return res.status(403).type('text/plain').send('Same-origin request required.');
+  }
+
   const nextPath = sanitizeNext(req.query.next) || '/';
 
   const oauth = req.session.oauth;
   const access = oauth?.access_token;
   const refresh = oauth?.refresh_token;
 
-  // destroy session first (to clear cookies) then revoke best-effort
-  req.session.destroy(async () => {
-    // revoke best-effort in background-ish
-    await oauthRevokeToken(access);
-    await oauthRevokeToken(refresh);
-    res.redirect(nextPath || '/');
-  });
+  let destroyError;
+  try {
+    await destroySession(req);
+  } catch (error) {
+    destroyError = error;
+  }
+
+  // Always expire the browser cookie, even if the backing store could not
+  // remove its server-side record. Revocation remains bounded and best-effort.
+  clearSessionCookie(res, SESSION_COOKIE_NAME);
+  res.setHeader('cache-control', 'no-store');
+  await Promise.all([oauthRevokeToken(access), oauthRevokeToken(refresh)]);
+
+  if (destroyError) {
+    console.error('[webui-next-bff] Session destruction failed during logout');
+    return res.status(500).type('text/plain').send('Logout failed. Please try again.');
+  }
+
+  return res.redirect(nextPath || '/');
 });
 
 function escapeHtml(s) {
