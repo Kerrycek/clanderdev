@@ -83,6 +83,34 @@ describe('requests API wrappers', () => {
     expect(u.searchParams.has('change[client_ip_addr]')).toBe(false);
   });
 
+  test('fetchMyChangeRequests explicitly owner-filters a privileged self view', async () => {
+    globalThis.fetch = mockFetchOk({ changes: [] });
+
+    await fetchMyChangeRequests(7, {
+      limit: 25,
+      count: true,
+      explicitOwnerFilter: true,
+    });
+
+    const [url] = lastFetchCall();
+    const u = new URL(url);
+    expect(u.searchParams.get('change[user]')).toBe('7');
+  });
+
+  test('fetchMyRegistrationRequests explicitly owner-filters a privileged self view', async () => {
+    globalThis.fetch = mockFetchOk({ registrations: [] });
+
+    await fetchMyRegistrationRequests(7, {
+      limit: 25,
+      count: true,
+      explicitOwnerFilter: true,
+    });
+
+    const [url] = lastFetchCall();
+    const u = new URL(url);
+    expect(u.searchParams.get('registration[user]')).toBe('7');
+  });
+
   test('owner-safe list and detail wrappers fail closed on foreign data', async () => {
     globalThis.fetch = mockFetchOk({
       registrations: [{ id: 11, user: { id: 99 }, email: 'private@example.test' }],

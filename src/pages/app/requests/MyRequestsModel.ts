@@ -151,6 +151,7 @@ function consumedCursor(
 export async function fetchMyRequestsPage(
   options: {
     userId: number;
+    isAdminAccount: boolean;
     type: MyRequestsType;
     state?: string;
     limit: number;
@@ -172,6 +173,7 @@ export async function fetchMyRequestsPage(
     fromId: fromId ?? undefined,
     state: options.state,
     count: true,
+    explicitOwnerFilter: options.isAdminAccount,
   });
 
   const [registrationPage, changePage] = await Promise.all([
