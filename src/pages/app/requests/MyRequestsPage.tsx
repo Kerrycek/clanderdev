@@ -79,6 +79,7 @@ export function MyRequestsPage() {
 
   const pageQ = useQuery({
     queryKey: ['user_request', 'mine', userId, 'page', {
+      isAdminAccount: auth.role === 'admin',
       type,
       state,
       limit: pagination.limit,
@@ -87,6 +88,7 @@ export function MyRequestsPage() {
     enabled: Boolean(userId),
     queryFn: async () => fetchMyRequestsPage({
       userId: userId as number,
+      isAdminAccount: auth.role === 'admin',
       type,
       state: state || undefined,
       limit: pagination.limit,

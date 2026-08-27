@@ -139,6 +139,53 @@ test('@workflow-matrix @smoke user requests: lists and opens only the signed-in 
   await expect(page.getByRole('button', { name: /resolve|approve|deny/i })).toHaveCount(0);
 });
 
+test('@smoke user requests: admin self view explicitly scopes both indexes and renders an empty state', async ({ page }) => {
+  const indexUrls: URL[] = [];
+
+  await setUiSettingsLocalStorage(page, { language: 'cs' });
+  await bootstrapVpsAdminWindow(page);
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'KerryCZE', level: 90 },
+    handlers: {
+      'GET user_request/registrations': ({ url }) => {
+        const requestUrl = new URL(url);
+        indexUrls.push(requestUrl);
+        return requestUrl.searchParams.get('registration[user]') === '1'
+          ? { registrations: [], _meta: { total_count: 0 } }
+          : {
+              registrations: [{ id: 90, user: { id: 99 }, login: 'foreign-user' }],
+              _meta: { total_count: 1 },
+            };
+      },
+      'GET user_request/changes': ({ url }) => {
+        const requestUrl = new URL(url);
+        indexUrls.push(requestUrl);
+        return requestUrl.searchParams.get('change[user]') === '1'
+          ? { changes: [], _meta: { total_count: 0 } }
+          : {
+              changes: [{ id: 91, user: { id: 99 }, change_reason: 'FOREIGN REQUEST' }],
+              _meta: { total_count: 1 },
+            };
+      },
+    },
+  });
+
+  await page.goto('/app/requests');
+
+  await expect(page.getByTestId('app.requests.empty')).toBeVisible();
+  await expect(page.getByTestId('app.requests.error')).toHaveCount(0);
+  await expect(page.getByText('FOREIGN REQUEST')).toHaveCount(0);
+  expect(indexUrls).toHaveLength(2);
+
+  const emptyScreenshot = process.env.E2E_USER_REQUESTS_EMPTY_SCREENSHOT?.trim();
+  if (emptyScreenshot) await page.screenshot({ path: emptyScreenshot, fullPage: true });
+
+  const registrationsUrl = indexUrls.find((url) => url.pathname.endsWith('/registrations'));
+  const changesUrl = indexUrls.find((url) => url.pathname.endsWith('/changes'));
+  expect(registrationsUrl?.searchParams.get('registration[user]')).toBe('1');
+  expect(changesUrl?.searchParams.get('change[user]')).toBe('1');
+});
+
 test('@workflow-matrix user requests: foreign or ownerless API data fails closed without leaking fields', async ({ page }) => {
   await setUiSettingsLocalStorage(page, { language: 'cs' });
   await bootstrapVpsAdminWindow(page);

@@ -106,6 +106,12 @@ export interface MyRequestListOptions {
   fromId?: number;
   state?: string;
   count?: boolean;
+  /**
+   * Admins are not owner-scoped by the API. In the self-service view, add an
+   * explicit user filter so privileged accounts do not download other users'
+   * requests before the fail-closed ownership check runs.
+   */
+  explicitOwnerFilter?: boolean;
 }
 
 export class UserRequestOwnershipError extends Error {
@@ -213,7 +219,12 @@ export async function fetchMyRegistrationRequests(
   expectedUserId: number,
   opts?: MyRequestListOptions,
 ) {
-  const res = await fetchRegistrationRequests({ ...opts, count: opts?.count });
+  const { explicitOwnerFilter = false, ...listOptions } = opts ?? {};
+  const res = await fetchRegistrationRequests({
+    ...listOptions,
+    userId: explicitOwnerFilter ? expectedUserId : undefined,
+    count: listOptions.count,
+  });
   return {
     ...res,
     data: assertOwnedUserRequests(res.data, expectedUserId),
@@ -339,7 +350,12 @@ export async function fetchMyChangeRequests(
   expectedUserId: number,
   opts?: MyRequestListOptions,
 ) {
-  const res = await fetchChangeRequests({ ...opts, count: opts?.count });
+  const { explicitOwnerFilter = false, ...listOptions } = opts ?? {};
+  const res = await fetchChangeRequests({
+    ...listOptions,
+    userId: explicitOwnerFilter ? expectedUserId : undefined,
+    count: listOptions.count,
+  });
   return {
     ...res,
     data: assertOwnedUserRequests(res.data, expectedUserId),

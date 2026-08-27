@@ -48,6 +48,7 @@ describe('MyRequestsModel', () => {
 
     const first = await fetchMyRequestsPage({
       userId: 10,
+      isAdminAccount: false,
       type: 'all',
       limit: 2,
       cursor: EMPTY_MY_REQUESTS_CURSOR,
@@ -63,6 +64,7 @@ describe('MyRequestsModel', () => {
 
     const second = await fetchMyRequestsPage({
       userId: 10,
+      isAdminAccount: false,
       type: 'all',
       limit: 2,
       cursor: first.nextCursor ?? EMPTY_MY_REQUESTS_CURSOR,
@@ -94,6 +96,7 @@ describe('MyRequestsModel', () => {
 
     const page = await fetchMyRequestsPage({
       userId: 10,
+      isAdminAccount: false,
       type: 'registration',
       limit: 25,
     }, api);
@@ -106,6 +109,25 @@ describe('MyRequestsModel', () => {
     expect(api.registrations).toHaveBeenCalledWith(10, expect.objectContaining({
       limit: 25,
       count: true,
+      explicitOwnerFilter: false,
+    }));
+  });
+
+  test('privileged self views explicitly owner-filter both request streams', async () => {
+    const api = fetchers(() => [], () => []);
+
+    await fetchMyRequestsPage({
+      userId: 10,
+      isAdminAccount: true,
+      type: 'all',
+      limit: 25,
+    }, api);
+
+    expect(api.registrations).toHaveBeenCalledWith(10, expect.objectContaining({
+      explicitOwnerFilter: true,
+    }));
+    expect(api.changes).toHaveBeenCalledWith(10, expect.objectContaining({
+      explicitOwnerFilter: true,
     }));
   });
 
@@ -117,6 +139,7 @@ describe('MyRequestsModel', () => {
 
     await expect(fetchMyRequestsPage({
       userId: 10,
+      isAdminAccount: false,
       type: 'registration',
       limit: 25,
     }, api)).rejects.toThrow('Request page contains an invalid ID.');
