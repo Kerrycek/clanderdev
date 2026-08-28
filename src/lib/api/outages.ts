@@ -1,10 +1,17 @@
 import type { ResourceRef, User, Vps } from './app';
 import type { ExportItem } from './exports';
-import { expectArray, haveApiCall } from './haveapi';
-import type { Outage, OutageEntity, OutageHandler, OutageUpdate } from './public';
+import { expectArray, HaveApiError, haveApiCall } from './haveapi';
+import { fetchAllOutageEntities, fetchAllOutageHandlers } from './outageScopePaging';
+import {
+  type Outage,
+  type OutageEntity,
+  type OutageHandler,
+  type OutageUpdate,
+} from './public';
 
 export type OutageAdminState = 'staged' | 'announced' | 'cancelled' | 'resolved';
-export type OutageAdminType = 'outage' | 'maintenance';
+export { fetchAllOutageEntities, fetchAllOutageHandlers, OutageScopeReadError } from './outageScopePaging';
+export type OutageAdminType = 'planned_outage' | 'unplanned_outage';
 export type OutageImpact =
   | 'tbd'
   | 'performance'
@@ -38,7 +45,7 @@ export interface OutagePayload {
   begins_at?: string | null;
   finished_at?: string | null;
   duration?: number | null;
-  type?: string;
+  type?: OutageAdminType;
   impact?: string;
   state?: string;
   auto_resolve?: boolean;
@@ -53,6 +60,14 @@ export interface OutageSystemsPayload {
   handlers: number[];
 }
 
+export interface OutageComponent {
+  id: number;
+  name?: string;
+  label?: string;
+  description?: string;
+  [k: string]: unknown;
+}
+
 export interface OutageUpdatePayload {
   outage: number;
   send_mail?: boolean;
@@ -65,6 +80,18 @@ export interface OutageUpdatePayload {
   en_description?: string;
   cs_summary?: string;
   cs_description?: string;
+}
+
+export function outageStateTransitionPayload(
+  outageId: number,
+  state: OutageAdminState,
+  sendMail = true
+): OutageUpdatePayload {
+  return {
+    outage: outageId,
+    state,
+    send_mail: sendMail,
+  };
 }
 
 export interface OutageAffectedUser {
@@ -96,6 +123,71 @@ export interface OutageAffectedExport {
   location?: ResourceRef;
   node?: ResourceRef;
   [k: string]: unknown;
+}
+
+/**
+ * Outage scope is exposed by HaveAPI as separate entity/handler CRUD calls.
+ * There is no bulk or transactional endpoint in either the deployed v4.1 API
+ * or current upstream. This error reports whether the client managed to
+ * reconcile the scope back to the exact state it received before the change.
+ */
+export class OutageSystemsApplyError extends Error {
+  readonly outageId: number;
+  readonly rollbackSucceeded: boolean;
+  readonly originalError: unknown;
+  readonly rollbackError?: unknown;
+
+  constructor(opts: {
+    outageId: number;
+    rollbackSucceeded: boolean;
+    originalError: unknown;
+    rollbackError?: unknown;
+  }) {
+    super(opts.rollbackSucceeded
+      ? `Affected scope for outage #${opts.outageId} was not saved; the previous scope was restored.`
+      : `Affected scope for outage #${opts.outageId} may be partially saved; reload the outage before retrying.`);
+    this.name = 'OutageSystemsApplyError';
+    this.outageId = opts.outageId;
+    this.rollbackSucceeded = opts.rollbackSucceeded;
+    this.originalError = opts.originalError;
+    this.rollbackError = opts.rollbackError;
+  }
+}
+
+/**
+ * The API has no endpoint for deleting a newly staged outage. If its initial
+ * scope fails, keep the staged report and direct the administrator to its
+ * detail instead of allowing an unsafe retry that would create a duplicate.
+ */
+export class OutageCreateWithSystemsError extends Error {
+  readonly outageId: number;
+  readonly rollbackSucceeded: boolean;
+  readonly systemsError: OutageSystemsApplyError;
+
+  constructor(outageId: number, systemsError: OutageSystemsApplyError) {
+    super(systemsError.rollbackSucceeded
+      ? `Outage #${outageId} was created without its affected scope; open the staged report and retry the scope change.`
+      : `Outage #${outageId} was created, but its affected scope may be partially saved; reload the staged report before retrying.`);
+    this.name = 'OutageCreateWithSystemsError';
+    this.outageId = outageId;
+    this.rollbackSucceeded = systemsError.rollbackSucceeded;
+    this.systemsError = systemsError;
+  }
+}
+
+/**
+ * A transport/server failure while creating the root report is ambiguous: the
+ * API can commit the POST and lose its response, and it has no idempotency key.
+ * Callers must refresh the outage list before offering another create attempt.
+ */
+export class OutageCreateIndeterminateError extends Error {
+  readonly originalError: unknown;
+
+  constructor(originalError: unknown) {
+    super('The outage create result is unknown; refresh and verify the outage list before retrying.');
+    this.name = 'OutageCreateIndeterminateError';
+    this.originalError = originalError;
+  }
 }
 
 function outageListParams(opts?: OutageFilters): Record<string, unknown> {
@@ -130,6 +222,20 @@ export async function fetchAdminOutages(opts?: OutageFilters) {
   return { ...res, data: expectArray<Outage>(res.data, 'outages#index') };
 }
 
+export async function fetchOutageComponents(opts?: { limit?: number; fromId?: number }) {
+  const params: Record<string, unknown> = {};
+  if (opts?.limit !== undefined) params['limit'] = opts.limit;
+  if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
+
+  const res = await haveApiCall<OutageComponent[]>({
+    method: 'GET',
+    path: '/components',
+    namespace: 'component',
+    params,
+  });
+  return { ...res, data: expectArray<OutageComponent>(res.data, 'components#index') };
+}
+
 export async function createOutage(params: OutagePayload) {
   return haveApiCall<Outage>({
     method: 'POST',
@@ -140,9 +246,24 @@ export async function createOutage(params: OutagePayload) {
 }
 
 export async function createOutageWithSystems(params: OutagePayload, systems: OutageSystemsPayload) {
-  const res = await createOutage(params);
+  let res: Awaited<ReturnType<typeof createOutage>>;
+  try {
+    res = await createOutage(params);
+  } catch (error) {
+    const isDefinitiveApiRejection = error instanceof HaveApiError
+      && (error.httpStatus === undefined || error.httpStatus < 500);
+    if (isDefinitiveApiRejection) throw error;
+    throw new OutageCreateIndeterminateError(error);
+  }
   const outageId = res.data.id;
-  await applyOutageSystems(outageId, [], [], systems);
+  try {
+    await applyOutageSystems(outageId, systems);
+  } catch (error) {
+    if (error instanceof OutageSystemsApplyError) {
+      throw new OutageCreateWithSystemsError(outageId, error);
+    }
+    throw error;
+  }
   return res;
 }
 
@@ -212,41 +333,116 @@ function outageEntityKey(name: string, entityId: number | null | undefined): str
   return `${name}:${entityId ?? ''}`;
 }
 
-export async function applyOutageSystems(
+function currentOutageSystems(
+  entities: OutageEntity[],
+  handlers: OutageHandler[]
+): OutageSystemsPayload {
+  return {
+    entities: entities.map((entity) => ({
+      name: entity.name,
+      entity_id: entity.entity_id ?? null,
+    })),
+    handlers: handlers
+      .map(outageHandlerUserId)
+      .filter((value): value is number => value !== null),
+  };
+}
+
+async function applyOutageSystemsUnsafe(
   outageId: number,
   currentEntities: OutageEntity[],
   currentHandlers: OutageHandler[],
   wanted: OutageSystemsPayload
 ) {
   const wantedEntities = wanted.entities;
-  const wantedKeys = new Set(wantedEntities.map((e) => outageEntityKey(e.name, e.entity_id)));
-  const currentKeys = new Set(currentEntities.map((e) => outageEntityKey(e.name, e.entity_id)));
+  const wantedKeys = new Set(wantedEntities.map((entity) => outageEntityKey(entity.name, entity.entity_id)));
+  const currentKeys = new Set(currentEntities.map((entity) => outageEntityKey(entity.name, entity.entity_id)));
 
-  for (const e of wantedEntities) {
-    if (!currentKeys.has(outageEntityKey(e.name, e.entity_id))) {
-      await createOutageEntity(outageId, { name: e.name, entity_id: e.entity_id ?? null });
-    }
-  }
-
-  for (const e of currentEntities) {
-    if (!wantedKeys.has(outageEntityKey(e.name, e.entity_id))) {
-      await deleteOutageEntity(outageId, e.id);
+  for (const entity of wantedEntities) {
+    if (!currentKeys.has(outageEntityKey(entity.name, entity.entity_id))) {
+      await createOutageEntity(outageId, {
+        name: entity.name,
+        entity_id: entity.entity_id ?? null,
+      });
     }
   }
 
   const wantedHandlers = new Set(wanted.handlers);
-  const currentHandlerIds = new Set(currentHandlers.map(outageHandlerUserId).filter((v): v is number => v !== null));
+  const currentHandlerIds = new Set(
+    currentHandlers
+      .map(outageHandlerUserId)
+      .filter((value): value is number => value !== null)
+  );
 
   for (const user of wantedHandlers) {
     if (!currentHandlerIds.has(user)) await createOutageHandler(outageId, { user });
   }
 
-  for (const h of currentHandlers) {
-    const user = outageHandlerUserId(h);
-    if (user !== null && !wantedHandlers.has(user)) await deleteOutageHandler(outageId, h.id);
+  for (const entity of currentEntities) {
+    if (!wantedKeys.has(outageEntityKey(entity.name, entity.entity_id))) {
+      await deleteOutageEntity(outageId, entity.id);
+    }
+  }
+
+  for (const handler of currentHandlers) {
+    const user = outageHandlerUserId(handler);
+    if (user !== null && !wantedHandlers.has(user)) {
+      await deleteOutageHandler(outageId, handler.id);
+    }
   }
 
   await rebuildOutageAffectedVps(outageId);
+}
+
+export async function applyOutageSystems(
+  outageId: number,
+  wanted: OutageSystemsPayload
+) {
+  // Never mutate from a possibly truncated snapshot supplied by the UI. Both
+  // nested indexes are keyset-paginated, so obtain a verified complete scope
+  // first. If this fails or hits a safety cap, no writes are attempted.
+  const [currentEntities, currentHandlers] = await Promise.all([
+    fetchAllOutageEntities(outageId),
+    fetchAllOutageHandlers(outageId),
+  ]);
+  const original = currentOutageSystems(currentEntities, currentHandlers);
+
+  try {
+    await applyOutageSystemsUnsafe(
+      outageId,
+      currentEntities,
+      currentHandlers,
+      wanted
+    );
+  } catch (originalError) {
+    try {
+      // A failed HTTP request is ambiguous: the server can commit a write and
+      // lose the response. Re-read the actual state before compensating.
+      const [actualEntities, actualHandlers] = await Promise.all([
+        fetchAllOutageEntities(outageId),
+        fetchAllOutageHandlers(outageId),
+      ]);
+      await applyOutageSystemsUnsafe(
+        outageId,
+        actualEntities,
+        actualHandlers,
+        original
+      );
+      throw new OutageSystemsApplyError({
+        outageId,
+        rollbackSucceeded: true,
+        originalError,
+      });
+    } catch (rollbackError) {
+      if (rollbackError instanceof OutageSystemsApplyError) throw rollbackError;
+      throw new OutageSystemsApplyError({
+        outageId,
+        rollbackSucceeded: false,
+        originalError,
+        rollbackError,
+      });
+    }
+  }
 }
 
 export async function fetchUserOutages(outageId: number) {

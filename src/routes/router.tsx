@@ -7,6 +7,7 @@ import { PublicLayout } from '../components/layout/PublicLayout';
 import { RouteProvidersLayout } from './RouteProvidersLayout';
 import { lazyRoute } from './lazyRoute';
 import * as CoreRoutes from './coreRouteComponents';
+import { adminFinanceRoutes } from './adminFinanceRoutes';
 import { securityAdvisoryAdminRoutes } from './securityAdvisoryAdminRoutes';
 
 import { ErrorPage } from '../pages/ErrorPage';
@@ -84,8 +85,6 @@ const RequestsPage = lazyRoute(() => import('../pages/app/admin/RequestsPage'), 
 const RequestDetailPage = lazyRoute(() => import('../pages/app/admin/RequestDetailPage'), 'RequestDetailPage');
 const MyRequestsPage = lazyRoute(() => import('../pages/app/requests/MyRequestsPage'), 'MyRequestsPage');
 const MyRequestDetailPage = lazyRoute(() => import('../pages/app/requests/MyRequestDetailPage'), 'MyRequestDetailPage');
-const IncomingPaymentsPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentsPage'), 'IncomingPaymentsPage');
-const IncomingPaymentDetailPage = lazyRoute(() => import('../pages/app/admin/IncomingPaymentDetailPage'), 'IncomingPaymentDetailPage');
 const MailLogsPage = lazyRoute(() => import('../pages/app/admin/mailer/MailLogsPage'), 'MailLogsPage');
 const MailTemplatesPage = lazyRoute(() => import('../pages/app/admin/mailer/MailTemplatesPage'), 'MailTemplatesPage');
 const MailTemplateDetailPage = lazyRoute(() => import('../pages/app/admin/mailer/MailTemplateDetailPage'), 'MailTemplateDetailPage');
@@ -464,8 +463,7 @@ export const router = createBrowserRouter([
             { path: 'audit/:historyId', element: <AuditEventPage /> },
             { path: 'requests', element: <RequestsPage /> },
             { path: 'requests/:type/:requestId', element: <RequestDetailPage /> },
-            { path: 'payments/incoming', element: <IncomingPaymentsPage /> },
-            { path: 'payments/incoming/:paymentId', element: <IncomingPaymentDetailPage /> },
+            ...adminFinanceRoutes,
             { path: 'profile', element: <ProfilePage /> },
             { path: 'profile/resources', element: <ProfileResourcesPage /> },
             { path: 'profile/security', element: <ProfileSecurityPage /> },

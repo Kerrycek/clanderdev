@@ -1,6 +1,8 @@
 // Common navigation, scope, sync, and settings copy
 export const enCommon_navigation = {
   'list.meta.filters_active': 'Filters active.',
+  'list.meta.filters_progressive':
+    'These filters apply to each API page as it loads. Continue to search later pages.',
   'pagination.prev': 'Prev',
   'pagination.next': 'Next',
   'pagination.rows': 'Rows',
@@ -11,6 +13,8 @@ export const enCommon_navigation = {
   'pagination.page_current': 'Page {page} (current)',
   'pagination.jump_label': 'Go to',
   'pagination.jump_action': 'Go',
+  'pagination.progressive_hint':
+    'Later pages become available progressively. You can jump through page {page} now.',
   'nav.navigation': 'Navigation',
   'nav.open': 'Open navigation',
   'nav.group.services': 'Services',

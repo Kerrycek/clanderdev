@@ -7,8 +7,8 @@ import { useI18n } from '../../../app/i18n';
 
 import { fetchIncomingPayments, updateIncomingPaymentState } from '../../../lib/api/payments';
 import { getMetaTotalCount } from '../../../lib/api/haveapi';
+import { useCountedKeysetPagination } from '../../../lib/hooks/useCountedKeysetPagination';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useTierSlowIntervalMs } from '../../../lib/refreshTiers';
 import { formatErrorMessage } from '../../../lib/errors';
 import { useToasts } from '../../../app/toasts';
@@ -23,20 +23,17 @@ import { IncomingPaymentsFilters } from './IncomingPaymentsFilters';
 import { IncomingPaymentsBulkActions } from './IncomingPaymentsBulkActions';
 import { IncomingPaymentsListContent } from './IncomingPaymentsListContent';
 import { IncomingPaymentsReconciliationSummary } from './IncomingPaymentsReconciliationCards';
-import { incomingPaymentStateFilterOptions, parsePositiveIntInput } from './IncomingPaymentsModel';
+import { incomingPaymentStateFilterOptions } from './IncomingPaymentsModel';
 import { type IncomingPaymentBulkAction, type IncomingPaymentBulkReview } from './IncomingPaymentsBulkModel';
+import { AdminFinanceTabs } from './AdminFinanceTabs';
 
 async function fetchIncomingPaymentStateTotal(input: {
-  state: 'queued' | 'unmatched' | 'ignored';
-  q?: string;
-  userId?: number;
+  state: 'queued' | 'unmatched' | 'processed' | 'ignored';
 }): Promise<number | undefined> {
   try {
     const res = await fetchIncomingPayments({
       limit: 1,
       state: input.state,
-      q: input.q,
-      userId: input.userId,
       count: true,
     });
 
@@ -61,25 +58,14 @@ export function IncomingPaymentsPage() {
     return incomingPaymentStateFilterOptions().includes(raw) ? raw : '';
   }, [sp]);
 
-  const qText = useMemo(() => String(sp.get('q') ?? ''), [sp]);
-
-  const urlUser = useMemo(() => String(sp.get('user') ?? ''), [sp]);
-  const [userId, setUserId] = useState(() => urlUser);
-
   useEffect(() => {
-    setUserId(urlUser);
-  }, [urlUser]);
-
-  const userIdNum = useMemo(() => parsePositiveIntInput(userId), [userId]);
-
-  useEffect(() => {
-    // Keep URL in sync while allowing the lookup input to hold a non-numeric query.
+    // Remove stale links created before we aligned the UI with the API contract.
+    if (!sp.has('q') && !sp.has('user')) return;
     const next = new URLSearchParams(sp);
-    if (userIdNum !== undefined) next.set('user', String(userIdNum));
-    else next.delete('user');
-
-    if (next.toString() !== sp.toString()) setSp(next, { replace: true });
-  }, [sp, setSp, userIdNum]);
+    next.delete('q');
+    next.delete('user');
+    setSp(next, { replace: true });
+  }, [sp, setSp]);
 
   const setStateFilter = (nextState: string) => {
     const st = String(nextState ?? '').trim().toLowerCase();
@@ -93,7 +79,7 @@ export function IncomingPaymentsPage() {
 
   const pagination = useKeysetPagination({
     id: 'admin.payments.incoming.list',
-    filterKey: JSON.stringify({ scope: basePath, state, q: qText.trim(), user: userIdNum ?? null }),
+    filterKey: JSON.stringify({ scope: basePath, state }),
     searchParams: sp,
     setSearchParams: setSp,
     defaultLimit: 50,
@@ -104,42 +90,49 @@ export function IncomingPaymentsPage() {
     queryKey: [
       'incoming_payments',
       'index',
-      { limit: pagination.limit, fromId: pagination.fromId, state: state || undefined, q: qText.trim() || undefined, user: userIdNum },
+      { limit: pagination.limit, fromId: pagination.fromId, state: state || undefined },
     ],
     queryFn: async () =>
       fetchIncomingPayments({
         limit: pagination.limit,
         fromId: pagination.fromId,
         state: state || undefined,
-        q: qText.trim() || undefined,
-        userId: userIdNum,
         count: true,
       }),
     refetchInterval: tierSlowMs,
   });
 
   const reconciliationTotalsQ = useQuery({
-    queryKey: [
-      'incoming_payments',
-      'reconciliation_totals',
-      { q: qText.trim() || undefined, user: userIdNum },
-    ],
+    queryKey: ['incoming_payments', 'reconciliation_totals'],
     queryFn: async () => {
-      const q = qText.trim() || undefined;
-      const [queued, unmatched, ignored] = await Promise.all([
-        fetchIncomingPaymentStateTotal({ state: 'queued', q, userId: userIdNum }),
-        fetchIncomingPaymentStateTotal({ state: 'unmatched', q, userId: userIdNum }),
-        fetchIncomingPaymentStateTotal({ state: 'ignored', q, userId: userIdNum }),
+      const [queued, unmatched, processed, ignored] = await Promise.all([
+        fetchIncomingPaymentStateTotal({ state: 'queued' }),
+        fetchIncomingPaymentStateTotal({ state: 'unmatched' }),
+        fetchIncomingPaymentStateTotal({ state: 'processed' }),
+        fetchIncomingPaymentStateTotal({ state: 'ignored' }),
       ]);
 
-      return { queued, unmatched, ignored };
+      return { queued, unmatched, processed, ignored };
     },
     refetchInterval: tierSlowMs,
   });
 
   const rows = paymentsQ.data?.data ?? [];
   const totalCount = getMetaTotalCount(paymentsQ.data?.meta);
-  const totalPageCount = totalCount !== undefined ? Math.max(1, Math.ceil(totalCount / pagination.limit)) : pagination.pageCount;
+  const loadPaymentsPage = useCallback(async (fromId: number | undefined) => (
+    await fetchIncomingPayments({
+      limit: pagination.limit,
+      fromId,
+      state: state || undefined,
+    })
+  ).data, [pagination.limit, state]);
+  const countedPagination = useCountedKeysetPagination({
+    pagination,
+    totalCount,
+    rows,
+    loadPage: loadPaymentsPage,
+    direction: 'desc',
+  });
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [bulkAction, setBulkAction] = useState<IncomingPaymentBulkAction>('mark_unmatched');
   const [bulkApplying, setBulkApplying] = useState(false);
@@ -223,54 +216,21 @@ export function IncomingPaymentsPage() {
     }
   }, [paymentsQ, qc, t, toasts]);
 
-  const pageCursor = useMemo(() => cursorFromDescendingPage(rows, (row) => row.id), [rows]);
-  const canNext = totalCount !== undefined ? pagination.page < totalPageCount : rows.length === pagination.limit;
-
-  const goToPaymentsPage = useCallback(async (pageNumber: number) => {
-    const target = totalCount !== undefined
-      ? Math.max(1, Math.min(totalPageCount, Math.floor(pageNumber)))
-      : Math.max(1, Math.floor(pageNumber));
-
-    if (!Number.isFinite(target) || target === pagination.page) return;
-    if (target <= pagination.stack.length) {
-      pagination.goToPage(target);
-      return;
-    }
-
-    const stack = [...pagination.stack];
-    let fromId = stack[stack.length - 1] ?? undefined;
-
-    while (stack.length < target) {
-      const page = await fetchIncomingPayments({
-        limit: pagination.limit,
-        fromId: fromId ?? undefined,
-        state: state || undefined,
-        q: qText.trim() || undefined,
-        userId: userIdNum,
-      });
-      const nextCursor = cursorFromDescendingPage(page.data, (row) => row.id);
-      if (typeof nextCursor !== 'number' || page.data.length < pagination.limit) break;
-      stack.push(nextCursor);
-      fromId = nextCursor;
-    }
-
-    if (stack.length >= target) pagination.goToPageWithStack(target, stack);
-  }, [pagination, qText, state, totalCount, totalPageCount, userIdNum]);
-
   const shareUrl = useMemo(() => (typeof window !== 'undefined' ? window.location.href : ''), [sp]);
 
   return (
     <ListShell
       testId="admin.payments.incoming.list"
-      header={<PageHeader title={t('payments.incoming.list.title')} description={t('payments.incoming.list.description')} />}
+      header={(
+        <div className="space-y-4">
+          <PageHeader title={t('payments.incoming.list.title')} description={t('payments.incoming.list.description')} />
+          <AdminFinanceTabs />
+        </div>
+      )}
       filters={
         <IncomingPaymentsFilters
           basePath={basePath}
           state={state}
-          qText={qText}
-          userId={userId}
-          userIdNum={userIdNum}
-          setUserId={setUserId}
           setSearchParams={setSp}
           onRefresh={() => paymentsQ.refetch()}
           shareUrl={shareUrl}
@@ -309,11 +269,13 @@ export function IncomingPaymentsPage() {
             rows={rows}
             basePath={basePath}
             pagination={pagination}
-            pageCount={totalPageCount}
-            totalPagesKnown={totalCount !== undefined}
-            onGoToPage={goToPaymentsPage}
-            pageCursor={pageCursor}
-            canNext={canNext}
+            pageCount={countedPagination.pageCount}
+            totalPagesKnown={countedPagination.totalPagesKnown}
+            onGoToPage={countedPagination.goToPage}
+            maxDirectPage={countedPagination.maxDirectPage}
+            jumpPending={countedPagination.isJumping}
+            pageCursor={countedPagination.pageCursor}
+            canNext={countedPagination.canNext}
             selectedIds={selectedIds}
             onToggleSelected={toggleSelected}
             onToggleAllVisible={toggleAllVisible}

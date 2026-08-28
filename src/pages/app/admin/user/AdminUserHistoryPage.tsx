@@ -2,13 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
-
 import { useAppMode } from '../../../../app/appMode';
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
-
 import { FilterBar } from '../../../../components/layout/FilterBar';
-
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { CopyButton } from '../../../../components/ui/CopyButton';
@@ -24,7 +21,6 @@ import { SmartInputHelp } from '../../../../components/ui/SmartInputHelp';
 import { StatusDot } from '../../../../components/ui/StatusDot';
 import { TableCard } from '../../../../components/ui/TableCard';
 import { TableRowLink } from '../../../../components/ui/TableRowLink';
-
 import { fetchObjectHistoryEvents, type ObjectHistoryEvent } from '../../../../lib/api/audit';
 import { eventBadgeVariant, eventDataSummary, eventVariant, sessionLabel, trackedObjectLabel, userLabel } from '../../../../lib/auditUi';
 import { dotVariantFromBadgeVariant } from '../../../../lib/variantMap';
@@ -32,7 +28,6 @@ import { formatDateTime } from '../../../../lib/format';
 import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
 import { useKeysetPagination } from '../../../../lib/hooks/useKeysetPagination';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
-
 import { useAdminUserContext } from './AdminUserLayout';
 
 function safeNumber(value: string): number | undefined {
@@ -42,10 +37,8 @@ function safeNumber(value: string): number | undefined {
   if (!Number.isFinite(n) || n <= 0) return undefined;
   return Math.floor(n);
 }
-
 type ViewMode = 'changes' | 'actions';
 type SmartKey = 'id' | 'q' | 'session' | 'event' | 'object' | 'object_id';
-
 function canonicalKey(raw: string): SmartKey | null {
   const k = String(raw ?? '').trim().toLowerCase();
   if (!k) return null;
@@ -171,7 +164,6 @@ export function AdminUserHistoryPage() {
       if (view === 'actions') {
         return (
           await fetchObjectHistoryEvents({
-            q: qTrim || undefined,
             userId,
             userSessionId,
             object: objectTrim || undefined,
@@ -185,7 +177,6 @@ export function AdminUserHistoryPage() {
 
       return (
         await fetchObjectHistoryEvents({
-          q: qTrim || undefined,
           object: 'User',
           objectId: userId,
           userSessionId,
@@ -197,8 +188,17 @@ export function AdminUserHistoryPage() {
     },
   });
 
-  const pageCursor = useMemo(() => cursorFromDescendingPage(qHistory.data, (event) => event.id), [qHistory.data]);
-  const hasMore = (qHistory.data ?? []).length >= pagination.limit;
+  const rawHistory = qHistory.data ?? [];
+  const visibleHistory = useMemo(() => {
+    const needle = qTrim.toLowerCase();
+    return needle
+      ? rawHistory.filter((event) =>
+          [event.id, event.event_type, event.object, event.object_id, event.user?.login, event.user?.label, JSON.stringify(event.event_data ?? null)]
+            .some((value) => String(value ?? '').toLowerCase().includes(needle)))
+      : rawHistory;
+  }, [qTrim, rawHistory]);
+  const pageCursor = useMemo(() => cursorFromDescendingPage(rawHistory, (event) => event.id), [rawHistory]);
+  const hasMore = rawHistory.length >= pagination.limit;
 
   const shareUrl = useMemo(() => (typeof window !== 'undefined' ? window.location.href : ''), [searchParams]);
   const filtersActive = Boolean(
@@ -874,8 +874,8 @@ export function AdminUserHistoryPage() {
           ) : null}
 
           {!qHistory.isLoading && !qHistory.isError ? (
-            qHistory.data && qHistory.data.length > 0 ? (
-              qHistory.data.map((ev: ObjectHistoryEvent) => {
+            visibleHistory.length > 0 ? (
+              visibleHistory.map((ev: ObjectHistoryEvent) => {
                 const badgeVariant = eventBadgeVariant(ev.event_type);
                 const rowVariant = eventVariant(ev.event_type);
                 const dotVariant = dotVariantFromBadgeVariant(badgeVariant);

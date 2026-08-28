@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, HaveApiError, haveApiCall } from './haveapi';
 import type { Location } from './appTypes';
 
 export interface Node {
@@ -11,6 +11,9 @@ export interface Node {
   hypervisor_type?: string;
   location?: Location;
   ip_addr?: string;
+  max_tx?: number;
+  max_rx?: number;
+  max_vps?: number;
 
   // Live metrics (availability depends on the API action)
   status?: boolean;
@@ -119,6 +122,126 @@ export interface NodePool {
   [k: string]: unknown;
 }
 
+export interface NodeCreateInput {
+  name: string;
+  type: 'node' | 'storage' | 'mailer' | 'dns_server';
+  location: number;
+  ip_addr: string;
+  hypervisor_type?: 'vpsadminos';
+  max_tx?: number;
+  max_rx?: number;
+  max_vps?: number;
+  cpus?: number;
+  total_memory?: number;
+  total_swap?: number;
+  maintenance?: boolean;
+}
+
+export interface NodeUpdateInput {
+  active?: boolean;
+  name?: string;
+  fqdn?: string;
+  hypervisor_type?: 'vpsadminos';
+  ip_addr?: string;
+  max_tx?: number | null;
+  max_rx?: number | null;
+  max_vps?: number | null;
+}
+
+export type NodeCreateCapacityField = 'cpus' | 'total_memory' | 'total_swap';
+
+export interface NodeWriteParameterDescription {
+  required?: boolean;
+  nullable?: boolean;
+  [k: string]: unknown;
+}
+
+export interface NodeWriteCapabilityDescription {
+  input?: {
+    parameters?: Record<string, NodeWriteParameterDescription | unknown>;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+export interface NodeCreateCapacityRequirements {
+  cpus: boolean;
+  total_memory: boolean;
+  total_swap: boolean;
+}
+
+export type NodeNullableUpdateField = 'max_tx' | 'max_rx' | 'max_vps';
+export type NodeUpdateNullability = Record<NodeNullableUpdateField, boolean>;
+
+const NODE_CREATE_CAPACITY_FIELDS: readonly NodeCreateCapacityField[] = [
+  'cpus',
+  'total_memory',
+  'total_swap',
+];
+
+/** Read requiredness from the effective OPTIONS contract of the deployed API. */
+export function nodeCreateCapacityRequirements(
+  capability: NodeWriteCapabilityDescription | undefined
+): NodeCreateCapacityRequirements {
+  const parameters = capability?.input?.parameters;
+  const result: NodeCreateCapacityRequirements = {
+    cpus: false,
+    total_memory: false,
+    total_swap: false,
+  };
+
+  for (const field of NODE_CREATE_CAPACITY_FIELDS) {
+    const descriptor = parameters?.[field];
+    result[field] = Boolean(
+      descriptor
+      && typeof descriptor === 'object'
+      && (descriptor as NodeWriteParameterDescription).required === true
+    );
+  }
+  return result;
+}
+
+/**
+ * HaveAPI only accepts `null` for parameters explicitly marked nullable in the
+ * effective update contract. The deployed 4.1 and current 4.2 node contracts
+ * do not mark any of these limits nullable, but reading OPTIONS keeps a future
+ * nullable contract honest without pretending that an omitted field was
+ * cleared.
+ */
+export function nodeUpdateNullability(
+  capability: NodeWriteCapabilityDescription | undefined
+): NodeUpdateNullability {
+  const parameters = capability?.input?.parameters;
+  return {
+    max_tx: parameterIsNullable(parameters?.['max_tx']),
+    max_rx: parameterIsNullable(parameters?.['max_rx']),
+    max_vps: parameterIsNullable(parameters?.['max_vps']),
+  };
+}
+
+function parameterIsNullable(value: unknown): boolean {
+  return Boolean(
+    value
+    && typeof value === 'object'
+    && (value as NodeWriteParameterDescription).nullable === true
+  );
+}
+
+/**
+ * Node creation is not idempotent. A lost response or HTTP 5xx can therefore
+ * mean that the node was already registered. Callers must refresh and verify
+ * the node list before another POST is enabled.
+ */
+export class NodeCreateIndeterminateError extends Error {
+  readonly originalError: unknown;
+
+  constructor(originalError: unknown) {
+    super('The node create result is unknown; refresh and verify the node list before retrying.');
+    this.name = 'NodeCreateIndeterminateError';
+    this.originalError = originalError;
+  }
+}
+
 // Nodes (admin)
 
 export async function fetchNodes(
@@ -165,6 +288,50 @@ export async function fetchNode(nodeId: number) {
   return haveApiCall<Node>({
     method: 'GET',
     path: `/nodes/${nodeId}`,
+  });
+}
+
+/**
+ * HaveAPI exposes per-action authorization and the effective input contract
+ * through OPTIONS. Keep write controls fail-closed when this probe is denied
+ * or unavailable instead of showing a form that cannot be submitted.
+ */
+export async function fetchNodeCreateCapability() {
+  return haveApiCall<NodeWriteCapabilityDescription>({
+    method: 'OPTIONS',
+    path: '/nodes?method=POST',
+  });
+}
+
+export async function fetchNodeUpdateCapability(nodeId: number) {
+  return haveApiCall<NodeWriteCapabilityDescription>({
+    method: 'OPTIONS',
+    path: `/nodes/${nodeId}?method=PUT`,
+  });
+}
+
+export async function createNode(payload: NodeCreateInput) {
+  try {
+    return await haveApiCall<Node>({
+      method: 'POST',
+      path: '/nodes',
+      namespace: 'node',
+      params: { ...payload },
+    });
+  } catch (error) {
+    const isDefinitiveApiRejection = error instanceof HaveApiError
+      && (error.httpStatus === undefined || error.httpStatus < 500);
+    if (isDefinitiveApiRejection) throw error;
+    throw new NodeCreateIndeterminateError(error);
+  }
+}
+
+export async function updateNode(nodeId: number, payload: NodeUpdateInput) {
+  return haveApiCall<void>({
+    method: 'PUT',
+    path: `/nodes/${nodeId}`,
+    namespace: 'node',
+    params: { ...payload },
   });
 }
 

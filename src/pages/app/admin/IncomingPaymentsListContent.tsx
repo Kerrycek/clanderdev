@@ -36,6 +36,8 @@ export function IncomingPaymentsListContent(props: {
   pageCount?: number;
   totalPagesKnown?: boolean;
   onGoToPage?: (pageNumber: number) => void | Promise<void>;
+  maxDirectPage?: number;
+  jumpPending?: boolean;
   pageCursor: number | null;
   canNext: boolean;
   selectedIds?: ReadonlySet<number>;
@@ -123,6 +125,8 @@ export function IncomingPaymentsListContent(props: {
             onPrev={props.pagination.goPrev}
             onNext={() => props.pagination.goNext(props.pageCursor)}
             onGoToPage={props.onGoToPage ?? props.pagination.goToPage}
+            maxDirectPage={props.maxDirectPage}
+            jumpPending={props.jumpPending}
             limit={props.pagination.limit}
             allowedLimits={props.pagination.allowedLimits}
             onLimitChange={props.pagination.setLimit}
@@ -145,6 +149,8 @@ export function IncomingPaymentsListContent(props: {
             onPrev={props.pagination.goPrev}
             onNext={() => props.pagination.goNext(props.pageCursor)}
             onGoToPage={props.onGoToPage ?? props.pagination.goToPage}
+            maxDirectPage={props.maxDirectPage}
+            jumpPending={props.jumpPending}
             limit={props.pagination.limit}
             allowedLimits={props.pagination.allowedLimits}
             onLimitChange={props.pagination.setLimit}

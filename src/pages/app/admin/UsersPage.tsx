@@ -6,9 +6,7 @@ import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 
-import { createUser, fetchUsers } from '../../../lib/api/users';
-import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../lib/lockIndex';
+import { createUser } from '../../../lib/api/users';
 import { parseBoolParam, parseNonNegativeInt } from '../../../lib/parse';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../lib/smartFilter';
 
@@ -29,7 +27,7 @@ import {
   resolveRoleValue,
   type CreateUserDraft,
 } from './users/UsersModel';
-import { type UserListRecord } from './users/userListSemantics';
+import { useUsersListPaging } from './users/useUsersListPaging';
 
 const validationErrorMessage = 'validation';
 
@@ -85,55 +83,33 @@ export function UsersPage() {
     qText.trim() || role || level !== undefined || mailerEnabled !== undefined || lockout !== undefined || passwordReset !== undefined || mfa !== undefined
   );
 
-  const pagination = useKeysetPagination({
-    id: 'admin.users.list',
-    filterKey: JSON.stringify({ q: qText.trim(), role, level, mailerEnabled, lockout, passwordReset, mfa, scope: basePath }),
+  const {
+    pagination,
+    listQ,
+    users: pageData,
+    pageCursor,
+    pageCount,
+    totalPagesKnown,
+    canNext,
+    goToPage,
+    maxDirectPage,
+    isJumping,
+    canPaginate,
+    compatScanActive,
+  } = useUsersListPaging({
+    basePath,
+    filters: {
+      q: qText.trim() || undefined,
+      role: role || undefined,
+      level,
+      mailerEnabled,
+      lockout,
+      passwordReset,
+      enableMfa: mfa,
+    },
     searchParams: sp,
     setSearchParams: setSp,
-    defaultLimit: 50,
-    allowedLimits: [25, 50, 100],
   });
-
-  const listQ = useQuery({
-    queryKey: [
-      'users',
-      'index',
-      {
-        limit: pagination.limit,
-        fromId: pagination.fromId,
-        q: qText.trim() || undefined,
-        role: role || undefined,
-        level,
-        mailerEnabled,
-        lockout,
-        passwordReset,
-        mfa,
-      },
-    ],
-    queryFn: async () =>
-      (
-        await fetchUsers({
-          limit: pagination.limit,
-          fromId: pagination.fromId,
-          q: qText.trim() || undefined,
-          role: role || undefined,
-          level,
-          mailerEnabled,
-          lockout,
-          passwordReset,
-          enableMfa: mfa,
-        })
-      ).data,
-    staleTime: 10_000,
-  });
-
-  const pageData = (listQ.data ?? []) as UserListRecord[];
-  const pageCursor = useMemo(() => cursorFromDescendingPage(pageData), [pageData]);
-
-  const hasMore = pageData.length >= pagination.limit;
-  const canNext = pagination.hasForward || (hasMore && pageCursor !== null);
-  const canPaginate = pagination.stack.length > 1 || pageData.length > 0;
-
   const [smart, setSmart] = useState('');
   const [smartErrors, setSmartErrors] = useState<string[]>([]);
   const smartNeedle = smart.trim();
@@ -406,7 +382,7 @@ export function UsersPage() {
         <PageHeader
           title={t('admin.users.title')}
           description={t('admin.users.subtitle')}
-          meta={<span className="text-xs text-faint">{t('admin.users.filter_hint')}</span>}
+          meta={<span className="text-xs text-faint">{t(compatScanActive ? 'list.meta.filters_progressive' : 'admin.users.filter_hint')}</span>}
           testId="admin.users.list.header"
         />
       }
@@ -473,6 +449,11 @@ export function UsersPage() {
         t={t}
         na={na}
         pagination={pagination}
+        pageCount={pageCount}
+        totalPagesKnown={totalPagesKnown}
+        onGoToPage={goToPage}
+        maxDirectPage={maxDirectPage}
+        jumpPending={isJumping}
         canPaginate={canPaginate}
         canNext={canNext}
         pageCursor={pageCursor}

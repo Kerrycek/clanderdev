@@ -3,14 +3,16 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
+import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
+import { Button } from '../../../components/ui/Button';
 import type { SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
 
-import { fetchNodes } from '../../../lib/api/nodes';
+import { fetchNodeCreateCapability, fetchNodes } from '../../../lib/api/nodes';
 import { fetchPublicNodeStatus } from '../../../lib/api/public';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { parseBoolParam } from '../../../lib/parse';
@@ -20,6 +22,8 @@ import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmart
 
 import { NodesFilters } from './NodesFilters';
 import { NodesListContent } from './NodesListContent';
+import { NodeCreateModal } from './nodes/NodeCreateModal';
+import { NodeCreateIndeterminateGuard, type IndeterminateNodeCreateAttempt } from './nodes/NodeCreateIndeterminateGuard';
 import {
   buildNodeRows,
   buildStatusIndex,
@@ -33,6 +37,7 @@ import {
 
 export function NodesPage() {
   const { basePath } = useAppMode();
+  const auth = useAuth();
   const { t } = useI18n();
   const toasts = useToasts();
   const navigate = useNavigate();
@@ -49,6 +54,16 @@ export function NodesPage() {
 
   const [helpOpen, setHelpOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [indeterminateCreate, setIndeterminateCreate] = useState<IndeterminateNodeCreateAttempt | null>(null);
+
+  const createCapabilityQ = useQuery({
+    queryKey: ['nodes', 'capability', 'create'],
+    queryFn: async () => (await fetchNodeCreateCapability()).data,
+    enabled: auth.role === 'admin',
+    retry: false,
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     if (smartNeedle === '?') setHelpOpen(true);
@@ -378,6 +393,13 @@ export function NodesPage() {
     void statusQ.refetch();
   }, [nodesQ, statusQ]);
 
+  const createDisabled = Boolean(indeterminateCreate) || !createCapabilityQ.isSuccess;
+  const createDisabledReason = indeterminateCreate
+    ? t('admin.node.editor.create.indeterminate_body')
+    : !createCapabilityQ.isSuccess
+      ? t('admin.node.editor.capability_unavailable.body')
+      : undefined;
+
   return (
     <ListShell
       testId="admin.nodes.page"
@@ -386,6 +408,20 @@ export function NodesPage() {
           title={t('admin.nodes.title')}
           description={t('admin.nodes.subtitle')}
           meta={filtersActive ? <span className="text-xs text-faint">{listHint ?? t('list.meta.filters_active')}</span> : null}
+          actions={
+            auth.role === 'admin' ? (
+              <Button
+                variant="primary"
+                disabled={createDisabled}
+                loading={createCapabilityQ.isLoading}
+                disabledReason={createDisabledReason}
+                onClick={() => setCreateOpen(true)}
+                testId="admin.nodes.create"
+              >
+                {t('admin.node.editor.action.create')}
+              </Button>
+            ) : null
+          }
           testId="admin.nodes.list.header"
         />
       }
@@ -418,6 +454,12 @@ export function NodesPage() {
         />
       }
     >
+      {indeterminateCreate ? (
+        <NodeCreateIndeterminateGuard
+          attempt={indeterminateCreate}
+          onListRefresh={() => nodesQ.refetch()}
+        />
+      ) : null}
       <NodesListContent
         t={t}
         basePath={basePath}
@@ -437,6 +479,17 @@ export function NodesPage() {
         canNext={canNext}
         pageCursor={pageCursor}
         pagination={pagination}
+      />
+      <NodeCreateModal
+        open={createOpen}
+        capabilityAvailable={auth.role === 'admin' && createCapabilityQ.isSuccess}
+        capability={createCapabilityQ.data}
+        capabilityError={createCapabilityQ.error}
+        onClose={() => setCreateOpen(false)}
+        onIndeterminate={(attempt) => {
+          setCreateOpen(false);
+          setIndeterminateCreate(attempt);
+        }}
       />
     </ListShell>
   );

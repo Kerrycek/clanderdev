@@ -2,13 +2,17 @@ import { describe, expect, test, vi } from 'vitest';
 
 import {
   createUserPayment,
+  estimateIncome,
   fetchIncomingPayments,
   fetchPaymentInstructions,
   fetchUserPayments,
 } from './payments';
 
-function mockFetchOk(response: any) {
-  return vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: true, response }) });
+function mockFetchOk(response: unknown): typeof globalThis.fetch {
+  return vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ status: true, response }),
+  }) as unknown as typeof globalThis.fetch;
 }
 
 function lastFetchCall() {
@@ -17,10 +21,10 @@ function lastFetchCall() {
 }
 
 describe('payments API wrappers', () => {
-  test('fetchIncomingPayments forwards q, state, user and pagination filters', async () => {
+  test('fetchIncomingPayments sends only filters supported by the API contract', async () => {
     globalThis.fetch = mockFetchOk({ incoming_payments: [], _meta: { total_count: 0 } }) as any;
 
-    await fetchIncomingPayments({ limit: 25, fromId: 200, state: 'queued', q: 'spec', userId: 42 });
+    await fetchIncomingPayments({ limit: 25, fromId: 200, state: 'queued' });
 
     const [url] = lastFetchCall();
     const u = new URL(url);
@@ -29,8 +33,8 @@ describe('payments API wrappers', () => {
     expect(u.searchParams.get('incoming_payment[limit]')).toBe('25');
     expect(u.searchParams.get('incoming_payment[from_id]')).toBe('200');
     expect(u.searchParams.get('incoming_payment[state]')).toBe('queued');
-    expect(u.searchParams.get('incoming_payment[q]')).toBe('spec');
-    expect(u.searchParams.get('incoming_payment[user]')).toBe('42');
+    expect(u.searchParams.has('incoming_payment[q]')).toBe(false);
+    expect(u.searchParams.has('incoming_payment[user]')).toBe(false);
   });
 
   test('fetchIncomingPayments can request total count metadata', async () => {
@@ -93,5 +97,39 @@ describe('payments API wrappers', () => {
     const res = await fetchPaymentInstructions(42);
 
     expect(res.data.instructions).toBe('Account: 123456/0100\nVS: 42');
+  });
+
+  test('estimateIncome uses the singular custom action and namespaced GET parameters', async () => {
+    globalThis.fetch = mockFetchOk({ user_count: 12, estimated_income: 36_000 });
+
+    const res = await estimateIncome({
+      year: 2026,
+      month: 8,
+      select: 'exactly_until',
+      duration: 3,
+    });
+
+    const [url, init] = lastFetchCall();
+    const u = new URL(url);
+
+    expect(u.pathname).toBe('/v7.0/payment_stat/estimate_income');
+    expect((init as RequestInit).method).toBe('GET');
+    expect(u.searchParams.get('payment_stat[year]')).toBe('2026');
+    expect(u.searchParams.get('payment_stat[month]')).toBe('8');
+    expect(u.searchParams.get('payment_stat[select]')).toBe('exactly_until');
+    expect(u.searchParams.get('payment_stat[duration]')).toBe('3');
+    expect(res.data).toEqual({ user_count: 12, estimated_income: 36_000 });
+  });
+
+  test('estimateIncome accepts a wrapped action response and rejects malformed totals', async () => {
+    globalThis.fetch = mockFetchOk({ payment_stats: { user_count: '4', estimated_income: '1200' } });
+
+    const res = await estimateIncome({ year: 2026, month: 7, select: 'all_until', duration: 1 });
+    expect(res.data).toEqual({ user_count: 4, estimated_income: 1200 });
+
+    globalThis.fetch = mockFetchOk({ user_count: 4, estimated_income: 'not-a-number' });
+    await expect(
+      estimateIncome({ year: 2026, month: 7, select: 'all_until', duration: 1 })
+    ).rejects.toThrow('invalid estimated_income');
   });
 });

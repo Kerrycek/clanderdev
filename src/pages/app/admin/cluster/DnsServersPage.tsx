@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Pencil, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useI18n } from '../../../../app/i18n';
@@ -9,7 +10,6 @@ import { Alert } from '../../../../components/ui/Alert';
 import { ActionButton } from '../../../../components/ui/ActionButton';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
-import { Card } from '../../../../components/ui/Card';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { ErrorState } from '../../../../components/ui/ErrorState';
@@ -18,10 +18,12 @@ import { KeysetPagination } from '../../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../../components/ui/LoadingState';
 import { Modal } from '../../../../components/ui/Modal';
 import { Select } from '../../../../components/ui/Select';
+import { TableCard } from '../../../../components/ui/TableCard';
 import { fetchNodes } from '../../../../lib/api/nodes';
 import { fetchDnsServers, createDnsServer, updateDnsServer, deleteDnsServer, type DnsServer } from '../../../../lib/api/dns';
+import { getMetaTotalCount } from '../../../../lib/api/haveapi';
+import { useCountedKeysetPagination } from '../../../../lib/hooks/useCountedKeysetPagination';
 import { useKeysetPagination } from '../../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
 import { formatErrorMessage } from '../../../../lib/errors';
 
 function nodeLabel(server: DnsServer): string {
@@ -48,6 +50,7 @@ export function DnsServersPage() {
   const [isHidden, setIsHidden] = useState(false);
   const [enableUserZones, setEnableUserZones] = useState(true);
   const [userZoneType, setUserZoneType] = useState('primary_type');
+  const filtersActive = Boolean(q.trim() || hidden || userZones);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -64,12 +67,45 @@ export function DnsServersPage() {
 
   const listQ = useQuery({
     queryKey: ['dns_servers', pagination.page, pagination.limit, pagination.fromId, q, hidden, userZones],
-    queryFn: async () => fetchDnsServers({ limit: pagination.limit, fromId: pagination.fromId, q: q.trim() || undefined, hidden: hidden === 'true' ? true : hidden === 'false' ? false : undefined, enable_user_dns_zones: userZones === 'true' ? true : userZones === 'false' ? false : undefined }),
+    queryFn: async () => fetchDnsServers({
+      limit: pagination.limit,
+      fromId: pagination.fromId,
+      count: !filtersActive,
+    }),
   });
 
-  const rows = listQ.data?.data ?? [];
-  const cursor = useMemo(() => cursorFromDescendingPage(rows as any), [rows]);
-  const hasMore = rows.length >= pagination.limit;
+  const rawRows = listQ.data?.data ?? [];
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const hiddenFilter = hidden === 'true' ? true : hidden === 'false' ? false : undefined;
+    const userZonesFilter = userZones === 'true' ? true : userZones === 'false' ? false : undefined;
+    return rawRows.filter((row) => {
+      const searchable = [row.id, row.name, row.ipv4_addr, row.ipv6_addr, nodeLabel(row)]
+        .map((value) => String(value ?? '').toLowerCase())
+        .join(' ');
+      if (needle && !searchable.includes(needle)) return false;
+      if (hiddenFilter !== undefined && Boolean(row.hidden) !== hiddenFilter) return false;
+      if (userZonesFilter !== undefined && Boolean(row.enable_user_dns_zones) !== userZonesFilter) return false;
+      return true;
+    });
+  }, [hidden, q, rawRows, userZones]);
+  const totalCount = filtersActive ? undefined : getMetaTotalCount(listQ.data?.meta);
+  const loadPage = useCallback(async (fromId: number | undefined) => (await fetchDnsServers({
+    limit: pagination.limit,
+    fromId,
+    count: !filtersActive,
+  })).data, [filtersActive, pagination.limit]);
+  const {
+    pageCursor: cursor,
+    pageCount,
+    totalPagesKnown,
+    canNext,
+    goToPage,
+    maxDirectPage,
+    isJumping,
+  } = useCountedKeysetPagination({
+    pagination, totalCount, rows: rawRows, loadPage, direction: 'asc',
+  });
 
   useEffect(() => {
     if (!editor) return;
@@ -111,25 +147,39 @@ export function DnsServersPage() {
   if (listQ.isLoading) return <LoadingState testId="admin.cluster.dns_servers.loading" label={t('admin.cluster.dns_servers.loading')} />;
   if (listQ.isError) return <ErrorState testId="admin.cluster.dns_servers.error" title={t('admin.cluster.dns_servers.load_failed')} error={listQ.error} onRetry={() => void listQ.refetch()} showBack={false} />;
 
-  const filtersActive = Boolean(q.trim() || hidden || userZones);
-
   return (
     <div className="space-y-6" data-testid="admin.cluster.dns_servers.page">
       <FilterBar
         left={<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('admin.cluster.dns_servers.search.placeholder')} testId="admin.cluster.dns_servers.search.input" />}
         right={<div className="flex flex-wrap items-end gap-2"><div><div className="mb-1 text-xs font-medium text-muted">{t('common.hidden')}</div><Select value={hidden} onChange={(e) => setHidden(e.target.value)} options={[{ value: '', label: t('common.all') }, { value: 'true', label: t('common.yes') }, { value: 'false', label: t('common.no') }]} testId="admin.cluster.dns_servers.filter.hidden" /></div><div><div className="mb-1 text-xs font-medium text-muted">{t('admin.cluster.dns_servers.field.user_zones')}</div><Select value={userZones} onChange={(e) => setUserZones(e.target.value)} options={[{ value: '', label: t('common.all') }, { value: 'true', label: t('common.yes') }, { value: 'false', label: t('common.no') }]} testId="admin.cluster.dns_servers.filter.user_zones" /></div><Button variant="secondary" onClick={() => listQ.refetch()}>{t('common.refresh')}</Button><Button onClick={() => setEditor({ mode: 'create' })}>{t('common.create')}</Button></div>}
       />
-      {filtersActive ? <div className="text-xs text-faint">{t('list.meta.filters_active')}</div> : null}
-      {rows.length === 0 ? <EmptyState testId="admin.cluster.dns_servers.empty" title={t('admin.cluster.dns_servers.empty')} body={t('admin.cluster.dns_servers.empty_body')} /> : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm table-list">
+      {filtersActive ? <div className="text-xs text-faint">{t('list.meta.filters_progressive')}</div> : null}
+      {rows.length === 0 ? <div className="space-y-2"><EmptyState testId="admin.cluster.dns_servers.empty" title={t('admin.cluster.dns_servers.empty')} body={t('admin.cluster.dns_servers.empty_body')} />{(rawRows.length > 0 || pagination.canPrev || canNext) ? <KeysetPagination testId="admin.cluster.dns_servers.pagination" page={pagination.page} pageCount={pageCount} totalPagesKnown={totalPagesKnown} maxDirectPage={maxDirectPage} jumpPending={isJumping} canPrev={pagination.canPrev} canNext={canNext} onPrev={pagination.goPrev} onNext={() => pagination.goNext(cursor)} onGoToPage={goToPage} limit={pagination.limit} allowedLimits={pagination.allowedLimits} onLimitChange={pagination.setLimit} /> : null}</div> : (
+        <TableCard
+          testId="admin.cluster.dns_servers.table"
+          minWidth="lg"
+          footer={
+            <KeysetPagination
+              testId="admin.cluster.dns_servers.pagination"
+              page={pagination.page}
+              pageCount={pageCount}
+              totalPagesKnown={totalPagesKnown}
+              maxDirectPage={maxDirectPage}
+              jumpPending={isJumping}
+              canPrev={pagination.canPrev}
+              canNext={canNext}
+              onPrev={pagination.goPrev}
+              onNext={() => pagination.goNext(cursor)}
+              onGoToPage={goToPage}
+              limit={pagination.limit}
+              allowedLimits={pagination.allowedLimits}
+              onLimitChange={pagination.setLimit}
+            />
+          }
+        >
               <thead><tr className="text-left text-xs uppercase tracking-wide text-faint"><th className="py-2 pl-4 pr-3">{t('common.name')}</th><th className="py-2 pr-3">{t('common.node')}</th><th className="py-2 pr-3">{t('common.ipv4')}</th><th className="py-2 pr-3">{t('common.ipv6')}</th><th className="py-2 pr-3">{t('common.flags')}</th><th className="py-2 pr-4">{t('common.actions')}</th></tr></thead>
-              <tbody>{rows.map((row) => <tr key={row.id} className="border-t border-border" data-testid={`admin.cluster.dns_servers.row.${row.id}`}><td className="py-2 pl-4 pr-3 font-medium text-fg">{String(row.name ?? `#${row.id}`)}</td><td className="py-2 pr-3">{nodeLabel(row)}</td><td className="py-2 pr-3">{row.ipv4_addr || t('common.na')}</td><td className="py-2 pr-3">{row.ipv6_addr || t('common.na')}</td><td className="py-2 pr-3"><div className="flex flex-wrap gap-2">{row.hidden ? <Badge variant="warn">{t('common.hidden')}</Badge> : null}{row.enable_user_dns_zones ? <Badge variant="ok">{t('admin.cluster.dns_servers.badge.user_zones')}</Badge> : <Badge variant="neutral">{t('admin.cluster.dns_servers.badge.no_user_zones')}</Badge>}</div></td><td className="py-2 pr-4 text-right"><div className="flex justify-end gap-2"><ActionButton size="sm" variant="secondary" onClick={() => setEditor({ mode: 'edit', server: row })}>{t('common.edit')}</ActionButton><ActionButton size="sm" variant="danger" onClick={() => setConfirmDelete(row)}>{t('common.delete')}</ActionButton></div></td></tr>)}</tbody>
-            </table>
-          </div>
-          <KeysetPagination page={pagination.page} pageCount={pagination.stack.length} canPrev={pagination.canPrev} canNext={hasMore} onPrev={pagination.goPrev} onNext={() => pagination.goNext(cursor)} />
-        </Card>
+              <tbody>{rows.map((row) => <tr key={row.id} className="border-t border-border" data-testid={`admin.cluster.dns_servers.row.${row.id}`}><td className="py-2 pl-4 pr-3 font-medium text-fg">{String(row.name ?? `#${row.id}`)}</td><td className="py-2 pr-3">{nodeLabel(row)}</td><td className="py-2 pr-3">{row.ipv4_addr || t('common.na')}</td><td className="py-2 pr-3">{row.ipv6_addr || t('common.na')}</td><td className="py-2 pr-3"><div className="flex flex-wrap gap-2">{row.hidden ? <Badge variant="warn">{t('common.hidden')}</Badge> : null}{row.enable_user_dns_zones ? <Badge variant="ok">{t('admin.cluster.dns_servers.badge.user_zones')}</Badge> : <Badge variant="neutral">{t('admin.cluster.dns_servers.badge.no_user_zones')}</Badge>}</div></td><td className="py-2 pr-4 text-right"><div className="inline-flex items-center justify-end gap-1" role="group" aria-label={t('common.actions')}><ActionButton size="sm" variant="ghost" className="h-8 w-8 min-w-8 px-0" title={t('common.edit')} ariaLabel={t('common.edit')} testId={`admin.cluster.dns_servers.row.${row.id}.edit`} onClick={() => setEditor({ mode: 'edit', server: row })}><Pencil className="h-4 w-4" aria-hidden /></ActionButton><ActionButton size="sm" variant="danger" className="h-8 w-8 min-w-8 px-0" title={t('common.delete')} ariaLabel={t('common.delete')} testId={`admin.cluster.dns_servers.row.${row.id}.delete`} onClick={() => setConfirmDelete(row)}><Trash2 className="h-4 w-4" aria-hidden /></ActionButton></div></td></tr>)}</tbody>
+        </TableCard>
       )}
 
       <Modal open={editor !== null} onClose={() => setEditor(null)} title={editor?.mode === 'edit' ? t('admin.cluster.dns_servers.edit.title') : t('admin.cluster.dns_servers.create.title')}>

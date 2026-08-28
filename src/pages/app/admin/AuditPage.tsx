@@ -12,11 +12,8 @@ import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
 
 import { searchUsers } from '../../../lib/api/users';
-import { fetchObjectHistoryEvents } from '../../../lib/api/audit';
 import { formatDateTime } from '../../../lib/format';
-import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useDebouncedValue } from '../../../lib/hooks/useDebouncedValue';
-import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../lib/smartFilter';
 
@@ -40,6 +37,7 @@ import { TableCard } from '../../../components/ui/TableCard';
 import { TableRowLink } from '../../../components/ui/TableRowLink';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { canonicalKey, safeNumber } from './audit/auditFilterSemantics';
+import { useAuditListPaging } from './audit/useAuditListPaging';
 
 export function AuditPage() {
   const { basePath } = useAppMode();
@@ -150,48 +148,24 @@ export function AuditPage() {
     staleTime: 10_000,
   });
 
-  const pagination = useKeysetPagination({
-    id: 'admin.audit.list',
-    filterKey: JSON.stringify({ q: qTrim, user: userId ?? null, userSession: userSessionId ?? null, object: objectTrim, objectId: objectIdNum ?? null, eventType: eventTypeTrim }),
+  const {
+    pagination,
+    eventsQ,
+    events,
+    rawEvents,
+    canPaginate,
+    pageCursor,
+    pageCount,
+    totalPagesKnown,
+    canNext: canNextPage,
+    goToPage,
+    maxDirectPage,
+    isJumping,
+  } = useAuditListPaging({
+    filters: { q: qTrim, userId, userSessionId, object: objectTrim, objectId: objectIdNum, eventType: eventTypeTrim },
     searchParams,
     setSearchParams,
-    defaultLimit: 25,
-    allowedLimits: [10, 25, 50, 100],
   });
-
-  const eventsQ = useQuery({
-    queryKey: [
-      'object_history',
-      'index',
-      {
-        q: qTrim || undefined,
-        user: userId ?? null,
-        userSession: userSessionId ?? null,
-        object: objectTrim,
-        objectId: objectIdNum ?? null,
-        eventType: eventTypeTrim,
-        fromId: pagination.fromId ?? null,
-        limit: pagination.limit,
-      },
-    ],
-    queryFn: async () =>
-      (
-        await fetchObjectHistoryEvents({
-          q: qTrim || undefined,
-          userId,
-          userSessionId,
-          object: objectTrim || undefined,
-          objectId: objectIdNum,
-          eventType: eventTypeTrim || undefined,
-          fromId: pagination.fromId ?? undefined,
-          limit: pagination.limit,
-        })
-      ).data,
-  });
-
-  const pageCursor = useMemo(() => cursorFromDescendingPage(eventsQ.data as any), [eventsQ.data]);
-  const hasMore = (eventsQ.data ?? []).length >= pagination.limit;
-  const canNextPage = pagination.hasForward || (hasMore && pageCursor !== null);
 
   const openAudit = (historyId: number) => {
     navigate(`${basePath}/audit/${historyId}`);
@@ -555,6 +529,8 @@ export function AuditPage() {
 
           {activeFilterChips.length ? <div className="flex flex-wrap gap-2">{activeFilterChips}</div> : null}
 
+          {qTrim ? <div className="text-xs text-faint">{t('list.meta.filters_progressive')}</div> : null}
+
           <SmartInputHelp
             open={helpOpen}
             onClose={() => setHelpOpen(false)}
@@ -711,25 +687,48 @@ export function AuditPage() {
           onRetry={() => void eventsQ.refetch()}
           detailsExtra={{ page: 'admin.audit' }}
         />
-      ) : (eventsQ.data ?? []).length === 0 ? (
-        <EmptyState
-          testId="admin.audit.empty"
-          title={t('audit.empty.title')}
-          body={t('audit.empty.body')}
-          actionLabel={t('common.clear_filters')}
-          onAction={clearFilters}
-        />
+      ) : events.length === 0 ? (
+        <div className="space-y-2">
+          <EmptyState
+            testId="admin.audit.empty"
+            title={t('audit.empty.title')}
+            body={t('audit.empty.body')}
+            actionLabel={t('common.clear_filters')}
+            onAction={clearFilters}
+          />
+          {canPaginate && (rawEvents.length > 0 || pagination.canPrev || canNextPage) ? (
+            <KeysetPagination
+              page={pagination.page}
+              pageCount={pageCount}
+              totalPagesKnown={totalPagesKnown}
+              maxDirectPage={maxDirectPage}
+              jumpPending={isJumping}
+              canPrev={pagination.canPrev}
+              canNext={canNextPage}
+              onPrev={pagination.goPrev}
+              onNext={() => pagination.goNext(pageCursor)}
+              onGoToPage={goToPage}
+              limit={pagination.limit}
+              allowedLimits={pagination.allowedLimits}
+              onLimitChange={pagination.setLimit}
+              testId="admin.audit.pagination"
+            />
+          ) : null}
+        </div>
       ) : (
         <>
           <div className="mb-3 rounded-lg border border-border bg-surface shadow-sm">
             <KeysetPagination
               page={pagination.page}
-              pageCount={pagination.stack.length}
+              pageCount={pageCount}
+              totalPagesKnown={totalPagesKnown}
+              maxDirectPage={maxDirectPage}
+              jumpPending={isJumping}
               canPrev={pagination.canPrev}
               canNext={canNextPage}
               onPrev={pagination.goPrev}
               onNext={() => pagination.goNext(pageCursor)}
-              onGoToPage={pagination.goToPage}
+              onGoToPage={goToPage}
               limit={pagination.limit}
               allowedLimits={pagination.allowedLimits}
               onLimitChange={pagination.setLimit}
@@ -744,12 +743,15 @@ export function AuditPage() {
             footer={
               <KeysetPagination
                 page={pagination.page}
-                pageCount={pagination.stack.length}
+                pageCount={pageCount}
+                totalPagesKnown={totalPagesKnown}
+                maxDirectPage={maxDirectPage}
+                jumpPending={isJumping}
                 canPrev={pagination.canPrev}
                 canNext={canNextPage}
                 onPrev={pagination.goPrev}
                 onNext={() => pagination.goNext(pageCursor)}
-                onGoToPage={pagination.goToPage}
+                onGoToPage={goToPage}
                 limit={pagination.limit}
                 allowedLimits={pagination.allowedLimits}
                 onLimitChange={pagination.setLimit}
@@ -769,7 +771,7 @@ export function AuditPage() {
               </tr>
             </thead>
             <tbody>
-              {(eventsQ.data ?? []).map((ev) => {
+              {events.map((ev) => {
                 const label = ev.event_type ? String(ev.event_type) : na;
                 const variant = eventVariant(ev.event_type);
                 const badgeVariant = eventBadgeVariant(ev.event_type);

@@ -104,6 +104,8 @@ test.describe('@smoke Admin mailer mailboxes', () => {
 
     await expect(page.getByTestId('admin.mailer.mailboxes.page')).toBeVisible();
     await expect(page.getByTestId('admin.mailer.mailboxes.row.20')).toBeVisible();
+    await expect(page.getByTestId('admin.mailer.mailboxes.pagination.page.1')).toBeVisible();
+    await expect(page.getByTestId('admin.mailer.mailboxes.pagination')).toContainText('Page 1 of 1');
 
     await page.getByTestId('admin.mailer.mailboxes.row.20').click();
     await expect(page).toHaveURL(/\/admin\/mailer\/mailboxes\/20/);
@@ -132,7 +134,8 @@ test.describe('@smoke Admin mailer mailboxes', () => {
 
     expect(mailboxReqs.length).toBeGreaterThan(0);
     const last = mailboxReqs[mailboxReqs.length - 1];
-    expect(last.searchParams.get('mailbox[q]')).toBe('support');
+    expect(last.searchParams.get('mailbox[q]')).toBeNull();
+    expect(last.searchParams.get('_meta[count]')).toBeNull();
 
     await page.getByTestId('admin.mailer.mailboxes.filter.clear').click();
     await expect(page.getByTestId('admin.mailer.mailboxes.row.20')).toBeVisible();

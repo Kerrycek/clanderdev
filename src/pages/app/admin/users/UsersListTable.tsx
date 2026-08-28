@@ -25,6 +25,11 @@ interface UsersListTableProps {
   t: UsersPageTranslator;
   na: string;
   pagination: KeysetPaginationState;
+  pageCount: number;
+  totalPagesKnown: boolean;
+  onGoToPage: (pageNumber: number) => void | Promise<void>;
+  maxDirectPage: number;
+  jumpPending: boolean;
   canPaginate: boolean;
   canNext: boolean;
   pageCursor: number | null;
@@ -36,6 +41,11 @@ export function UsersListTable({
   t,
   na,
   pagination,
+  pageCount,
+  totalPagesKnown,
+  onGoToPage,
+  maxDirectPage,
+  jumpPending,
   canPaginate,
   canNext,
   pageCursor,
@@ -49,12 +59,15 @@ export function UsersListTable({
         canPaginate ? (
           <KeysetPagination
             page={pagination.page}
-            pageCount={pagination.stack.length}
+            pageCount={pageCount}
+            totalPagesKnown={totalPagesKnown}
+            maxDirectPage={maxDirectPage}
+            jumpPending={jumpPending}
             canPrev={pagination.canPrev}
             canNext={canNext}
             onPrev={pagination.goPrev}
             onNext={() => pagination.goNext(pageCursor)}
-            onGoToPage={pagination.goToPage}
+            onGoToPage={onGoToPage}
             limit={pagination.limit}
             allowedLimits={pagination.allowedLimits}
             onLimitChange={pagination.setLimit}

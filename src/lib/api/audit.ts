@@ -23,8 +23,8 @@ export interface ObjectHistoryEvent {
 export async function fetchObjectHistoryEvents(opts?: {
   limit?: number;
   fromId?: number;
-  /** Full text search (event_type, object type, actor…) */
-  q?: string;
+  /** Request an exact total for the active server-side filters. */
+  count?: boolean;
   userId?: number;
   userSessionId?: number;
   object?: string;
@@ -34,9 +34,6 @@ export async function fetchObjectHistoryEvents(opts?: {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-
-  const q = opts?.q ? String(opts.q).trim() : '';
-  if (q) params['q'] = q;
 
   if (opts?.userId !== undefined) params['user'] = opts.userId;
   if (opts?.userSessionId !== undefined) params['user_session'] = opts.userSessionId;
@@ -54,6 +51,7 @@ export async function fetchObjectHistoryEvents(opts?: {
     path: '/object_histories',
     namespace: 'object_history',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return { ...res, data: expectArray<ObjectHistoryEvent>(res.data, 'object_histories#index') };

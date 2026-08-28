@@ -1,5 +1,6 @@
 // Requests / payments
 import { enPaymentReview } from './requests/payment_review';
+import { enFinance } from './requests/finance';
 
 export const enRequests = {
   'requests.list.title': 'Requests',
@@ -183,6 +184,8 @@ export const enRequests = {
   'payments.incoming.list.title': 'Incoming payments',
   'payments.incoming.list.description': 'Bank transfers and other incoming payments.',
   'payments.incoming.list.filter.state.aria': 'Filter by state',
+  'payments.incoming.list.open_id.aria': 'Open an incoming payment by ID',
+  'payments.incoming.list.open_id.placeholder': 'Payment #ID',
   'payments.incoming.list.filter.q.placeholder': 'Search (id, tx, vs, account, user...)',
   'payments.incoming.list.load_error.title': 'Unable to load incoming payments',
   'payments.incoming.list.empty': 'No incoming payments',
@@ -373,5 +376,6 @@ export const enRequests = {
   'payments.incoming.bulk.toast.success.body': '{count} payments were updated.',
   'payments.incoming.bulk.toast.partial.title': 'Bulk reconciliation finished with errors',
   'payments.incoming.bulk.toast.partial.body': 'Updated: {succeeded}; failed: {failed}. First error: {error}',
+  ...enFinance,
   ...enPaymentReview,
 } as const;

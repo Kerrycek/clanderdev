@@ -1,5 +1,6 @@
 // Requests / payments
 import { csPaymentReview } from './requests/payment_review';
+import { csFinance } from './requests/finance';
 
 export const csRequests = {
   'requests.list.title': 'Žádosti',
@@ -183,6 +184,8 @@ export const csRequests = {
   'payments.incoming.list.title': 'Příchozí platby',
   'payments.incoming.list.description': 'Bankovní převody a další příchozí platby.',
   'payments.incoming.list.filter.state.aria': 'Filtrovat podle stavu',
+  'payments.incoming.list.open_id.aria': 'Otevřít příchozí platbu podle ID',
+  'payments.incoming.list.open_id.placeholder': '#ID platby',
   'payments.incoming.list.filter.q.placeholder': 'Hledat (id, tx, VS, účet, uživatel...)',
   'payments.incoming.list.load_error.title': 'Nelze načíst příchozí platby',
   'payments.incoming.list.empty': 'Žádné příchozí platby',
@@ -373,5 +376,6 @@ export const csRequests = {
   'payments.incoming.bulk.toast.success.body': 'Aktualizováno plateb: {count}.',
   'payments.incoming.bulk.toast.partial.title': 'Hromadné párování skončilo s chybami',
   'payments.incoming.bulk.toast.partial.body': 'Aktualizováno: {succeeded}; selhalo: {failed}. První chyba: {error}',
+  ...csFinance,
   ...csPaymentReview,
 } as const;

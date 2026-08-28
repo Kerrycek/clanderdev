@@ -37,16 +37,12 @@ export async function fetchIncomingPayments(opts?: {
   limit?: number;
   fromId?: number;
   state?: string;
-  q?: string;
-  userId?: number;
   count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.state) params['state'] = opts.state;
-  if (opts?.q) params['q'] = opts.q;
-  if (opts?.userId !== undefined) params['user'] = opts.userId;
 
   const res = await haveApiCall<IncomingPayment[]>({
     method: 'GET',
@@ -153,4 +149,55 @@ export async function fetchPaymentInstructions(userId: number) {
   }
 
   return { ...res, data: { instructions: String(res.data?.instructions ?? '') } };
+}
+
+export type IncomeEstimateSelection = 'exactly_until' | 'all_until';
+
+export interface EstimateIncomeInput {
+  year: number;
+  month: number;
+  select: IncomeEstimateSelection;
+  duration: number;
+}
+
+export interface IncomeEstimate {
+  user_count: number;
+  estimated_income: number;
+}
+
+function finiteApiNumber(value: unknown, field: keyof IncomeEstimate): number {
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numberValue)) {
+    throw new Error(`payment_stats#estimate_income: invalid ${field}`);
+  }
+  return numberValue;
+}
+
+/**
+ * Estimate income for users matching a paid-until period.
+ *
+ * The API contract intentionally does not declare a currency for
+ * `estimated_income`, so callers must present it as a raw API value.
+ */
+export async function estimateIncome(input: EstimateIncomeInput, opts?: { signal?: AbortSignal }) {
+  const res = await haveApiCall<IncomeEstimate>({
+    method: 'GET',
+    path: '/payment_stat/estimate_income',
+    namespace: 'payment_stat',
+    params: {
+      year: input.year,
+      month: input.month,
+      select: input.select,
+      duration: input.duration,
+    },
+    signal: opts?.signal,
+  });
+
+  return {
+    ...res,
+    data: {
+      user_count: Math.max(0, Math.trunc(finiteApiNumber(res.data?.user_count, 'user_count'))),
+      estimated_income: finiteApiNumber(res.data?.estimated_income, 'estimated_income'),
+    },
+  };
 }

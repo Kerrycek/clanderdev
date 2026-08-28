@@ -1,21 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAppMode } from '../../../../app/appMode';
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
-
-import { createMailbox, fetchMailboxes, type Mailbox } from '../../../../lib/api/mailer';
+import { createMailbox, type Mailbox } from '../../../../lib/api/mailer';
 import { formatDateTime } from '../../../../lib/format';
 import { useKeysetPagination } from '../../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
-
 import { ListShell } from '../../../../components/layout/ListShell';
 import { PageHeader } from '../../../../components/layout/PageHeader';
 import { FilterBar } from '../../../../components/layout/FilterBar';
-
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { Checkbox } from '../../../../components/ui/Checkbox';
@@ -25,7 +20,6 @@ import { FilterChip } from '../../../../components/ui/FilterChip';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { ErrorState } from '../../../../components/ui/ErrorState';
 import { Input } from '../../../../components/ui/Input';
-import { KeysetPagination } from '../../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../../components/ui/LoadingState';
 import { Modal } from '../../../../components/ui/Modal';
 import { SmartFilterInput, type SmartFilterSuggestion } from '../../../../components/ui/SmartFilterInput';
@@ -33,8 +27,9 @@ import { SmartInputHelp } from '../../../../components/ui/SmartInputHelp';
 import { Select } from '../../../../components/ui/Select';
 import { TableCard } from '../../../../components/ui/TableCard';
 import { TableRowLink } from '../../../../components/ui/TableRowLink';
-
 import { MailerTabs } from './MailerTabs';
+import { MailboxListPagination } from './MailboxListPagination';
+import { useMailboxPageNavigation } from './useMailboxPageNavigation';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
 
 function parsePositiveInt(v: string): number | undefined {
@@ -104,17 +99,15 @@ export function MailboxesPage() {
     allowedLimits: [25, 50, 100],
   });
 
-  const listQ = useQuery({
-    queryKey: ['mailer', 'mailboxes', 'index', { limit: pagination.limit, fromId: pagination.fromId, q: qTrim, server: serverTrim, user: userTrim, ssl: sslValue }],
-    queryFn: async () => (await fetchMailboxes({ limit: pagination.limit, fromId: pagination.fromId, q: qTrim, server: serverTrim, user: userTrim, enableSsl: sslValue })).data,
-    staleTime: 10_000,
+  const mailboxPage = useMailboxPageNavigation({
+    pagination,
+    filters: useMemo(() => ({ q: qTrim, server: serverTrim, user: userTrim, enableSsl: sslValue }), [qTrim, serverTrim, sslValue, userTrim]),
   });
-
-  const rows: Mailbox[] = listQ.data ?? [];
-  const pageCursor = useMemo(() => cursorFromDescendingPage(rows as any), [rows]);
-  const hasMore = rows.length >= pagination.limit;
-  const canNext = pagination.hasForward || (hasMore && pageCursor !== null);
-  const canPaginate = pagination.stack.length > 1 || rows.length > 0;
+  const {
+    canPaginate,
+    rows,
+    listQ,
+  } = mailboxPage;
 
   const filtersActive = Boolean(qTrim || serverTrim || userTrim || sslValue !== undefined || smartErrors.length);
 
@@ -306,7 +299,7 @@ export function MailboxesPage() {
           <PageHeader
             title={t('mailer.tabs.mailboxes')}
             description={t('mailer.mailboxes.list.description')}
-            meta={filtersActive ? <span className="text-xs text-faint">{t('list.meta.filters_active')}</span> : null}
+            meta={filtersActive ? <span className="text-xs text-faint">{t('list.meta.filters_progressive')}</span> : null}
             actions={
               <Button variant="primary" onClick={openCreate} testId="admin.mailer.mailboxes.create">
                 {t('mailer.mailboxes.create')}
@@ -460,11 +453,16 @@ export function MailboxesPage() {
           detailsExtra={{ page: 'admin.mailer.mailboxes.list' }}
         />
       ) : rows.length === 0 ? (
-        <EmptyState
-          testId="admin.mailer.mailboxes.empty"
-          title={filtersActive ? t('empty.list.no_matches.title') : t('empty.list.empty.title')}
-          body={filtersActive ? t('empty.list.no_matches.body') : t('empty.list.empty.body')}
-        />
+        <div className="space-y-2">
+          <EmptyState
+            testId="admin.mailer.mailboxes.empty"
+            title={filtersActive ? t('empty.list.no_matches.title') : t('empty.list.empty.title')}
+            body={filtersActive ? t('empty.list.no_matches.body') : t('empty.list.empty.body')}
+          />
+          {canPaginate ? (
+            <MailboxListPagination {...mailboxPage} pagination={pagination} />
+          ) : null}
+        </div>
       ) : (
         <>
           <TableCard
@@ -472,16 +470,7 @@ export function MailboxesPage() {
             minWidth="md"
             footer={
               canPaginate ? (
-                <KeysetPagination
-                  testId="admin.mailer.mailboxes.pagination"
-                  variant="inCard"
-                  limit={pagination.limit}
-                  canPrev={pagination.canPrev}
-                  canNext={canNext}
-                  onPrev={() => pagination.goPrev()}
-                  onNext={() => pagination.goNext(pageCursor)}
-                  onLimitChange={(n) => pagination.setLimit(n)}
-                />
+                <MailboxListPagination {...mailboxPage} pagination={pagination} variant="inCard" />
               ) : null
             }
           >

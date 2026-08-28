@@ -134,6 +134,79 @@ test('admin incoming payments: reconciliation summary links to all unmatched pay
 
   await expect(page).toHaveURL(/state=unmatched/);
   await expect.poll(() => requestedStates).toContain('unmatched');
-  await expect(page.getByTestId('admin.payments.incoming.row.399')).toBeVisible();
+  await expect(page.locator('[data-testid="admin.payments.incoming.row.399.dot"]:visible')).toBeVisible();
   await expect(page.getByTestId('admin.payments.incoming.row.400')).toHaveCount(0);
+});
+
+test('admin incoming payments: only sends supported state filters and opens an exact payment ID', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+  const haveApiMock = await installHaveApiMock(page, { user: { id: 1, login: 'admin', level: 100 } });
+  const indexRequests: URLSearchParams[] = [];
+
+  haveApiMock.addHandler('GET incoming_payments', ({ searchParams }) => {
+    indexRequests.push(new URLSearchParams(searchParams));
+    return {
+      status: true,
+      response: {
+        incoming_payments: [],
+        _meta: { total_count: 0 },
+      },
+    };
+  });
+
+  await page.goto(withAppUrl('/admin/payments/incoming?q=ignored-by-api&user=42&state=queued'));
+
+  await expect(page).toHaveURL(/state=queued/);
+  await expect(page).not.toHaveURL(/[?&](?:q|user)=/);
+  await expect.poll(() => indexRequests.length).toBeGreaterThan(0);
+  for (const request of indexRequests) {
+    expect(request.has('incoming_payment[q]')).toBe(false);
+    expect(request.has('incoming_payment[user]')).toBe(false);
+  }
+
+  await page.getByTestId('admin.payments.incoming.open_id.input').fill('#300');
+  await page.getByTestId('admin.payments.incoming.open_id.submit').click();
+  await expect(page).toHaveURL(/\/admin\/payments\/incoming\/300$/);
+});
+
+test('admin incoming payments: descending keyset jump reaches page five without overlap', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+  const haveApiMock = await installHaveApiMock(page, { user: { id: 1, login: 'admin', level: 100 } });
+  const payments = Array.from({ length: 125 }, (_, index) => ({
+    id: 125 - index,
+    state: 'processed',
+    date: '2026-02-14T09:00:00Z',
+    transaction_id: `TX-${125 - index}`,
+    amount: 1_000,
+    currency: 'CZK',
+    account_name: 'Test account',
+    vs: String(125 - index),
+    user: { id: 10, login: 'alice' },
+    user_paid_until: '2026-03-01T00:00:00Z',
+    created_at: '2026-02-14T09:00:00Z',
+  }));
+  const cursors: Array<number | null> = [];
+
+  haveApiMock.addHandler('GET incoming_payments', ({ searchParams }) => {
+    const state = searchParams.get('incoming_payment[state]');
+    if (state) return { status: true, response: { incoming_payments: [], _meta: { total_count: 0 } } };
+
+    const fromIdRaw = searchParams.get('incoming_payment[from_id]');
+    const fromId = fromIdRaw ? Number(fromIdRaw) : null;
+    const limit = Number(searchParams.get('incoming_payment[limit]') ?? 25);
+    cursors.push(fromId);
+    const rows = payments.filter((payment) => fromId === null || payment.id < fromId).slice(0, limit);
+    return { status: true, response: { incoming_payments: rows, _meta: { total_count: payments.length } } };
+  });
+
+  await page.goto(withAppUrl('/admin/payments/incoming?limit=25'));
+  const pagination = page.getByTestId('admin.payments.incoming.pagination.desktop');
+  await expect(pagination).toContainText(/1.*5/);
+  await pagination.getByTestId('admin.payments.incoming.pagination.desktop.page.5').click();
+
+  await expect(page).toHaveURL(/(?:\?|&)page=5(?:&|$)/);
+  await expect(page).toHaveURL(/(?:\?|&)from_id=26(?:&|$)/);
+  await expect(page.getByTestId('admin.payments.incoming.row.25')).toBeVisible();
+  await expect(page.getByTestId('admin.payments.incoming.row.26')).toHaveCount(0);
+  expect(cursors).toEqual(expect.arrayContaining([null, 101, 76, 51, 26]));
 });

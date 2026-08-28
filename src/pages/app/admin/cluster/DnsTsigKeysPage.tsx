@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Trash2 } from 'lucide-react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 
 import { useI18n } from '../../../../app/i18n';
@@ -10,7 +11,6 @@ import { Alert } from '../../../../components/ui/Alert';
 import { ActionButton } from '../../../../components/ui/ActionButton';
 import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
-import { Card } from '../../../../components/ui/Card';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { ErrorState } from '../../../../components/ui/ErrorState';
@@ -21,9 +21,11 @@ import { Modal } from '../../../../components/ui/Modal';
 import { SecretField } from '../../../../components/ui/SecretField';
 import { Select } from '../../../../components/ui/Select';
 import { UserLookupInput } from '../../../../components/ui/UserLookupInput';
+import { TableCard } from '../../../../components/ui/TableCard';
 import { DNS_TSIG_ALGORITHMS, fetchDnsTsigKeys, createDnsTsigKey, deleteDnsTsigKey, type DnsTsigKeySummary } from '../../../../lib/api/dns';
+import { getMetaTotalCount } from '../../../../lib/api/haveapi';
+import { useCountedKeysetPagination } from '../../../../lib/hooks/useCountedKeysetPagination';
 import { useKeysetPagination } from '../../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
 import { formatDateTime } from '../../../../lib/format';
 import { formatErrorMessage } from '../../../../lib/errors';
 
@@ -52,11 +54,19 @@ export function DnsTsigKeysPage() {
 
   const listQ = useQuery({
     queryKey: ['dns_tsig_keys', pagination.page, pagination.limit, pagination.fromId, algorithm, userId],
-    queryFn: async () => fetchDnsTsigKeys({ limit: pagination.limit, fromId: pagination.fromId, algorithm: algorithm || undefined, user: userId ?? undefined }),
+    queryFn: async () => fetchDnsTsigKeys({ limit: pagination.limit, fromId: pagination.fromId, algorithm: algorithm || undefined, user: userId ?? undefined, count: true }),
   });
   const rows = listQ.data?.data ?? [];
-  const cursor = useMemo(() => cursorFromDescendingPage(rows as any), [rows]);
-  const hasMore = rows.length >= pagination.limit;
+  const totalCount = getMetaTotalCount(listQ.data?.meta);
+  const loadPage = useCallback(async (fromId: number | undefined) => (await fetchDnsTsigKeys({
+    limit: pagination.limit,
+    fromId,
+    algorithm: algorithm || undefined,
+    user: userId ?? undefined,
+  })).data, [algorithm, pagination.limit, userId]);
+  const { pageCursor: cursor, pageCount, totalPagesKnown, canNext, goToPage, maxDirectPage, isJumping } = useCountedKeysetPagination({
+    pagination, totalCount, rows, loadPage, direction: 'asc',
+  });
 
   const createM = useMutation({
     mutationFn: async () => {
@@ -104,15 +114,31 @@ export function DnsTsigKeysPage() {
       />
       {filtersActive ? <div className="text-xs text-faint">{t('list.meta.filters_active')}</div> : null}
       {rows.length === 0 ? <EmptyState testId="admin.cluster.dns_tsig.empty" title={t('admin.cluster.dns_tsig.empty')} body={t('admin.cluster.dns_tsig.empty_body')} /> : (
-        <Card>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm table-list">
+        <TableCard
+          testId="admin.cluster.dns_tsig.table"
+          minWidth="md"
+          footer={
+            <KeysetPagination
+              testId="admin.cluster.dns_tsig.pagination"
+              page={pagination.page}
+              pageCount={pageCount}
+              totalPagesKnown={totalPagesKnown}
+              maxDirectPage={maxDirectPage}
+              jumpPending={isJumping}
+              canPrev={pagination.canPrev}
+              canNext={canNext}
+              onPrev={pagination.goPrev}
+              onNext={() => pagination.goNext(cursor)}
+              onGoToPage={goToPage}
+              limit={pagination.limit}
+              allowedLimits={pagination.allowedLimits}
+              onLimitChange={pagination.setLimit}
+            />
+          }
+        >
               <thead><tr className="text-left text-xs uppercase tracking-wide text-faint"><th className="py-2 pl-4 pr-3">{t('common.name')}</th><th className="py-2 pr-3">{t('common.user')}</th><th className="py-2 pr-3">{t('common.algorithm')}</th><th className="py-2 pr-3">{t('common.created')}</th><th className="py-2 pr-4">{t('common.actions')}</th></tr></thead>
-              <tbody>{rows.map((row) => <tr key={row.id} className="border-t border-border" data-testid={`admin.cluster.dns_tsig.row.${row.id}`}><td className="py-2 pl-4 pr-3 font-medium text-fg">{String(row.name ?? `#${row.id}`)}</td><td className="py-2 pr-3">{typeof row.user?.login === 'string' ? String(row.user.login) : t('common.na')}</td><td className="py-2 pr-3"><Badge variant="neutral">{String(row.algorithm ?? t('common.na'))}</Badge></td><td className="py-2 pr-3">{row.created_at ? formatDateTime(String(row.created_at)) : t('common.na')}</td><td className="py-2 pr-4 text-right"><ActionButton size="sm" variant="danger" onClick={() => setConfirmDelete(row)}>{t('common.delete')}</ActionButton></td></tr>)}</tbody>
-            </table>
-          </div>
-          <KeysetPagination page={pagination.page} pageCount={pagination.stack.length} canPrev={pagination.canPrev} canNext={hasMore} onPrev={pagination.goPrev} onNext={() => pagination.goNext(cursor)} />
-        </Card>
+              <tbody>{rows.map((row) => <tr key={row.id} className="border-t border-border" data-testid={`admin.cluster.dns_tsig.row.${row.id}`}><td className="py-2 pl-4 pr-3 font-medium text-fg">{String(row.name ?? `#${row.id}`)}</td><td className="py-2 pr-3">{typeof row.user?.login === 'string' ? String(row.user.login) : t('common.na')}</td><td className="py-2 pr-3"><Badge variant="neutral">{String(row.algorithm ?? t('common.na'))}</Badge></td><td className="py-2 pr-3">{row.created_at ? formatDateTime(String(row.created_at)) : t('common.na')}</td><td className="py-2 pr-4 text-right"><ActionButton size="sm" variant="danger" className="h-8 w-8 min-w-8 px-0" title={t('common.delete')} ariaLabel={t('common.delete')} testId={`admin.cluster.dns_tsig.row.${row.id}.delete`} onClick={() => setConfirmDelete(row)}><Trash2 className="h-4 w-4" aria-hidden /></ActionButton></td></tr>)}</tbody>
+        </TableCard>
       )}
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('admin.cluster.dns_tsig.create.title')} testId="admin.cluster.dns_tsig.create.modal">
