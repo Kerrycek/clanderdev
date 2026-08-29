@@ -41,6 +41,8 @@ export async function fetchCurrentUser() {
 export interface FetchUsersOpts {
   limit?: number;
   fromId?: number;
+  /** Request an exact total for filters supported directly by HaveAPI. */
+  count?: boolean;
 
   /**
    * Legacy admin list search from the redesign snapshot.
@@ -76,6 +78,7 @@ export interface FetchUsersOpts {
 interface RawFetchUsersOpts {
   limit?: number;
   fromId?: number;
+  count?: boolean;
   level?: number;
   mailerEnabled?: boolean;
   adminOnly?: boolean;
@@ -86,10 +89,19 @@ interface RawFetchUsersOpts {
   info?: string;
 }
 
+export interface UserCompatPagination {
+  /** Cursor after the last raw user inspected in this bounded scan chunk. */
+  nextFromId?: number;
+  /** True only when this scan reached the end of the server-side result set. */
+  complete: boolean;
+  scannedRows: number;
+}
+
 interface UserListResult {
   data: User[];
   meta?: Record<string, unknown>;
   envelope: HaveApiEnvelope;
+  compat?: UserCompatPagination;
 }
 
 const DEFAULT_LIST_LIMIT = 50;
@@ -205,6 +217,7 @@ async function rawFetchUsers(opts?: RawFetchUsersOpts): Promise<UserListResult> 
     path: '/users',
     namespace: 'user',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return { ...res, data: expectArray<User>(res.data, 'users') };
@@ -215,6 +228,7 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
   const safeOpts: FetchUsersOpts = {
     limit,
     fromId: opts?.fromId,
+    count: opts?.count,
     q: normalizeQueryNeedle(opts?.q),
     role: opts?.role,
     level: opts?.level,
@@ -233,6 +247,7 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     return rawFetchUsers({
       limit,
       fromId: safeOpts.fromId,
+      count: safeOpts.count,
       level: safeOpts.level,
       mailerEnabled: safeOpts.mailerEnabled,
       adminOnly: safeOpts.role === 'admin',
@@ -246,8 +261,10 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
   let scanned = 0;
   let batches = 0;
   let lastResult: UserListResult | null = null;
+  let complete = false;
+  let nextFromId: number | undefined;
 
-  while (data.length < limit && scanned < COMPAT_SCAN_MAX_ROWS && batches < COMPAT_SCAN_MAX_BATCHES) {
+  scan: while (data.length < limit && scanned < COMPAT_SCAN_MAX_ROWS && batches < COMPAT_SCAN_MAX_BATCHES) {
     const remainingScanBudget = COMPAT_SCAN_MAX_ROWS - scanned;
     const batchLimit = Math.max(1, Math.min(buildCompatScanLimit(limit), remainingScanBudget));
 
@@ -262,18 +279,29 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     lastResult = batch;
     batches += 1;
 
-    if (batch.data.length === 0) break;
+    if (batch.data.length === 0) {
+      complete = true;
+      break;
+    }
 
     scanned += batch.data.length;
 
-    for (const user of batch.data) {
+    for (let index = 0; index < batch.data.length; index += 1) {
+      const user = batch.data[index];
+      if (!user) continue;
+      cursor = user.id;
       if (seen.has(user.id)) continue;
       seen.add(user.id);
 
       if (!matchesCompatFilters(user, safeOpts)) continue;
 
       data.push(user);
-      if (data.length >= limit) break;
+      if (data.length >= limit) {
+        const hasRemainingRows = index < batch.data.length - 1 || batch.data.length >= batchLimit;
+        if (hasRemainingRows) nextFromId = cursor;
+        else complete = true;
+        break scan;
+      }
     }
 
     const lastRow = batch.data[batch.data.length - 1];
@@ -282,18 +310,30 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     cursor = lastRow.id;
 
     if (batch.data.length < batchLimit) {
+      complete = true;
       break;
     }
+
+    nextFromId = cursor;
   }
 
   if (lastResult) {
-    return { ...lastResult, data: data.slice(0, limit) };
+    // HaveAPI's total_count describes only the server-side subset. Once we
+    // apply compatibility filters locally, presenting it as an exact filtered
+    // total would be misleading, so keep pagination explicitly unknown.
+    return {
+      ...lastResult,
+      data: data.slice(0, limit),
+      meta: undefined,
+      compat: { nextFromId: complete ? undefined : nextFromId ?? cursor, complete, scannedRows: scanned },
+    };
   }
 
   return {
     data: [],
     meta: undefined,
     envelope: { status: true, response: { users: [] } },
+    compat: { complete: true, scannedRows: 0 },
   };
 }
 

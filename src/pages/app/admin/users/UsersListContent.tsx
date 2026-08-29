@@ -24,6 +24,11 @@ interface UsersListContentProps {
   t: UsersPageTranslator;
   na: string;
   pagination: KeysetPaginationState;
+  pageCount: number;
+  totalPagesKnown: boolean;
+  onGoToPage: (pageNumber: number) => void | Promise<void>;
+  maxDirectPage: number;
+  jumpPending: boolean;
   canPaginate: boolean;
   canNext: boolean;
   pageCursor: number | null;
@@ -41,6 +46,11 @@ export function UsersListContent({
   t,
   na,
   pagination,
+  pageCount,
+  totalPagesKnown,
+  onGoToPage,
+  maxDirectPage,
+  jumpPending,
   canPaginate,
   canNext,
   pageCursor,
@@ -64,13 +74,35 @@ export function UsersListContent({
 
   if (users.length === 0) {
     return (
-      <EmptyState
-        testId="admin.users.empty"
-        title={filtersActive ? t('empty.list.no_matches.title') : t('admin.users.empty')}
-        body={filtersActive ? t('empty.list.no_matches.body') : undefined}
-        actionLabel={filtersActive ? t('common.clear_filters') : undefined}
-        onAction={filtersActive ? onClearFilters : undefined}
-      />
+      <div className="space-y-2">
+        <EmptyState
+          testId="admin.users.empty"
+          title={filtersActive ? t('empty.list.no_matches.title') : t('admin.users.empty')}
+          body={filtersActive ? t('empty.list.no_matches.body') : undefined}
+          actionLabel={filtersActive ? t('common.clear_filters') : undefined}
+          onAction={filtersActive ? onClearFilters : undefined}
+        />
+        {canPaginate ? (
+          <Card>
+            <KeysetPagination
+              page={pagination.page}
+              pageCount={pageCount}
+              totalPagesKnown={totalPagesKnown}
+              maxDirectPage={maxDirectPage}
+              jumpPending={jumpPending}
+              canPrev={pagination.canPrev}
+              canNext={canNext}
+              onPrev={pagination.goPrev}
+              onNext={() => pagination.goNext(pageCursor)}
+              onGoToPage={onGoToPage}
+              limit={pagination.limit}
+              allowedLimits={pagination.allowedLimits}
+              onLimitChange={pagination.setLimit}
+              testId="admin.users.pagination.empty"
+            />
+          </Card>
+        ) : null}
+      </div>
     );
   }
 
@@ -82,12 +114,15 @@ export function UsersListContent({
         <Card className="md:hidden">
           <KeysetPagination
             page={pagination.page}
-            pageCount={pagination.stack.length}
+            pageCount={pageCount}
+            totalPagesKnown={totalPagesKnown}
+            maxDirectPage={maxDirectPage}
+            jumpPending={jumpPending}
             canPrev={pagination.canPrev}
             canNext={canNext}
             onPrev={pagination.goPrev}
             onNext={() => pagination.goNext(pageCursor)}
-            onGoToPage={pagination.goToPage}
+            onGoToPage={onGoToPage}
             limit={pagination.limit}
             allowedLimits={pagination.allowedLimits}
             onLimitChange={pagination.setLimit}
@@ -102,6 +137,11 @@ export function UsersListContent({
         t={t}
         na={na}
         pagination={pagination}
+        pageCount={pageCount}
+        totalPagesKnown={totalPagesKnown}
+        onGoToPage={onGoToPage}
+        maxDirectPage={maxDirectPage}
+        jumpPending={jumpPending}
         canPaginate={canPaginate}
         canNext={canNext}
         pageCursor={pageCursor}

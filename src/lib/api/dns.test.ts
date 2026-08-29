@@ -115,19 +115,26 @@ describe('dns API wrappers', () => {
     expect(u.searchParams.get('dns_record_log[limit]')).toBe('1');
   });
 
-  test('fetchDnsServers forwards search and user-zone filters', async () => {
+  test('fetchDnsServers never forwards unsupported list filters', async () => {
     const fetchMock = mockFetchOk({ dns_servers: [], _meta: { total_count: 0 } });
     vi.stubGlobal('fetch', fetchMock);
 
-    await fetchDnsServers({ q: 'ns1', hidden: false, enable_user_dns_zones: true });
+    const optionsWithUnsupportedFilters = {
+      q: 'ns1',
+      hidden: false,
+      enable_user_dns_zones: true,
+      count: true,
+    };
+    await fetchDnsServers(optionsWithUnsupportedFilters);
 
     const [url] = lastFetchCall(fetchMock);
     const u = new URL(String(url));
 
     expect(u.pathname).toBe('/v7.0/dns_servers');
-    expect(u.searchParams.get('dns_server[q]')).toBe('ns1');
-    expect(u.searchParams.get('dns_server[hidden]')).toBe('false');
-    expect(u.searchParams.get('dns_server[enable_user_dns_zones]')).toBe('true');
+    expect(u.searchParams.get('dns_server[q]')).toBeNull();
+    expect(u.searchParams.get('dns_server[hidden]')).toBeNull();
+    expect(u.searchParams.get('dns_server[enable_user_dns_zones]')).toBeNull();
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchDnsTsigKeys forwards only supported algorithm and user filters', async () => {
@@ -135,7 +142,7 @@ describe('dns API wrappers', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const optionsWithUnsupportedQ = { q: 'alice', algorithm: 'hmac-sha512', user: 7 };
-    await fetchDnsTsigKeys(optionsWithUnsupportedQ);
+    await fetchDnsTsigKeys({ ...optionsWithUnsupportedQ, count: true });
 
     const [url] = lastFetchCall(fetchMock);
     const u = new URL(String(url));
@@ -144,6 +151,7 @@ describe('dns API wrappers', () => {
     expect(u.searchParams.has('dns_tsig_key[q]')).toBe(false);
     expect(u.searchParams.get('dns_tsig_key[algorithm]')).toBe('hmac-sha512');
     expect(u.searchParams.get('dns_tsig_key[user]')).toBe('7');
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchDnsTsigKeys strips secrets from list results before returning them', async () => {

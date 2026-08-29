@@ -1,19 +1,32 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { fetchNodePools, fetchNodes } from './nodes';
+import { HaveApiError } from './haveapi';
+import {
+  NodeCreateReconciliationIncompleteError,
+  reconcileNodeCreate,
+  reconcileNodeCreateAfterSettling,
+} from './nodeCreateReconciliation';
+import {
+  createNode,
+  fetchNodePools,
+  fetchNodes,
+  NodeCreateIndeterminateError,
+} from './nodes';
 
 function mockFetchOk(response: any) {
   return vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: true, response }) });
 }
 
 function lastFetchCall() {
-  const calls = (globalThis.fetch as any).mock.calls;
-  return calls[calls.length - 1] as [string, RequestInit?];
+  const calls = vi.mocked(globalThis.fetch).mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call) throw new Error('Expected fetch to have been called');
+  return call;
 }
 
 describe('nodes API wrappers', () => {
   test('fetchNodes forwards q, state, limit, from_id, and node filters', async () => {
-    globalThis.fetch = mockFetchOk({ nodes: [{ id: 12, name: 'node12' }], _meta: { total_count: 1 } }) as any;
+    vi.stubGlobal('fetch', mockFetchOk({ nodes: [{ id: 12, name: 'node12' }], _meta: { total_count: 1 } }));
 
     const res = await fetchNodes({
       q: 'node12',
@@ -28,7 +41,7 @@ describe('nodes API wrappers', () => {
     expect(res.data).toEqual([{ id: 12, name: 'node12' }]);
 
     const [url] = lastFetchCall();
-    const u = new URL(url);
+    const u = new URL(String(url));
 
     expect(u.pathname).toBe('/v7.0/nodes');
     expect(u.searchParams.get('node[q]')).toBe('node12');
@@ -48,10 +61,138 @@ describe('nodes API wrappers', () => {
     expect(res.data).toEqual([{ id: 7, name: 'tank' }]);
 
     const [url] = lastFetchCall();
-    const u = new URL(url);
+    const u = new URL(String(url));
 
     expect(u.pathname).toBe('/v7.0/pools');
     expect(u.searchParams.get('pool[node]')).toBe('12');
     expect(u.searchParams.get('pool[limit]')).toBe('100');
+  });
+
+  test('marks an HTTP 5xx node create result indeterminate', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ status: false, message: 'upstream unavailable', response: null }),
+    }));
+
+    await expect(createNode({
+      name: 'node42',
+      type: 'node',
+      location: 7,
+      ip_addr: '192.0.2.42',
+    })).rejects.toBeInstanceOf(NodeCreateIndeterminateError);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('marks a lost node create response indeterminate without retrying', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('connection reset')));
+
+    await expect(createNode({
+      name: 'node42',
+      type: 'node',
+      location: 7,
+      ip_addr: '192.0.2.42',
+    })).rejects.toBeInstanceOf(NodeCreateIndeterminateError);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps a definitive 4xx node create rejection retryable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ status: false, message: 'invalid node', response: null }),
+    }));
+
+    const promise = createNode({
+      name: 'node42',
+      type: 'node',
+      location: 7,
+      ip_addr: '192.0.2.42',
+    });
+    await expect(promise).rejects.toBeInstanceOf(HaveApiError);
+    await expect(promise).rejects.not.toBeInstanceOf(NodeCreateIndeterminateError);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('reconciles an indeterminate create by scanning beyond the visible page', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: string) => {
+      const url = new URL(input);
+      const fromId = url.searchParams.get('node[from_id]');
+      const nodes = fromId
+        ? [{ id: 42, name: 'node42', ip_addr: '192.0.2.42' }]
+        : [
+            { id: 9, name: 'node9', ip_addr: '192.0.2.9' },
+            { id: 10, name: 'node10', ip_addr: '192.0.2.10' },
+          ];
+      return { ok: true, json: async () => ({ status: true, response: { nodes } }) };
+    }));
+
+    await expect(reconcileNodeCreate(
+      { name: 'node42', ip_addr: '192.0.2.42' },
+      { pageSize: 2, maxNodes: 10 },
+    )).resolves.toEqual({ status: 'found', node: { id: 42, name: 'node42', ip_addr: '192.0.2.42' } });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(globalThis.fetch).mock.calls;
+    const firstUrl = new URL(String(calls[0]?.[0]));
+    const secondUrl = new URL(String(calls[1]?.[0]));
+    expect(firstUrl.searchParams.get('node[state]')).toBe('all');
+    expect(firstUrl.searchParams.has('node[q]')).toBe(false);
+    expect(secondUrl.searchParams.get('node[from_id]')).toBe('10');
+  });
+
+  test('keeps create reconciliation blocked when a bounded scan is incomplete', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        status: true,
+        response: {
+          nodes: [
+            { id: 10, name: 'node10', ip_addr: '192.0.2.10' },
+            { id: 9, name: 'node9', ip_addr: '192.0.2.9' },
+          ],
+        },
+      }),
+    }));
+
+    await expect(reconcileNodeCreate(
+      { name: 'node42', ip_addr: '192.0.2.42' },
+      { pageSize: 2, maxNodes: 2 },
+    )).rejects.toBeInstanceOf(NodeCreateReconciliationIncompleteError);
+  });
+
+  test('catches a late node commit during the settling window', async () => {
+    let scan = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
+      scan += 1;
+      const nodes = scan === 1
+        ? [{ id: 10, name: 'node10', ip_addr: '192.0.2.10' }]
+        : [{ id: 42, name: 'node42', ip_addr: '192.0.2.42' }];
+      return { ok: true, json: async () => ({ status: true, response: { nodes } }) };
+    }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(reconcileNodeCreateAfterSettling(
+      { name: 'node42', ip_addr: '192.0.2.42' },
+      { pageSize: 2, maxNodes: 10, attempts: 4, settleDelayMs: 0, sleep },
+    )).resolves.toEqual({ status: 'found', node: { id: 42, name: 'node42', ip_addr: '192.0.2.42' } });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps repeated complete scans unresolved instead of declaring a safe retry', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({
+      nodes: [{ id: 10, name: 'node10', ip_addr: '192.0.2.10' }],
+    }));
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(reconcileNodeCreateAfterSettling(
+      { name: 'node42', ip_addr: '192.0.2.42' },
+      { pageSize: 2, maxNodes: 10, attempts: 4, settleDelayMs: 0, sleep },
+    )).resolves.toEqual({ status: 'unresolved' });
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(4);
+    expect(sleep).toHaveBeenCalledTimes(3);
   });
 });

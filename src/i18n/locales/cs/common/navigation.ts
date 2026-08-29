@@ -1,6 +1,8 @@
 // Common navigation, scope, sync, and settings copy
 export const csCommon_navigation = {
   'list.meta.filters_active': 'Filtry aktivní.',
+  'list.meta.filters_progressive':
+    'Tyto filtry se použijí na každou načtenou stránku API. Prohledej i další strany.',
   'pagination.prev': 'Předchozí',
   'pagination.next': 'Další',
   'pagination.rows': 'Řádků',
@@ -11,6 +13,8 @@ export const csCommon_navigation = {
   'pagination.page_current': 'Strana {page} (aktuální)',
   'pagination.jump_label': 'Přejít na',
   'pagination.jump_action': 'Přejít',
+  'pagination.progressive_hint':
+    'Další strany se zpřístupní postupně. Teď lze přeskočit nejvýše na stranu {page}.',
   'nav.navigation': 'Navigace',
   'nav.open': 'Otevřít navigaci',
   'nav.group.services': 'Služby',

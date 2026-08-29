@@ -32,7 +32,6 @@ import { Badge } from '../../../components/ui/Badge';
 import { LockBadge } from '../../../components/ui/LockBadge';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
-import { CopyButton } from '../../../components/ui/CopyButton';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { LinkButton } from '../../../components/ui/LinkButton';
 import { LoadingState } from '../../../components/ui/LoadingState';
@@ -41,6 +40,7 @@ import { ObjectHeader } from '../../../components/ui/ObjectHeader';
 
 import { NodeDetailTabs, NodeMaintenanceSection, NodeOverviewSection } from './nodeDetail/NodeDetailSections';
 import { NodeStorageCard } from './nodeDetail/NodeStorageCard';
+import { NodeLifecycleHeaderActions } from './nodes/NodeLifecycleHeaderActions';
 import { parseNodeDetailSection, type NodeDetailSection } from './nodeDetail/NodeStorageModel';
 import {
   buildNodeStatusKeys,
@@ -399,7 +399,7 @@ export function NodeDetailPage() {
         meta={loc ? t('admin.node.meta.location', { location: loc }) : ' '}
         actions={
           <>
-            {node ? <CopyButton text={title} /> : null}
+            {node ? <NodeLifecycleHeaderActions node={node} busyTransaction={busyTransaction} onUpdated={() => { setNotice(t('admin.node.editor.notice.updated')); refreshAfterNodeMutation(); }} /> : null}
             {typeof nodeId === 'number' && Number.isFinite(nodeId) && nodeId > 0 ? (
               <LinkButton to={`${basePath}/vps?node=${nodeId}`} variant="secondary" title={t('admin.node.action.show_vps.title')}>
                 {t('nav.vps')}

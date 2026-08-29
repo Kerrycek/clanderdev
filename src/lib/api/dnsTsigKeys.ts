@@ -50,6 +50,7 @@ export async function fetchDnsTsigKeys(opts?: {
   limit?: number;
   user?: number;
   algorithm?: string;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
@@ -62,7 +63,7 @@ export async function fetchDnsTsigKeys(opts?: {
     path: '/dns_tsig_keys',
     namespace: 'dns_tsig_key',
     params,
-    meta: { includes: 'user' },
+    meta: { includes: 'user', ...(opts?.count ? { count: true } : {}) },
   });
 
   // Scrub the complete result: HaveAPI envelopes and metadata are cached too.

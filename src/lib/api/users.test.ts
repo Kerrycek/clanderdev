@@ -42,6 +42,7 @@ describe('fetchUsers', () => {
     const res = await fetchUsers({
       limit: 25,
       fromId: 150,
+      count: true,
       role: 'admin',
       level: 90,
       mailerEnabled: false,
@@ -58,6 +59,7 @@ describe('fetchUsers', () => {
     expect(parsed.searchParams.get('user[level]')).toBe('90');
     expect(parsed.searchParams.get('user[mailer_enabled]')).toBe('false');
     expect(parsed.searchParams.get('user[admin]')).toBe('true');
+    expect(parsed.searchParams.get('_meta[count]')).toBe('true');
 
     expect(parsed.searchParams.get('user[q]')).toBeNull();
     expect(parsed.searchParams.get('user[role]')).toBeNull();
@@ -68,17 +70,17 @@ describe('fetchUsers', () => {
     installApiFixture();
 
     const firstBatch = Array.from({ length: 100 }, (_, idx) => ({
-      id: 200 - idx,
-      login: `plain-${200 - idx}`,
+      id: idx + 1,
+      login: `plain-${idx + 1}`,
       level: idx % 3 === 0 ? 21 : 10,
     }));
 
     const secondBatch = [
-      { id: 100, login: 'alpha', level: 21 },
-      { id: 99, login: 'bobby', level: 21 },
-      { id: 98, login: 'bobette', level: 10 },
-      { id: 97, login: 'delta', level: 21 },
-      { id: 96, login: 'bob-support', level: 21 },
+      { id: 101, login: 'alpha', level: 21 },
+      { id: 102, login: 'bobby', level: 21 },
+      { id: 103, login: 'bobette', level: 10 },
+      { id: 104, login: 'delta', level: 21 },
+      { id: 105, login: 'bob-support', level: 21 },
     ];
 
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -89,7 +91,7 @@ describe('fetchUsers', () => {
         return makeUsersResponse(firstBatch);
       }
 
-      if (fromId === '101') {
+      if (fromId === '100') {
         return makeUsersResponse(secondBatch);
       }
 
@@ -102,7 +104,7 @@ describe('fetchUsers', () => {
       role: 'support',
     });
 
-    expect(res.data.map((u) => u.id)).toEqual([99, 96]);
+    expect(res.data.map((u) => u.id)).toEqual([102, 105]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
@@ -113,7 +115,7 @@ describe('fetchUsers', () => {
     expect(firstUrl.searchParams.get('user[role]')).toBeNull();
     expect(firstUrl.searchParams.get('user[limit]')).toBe('100');
 
-    expect(secondUrl.searchParams.get('user[from_id]')).toBe('101');
+    expect(secondUrl.searchParams.get('user[from_id]')).toBe('100');
     expect(secondUrl.searchParams.get('user[q]')).toBeNull();
     expect(secondUrl.searchParams.get('user[role]')).toBeNull();
   });
@@ -136,6 +138,53 @@ describe('fetchUsers', () => {
 
     const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
     expect(url.searchParams.get('user[lockout]')).toBeNull();
+  });
+
+  it('does not expose an unfiltered HaveAPI count for compatibility filters', async () => {
+    installApiFixture();
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      makeOkResponse({
+        status: true,
+        response: {
+          users: [{ id: 10, login: 'matching-user', level: 1 }],
+          _meta: { total_count: 20_000 },
+        },
+      })
+    );
+
+    const res = await fetchUsers({ limit: 25, q: 'matching', count: true });
+
+    expect(res.data).toHaveLength(1);
+    expect(res.meta).toBeUndefined();
+  });
+
+  it('returns a continuation cursor instead of a false empty end after the bounded compatibility scan', async () => {
+    installApiFixture();
+
+    const allRows = [
+      ...Array.from({ length: 1_200 }, (_, index) => ({
+        id: index + 1,
+        login: `plain-${index + 1}`,
+        level: 1,
+      })),
+      { id: 1_201, login: 'needle-user', level: 1 },
+    ];
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const fromId = Number(url.searchParams.get('user[from_id]') ?? 0);
+      const limit = Number(url.searchParams.get('user[limit]') ?? 100);
+      return makeUsersResponse(allRows.filter((row) => row.id > fromId).slice(0, limit));
+    });
+
+    const first = await fetchUsers({ limit: 25, q: 'needle' });
+    expect(first.data).toEqual([]);
+    expect(first.compat).toMatchObject({ complete: false, nextFromId: 1_200, scannedRows: 1_200 });
+    expect(fetchMock).toHaveBeenCalledTimes(12);
+
+    const second = await fetchUsers({ limit: 25, q: 'needle', fromId: first.compat?.nextFromId });
+    expect(second.data.map((user) => user.id)).toEqual([1_201]);
+    expect(second.compat).toMatchObject({ complete: true });
   });
 });
 

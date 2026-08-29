@@ -38,17 +38,19 @@ describe('mailer API wrappers', () => {
     expect(u.searchParams.get('mail_log[created_before]')).toBe('2026-03-09T00:00:00Z');
   });
 
-  test('fetchMailboxes forwards q, server, user and ssl filters', async () => {
+  test('fetchMailboxes forwards pagination/count and never sends unsupported filters', async () => {
     globalThis.fetch = mockFetchOk({ mailboxes: [], _meta: { total_count: 0 } }) as any;
 
-    await fetchMailboxes({
+    const optionsWithUnsupportedFilters = {
       limit: 10,
       fromId: 5,
       q: 'imap',
       server: 'mail.example.test',
       user: 'ops',
       enableSsl: false,
-    });
+      count: true,
+    };
+    await fetchMailboxes(optionsWithUnsupportedFilters);
 
     const [url] = lastFetchCall();
     const u = new URL(url);
@@ -56,10 +58,11 @@ describe('mailer API wrappers', () => {
     expect(u.pathname).toBe('/v7.0/mailboxes');
     expect(u.searchParams.get('mailbox[limit]')).toBe('10');
     expect(u.searchParams.get('mailbox[from_id]')).toBe('5');
-    expect(u.searchParams.get('mailbox[q]')).toBe('imap');
-    expect(u.searchParams.get('mailbox[server]')).toBe('mail.example.test');
-    expect(u.searchParams.get('mailbox[user]')).toBe('ops');
-    expect(u.searchParams.get('mailbox[enable_ssl]')).toBe('false');
+    expect(u.searchParams.get('mailbox[q]')).toBeNull();
+    expect(u.searchParams.get('mailbox[server]')).toBeNull();
+    expect(u.searchParams.get('mailbox[user]')).toBeNull();
+    expect(u.searchParams.get('mailbox[enable_ssl]')).toBeNull();
+    expect(u.searchParams.get('_meta[count]')).toBe('true');
   });
 
   test('fetchMailRecipients forwards q and per-field address filters', async () => {

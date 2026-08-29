@@ -140,7 +140,6 @@ export async function fetchMailTemplates(opts?: {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-
   const q = opts?.q ? String(opts.q).trim() : '';
   if (q) params['q'] = q;
 
@@ -371,28 +370,18 @@ export interface MailboxHandler {
 export async function fetchMailboxes(opts?: {
   limit?: number;
   fromId?: number;
-  q?: string;
-  server?: string;
-  user?: string;
-  enableSsl?: boolean;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-
-  const q = opts?.q ? String(opts.q).trim() : '';
-  if (q) params['q'] = q;
-  const server = opts?.server ? String(opts.server).trim() : '';
-  if (server) params['server'] = server;
-  const user = opts?.user ? String(opts.user).trim() : '';
-  if (user) params['user'] = user;
-  if (opts?.enableSsl !== undefined) params['enable_ssl'] = opts.enableSsl;
 
   const res = await haveApiCall<Mailbox[]>({
     method: 'GET',
     path: '/mailboxes',
     namespace: 'mailbox',
     params,
+    meta: opts?.count ? { count: true } : undefined,
   });
 
   return { ...res, data: expectArray<Mailbox>(res.data, 'mailboxes#index') };

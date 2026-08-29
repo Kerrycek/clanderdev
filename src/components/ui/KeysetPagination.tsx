@@ -43,6 +43,10 @@ export function KeysetPagination(props: {
   onPrev: () => void;
   onNext: () => void;
   onGoToPage?: (pageNumber: number) => void | Promise<void>;
+  /** Furthest page whose cursor can be resolved in one bounded interaction. */
+  maxDirectPage?: number;
+  /** Prevent duplicate cursor walks while a direct jump is being resolved. */
+  jumpPending?: boolean;
   limit?: number;
   allowedLimits?: readonly number[];
   onLimitChange?: (limit: number) => void;
@@ -60,12 +64,18 @@ export function KeysetPagination(props: {
   const prefix = props.testId ?? 'pagination';
   const [jumpPage, setJumpPage] = useState('');
   const totalPagesKnown = Boolean(props.totalPagesKnown && pageCount >= page);
+  const maxDirectPage = Math.max(
+    page,
+    Math.min(pageCount, Math.floor(props.maxDirectPage ?? pageCount))
+  );
+  const jumpPending = Boolean(props.jumpPending);
 
   const submitJump = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (jumpPending) return;
     const raw = Number(jumpPage);
     if (!Number.isFinite(raw)) return;
-    const target = Math.max(1, Math.min(pageCount, Math.floor(raw)));
+    const target = Math.max(1, Math.min(maxDirectPage, Math.floor(raw)));
     setJumpPage('');
     void props.onGoToPage?.(target);
   };
@@ -82,7 +92,7 @@ export function KeysetPagination(props: {
         <Button
           variant="secondary"
           size="sm"
-          disabled={!props.canPrev}
+          disabled={!props.canPrev || jumpPending}
           onClick={props.onPrev}
           testId={`${prefix}.prev`}
         >
@@ -110,7 +120,7 @@ export function KeysetPagination(props: {
                     : t('pagination.go_to_page', { page: it })
                 }
                 onClick={() => props.onGoToPage?.(it)}
-                disabled={!props.onGoToPage}
+                disabled={!props.onGoToPage || it > maxDirectPage || jumpPending}
                 testId={`${prefix}.page.${it}`}
               >
                 {it}
@@ -122,7 +132,7 @@ export function KeysetPagination(props: {
         <Button
           variant="secondary"
           size="sm"
-          disabled={!props.canNext}
+          disabled={!props.canNext || jumpPending}
           onClick={props.onNext}
           testId={`${prefix}.next`}
         >
@@ -146,22 +156,29 @@ export function KeysetPagination(props: {
               className="h-9 w-20 rounded-lg border border-border bg-surface px-2 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               type="number"
               min={1}
-              max={pageCount}
+              max={maxDirectPage}
               inputMode="numeric"
               value={jumpPage}
-              placeholder={totalPagesKnown ? String(pageCount) : undefined}
+              placeholder={String(maxDirectPage)}
+              disabled={jumpPending}
               onChange={(event) => setJumpPage(event.target.value)}
             />
             <Button
               type="submit"
               variant="secondary"
               size="sm"
-              disabled={!jumpPage.trim()}
+              disabled={!jumpPage.trim() || jumpPending}
               testId={`${prefix}.jump.submit`}
             >
               {t('pagination.jump_action')}
             </Button>
           </form>
+        ) : null}
+
+        {totalPagesKnown && maxDirectPage < pageCount ? (
+          <span className="max-w-72 text-xs text-muted" data-testid={`${prefix}.progressive-hint`}>
+            {t('pagination.progressive_hint', { page: maxDirectPage })}
+          </span>
         ) : null}
 
         {props.onLimitChange ? (

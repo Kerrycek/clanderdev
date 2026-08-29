@@ -298,22 +298,17 @@ export async function fetchDnssecRecords(opts?: { fromId?: number; limit?: numbe
 export async function fetchDnsServers(opts?: {
   fromId?: number;
   limit?: number;
-  q?: string;
-  hidden?: boolean;
-  enable_user_dns_zones?: boolean;
+  count?: boolean;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
-  if (opts?.q !== undefined) params['q'] = opts.q;
-  if (opts?.hidden !== undefined) params['hidden'] = opts.hidden;
-  if (opts?.enable_user_dns_zones !== undefined) params['enable_user_dns_zones'] = opts.enable_user_dns_zones;
   const res = await haveApiCall<DnsServer[]>({
     method: 'GET',
     path: '/dns_servers',
     namespace: 'dns_server',
     params,
-    meta: { includes: 'node' },
+    meta: { includes: 'node', ...(opts?.count ? { count: true } : {}) },
   });
   return { ...res, data: expectArray<DnsServer>(res.data, 'dns_servers#index') };
 }

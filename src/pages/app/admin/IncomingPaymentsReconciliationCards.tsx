@@ -52,7 +52,7 @@ export function IncomingPaymentsReconciliationSummary(props: {
   rows: IncomingPayment[];
   activeState: string;
   onSetState: (state: string) => void;
-  stateTotals?: Partial<Record<'queued' | 'unmatched' | 'ignored', number>>;
+  stateTotals?: Partial<Record<'queued' | 'unmatched' | 'processed' | 'ignored', number>>;
 }) {
   const { t } = useI18n();
   const summary = useMemo(() => buildIncomingPaymentsReconciliationSummary(props.rows), [props.rows]);
@@ -60,6 +60,7 @@ export function IncomingPaymentsReconciliationSummary(props: {
   const activeStateLabel = props.activeState ? t(incomingPaymentStateLabelKey(props.activeState)) : t('common.all');
   const queuedCount = props.stateTotals?.queued ?? summary.queued;
   const unmatchedCount = props.stateTotals?.unmatched ?? summary.unmatched;
+  const processedCount = props.stateTotals?.processed ?? summary.processed;
   const ignoredCount = props.stateTotals?.ignored ?? summary.ignored;
   const needsReviewCount = queuedCount + unmatchedCount;
   const openReviewState = unmatchedCount > 0 ? 'unmatched' : queuedCount > 0 ? 'queued' : '';
@@ -149,7 +150,7 @@ export function IncomingPaymentsReconciliationSummary(props: {
           />
           <MetricTile
             label={t('payments.incoming.reconcile.summary.processed')}
-            value={summary.processed}
+            value={processedCount}
             description={t('payments.incoming.reconcile.summary.processed.detail')}
             testId="admin.payments.incoming.reconciliation.metric.processed"
           />
@@ -246,16 +247,15 @@ export function IncomingPaymentReconciliationCard(props: { payment: IncomingPaym
               </Button>
             ) : null}
 
-            {searchTargets.map((target) => (
-              <Button
+            {searchTargets.filter((target) => target.key !== 'transaction').map((target) => (
+              <CopyButton
                 key={`${target.key}:${target.value}`}
-                to={`${props.basePath}/payments/incoming?q=${encodeURIComponent(target.value)}`}
+                text={target.value}
+                label={t(target.labelKey)}
                 variant="secondary"
                 size="sm"
                 testId={`admin.payments.incoming.reconciliation.link.${target.key}`}
-              >
-                {t(target.labelKey)}
-              </Button>
+              />
             ))}
 
             {transactionId ? (
