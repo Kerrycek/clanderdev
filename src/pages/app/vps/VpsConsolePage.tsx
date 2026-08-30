@@ -18,10 +18,17 @@ import {
   normalizeConsoleToken,
   normalizeRemoteConsoleServer,
 } from '../../../lib/consoleToken';
+import {
+  CONSOLE_CONNECTION_STATE_VARIANT,
+  consoleMutationErrorMessage,
+  formatConsoleExpiration,
+  getConsoleConnectionState,
+  hasKnownConsoleToken,
+  isConsoleSessionStateUncertain,
+  markConsoleSessionStateUncertain,
+} from './VpsConsoleModel';
 import { useVps } from './VpsContext';
-type ConsoleConnectionState =
-  | 'connecting' | 'connected' | 'disconnected' | 'failed'
-  | 'reconnecting' | 'expired' | 'revoked' | 'unavailable';
+
 export function VpsConsolePage() {
   const { canMutateVps } = useVps();
   const { t } = useI18n();
@@ -71,7 +78,10 @@ function MutableVpsConsolePage() {
   const tokenQ = useQuery({
     queryKey: tokenQueryKey,
     queryFn: createFreshConsoleToken,
-    enabled: canCreateSession && !sessionSuspended,
+    // A console token is a server-side session and its creation is a mutation.
+    // Keep route navigation and reload read-only; the user must explicitly ask
+    // for a session with the action below.
+    enabled: false,
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -83,26 +93,41 @@ function MutableVpsConsolePage() {
     setManualReconnect(false);
   };
 
+  const revokeSessionM = useMutation({
+    mutationFn: async () => deleteConsoleToken(vps.id),
+    onSuccess: () => {
+      qc.setQueryData(tokenQueryKey, null);
+      setSessionSuspended(true);
+      resetFrameState();
+    },
+  });
+
   const newSessionM = useMutation({
     mutationFn: async () => {
-      // Creating a new token may require invalidating the existing one first.
-      // The backend `Create` can return an existing valid token.
-      let revokedBeforeCreate = false;
-      try {
-        await deleteConsoleToken(vps.id);
-        revokedBeforeCreate = true;
-      } catch {
-        // ignore (e.g. no prior token)
+      // The backend `Create` can return an existing valid token. Invalidate a
+      // token only when this client actually knows about one; after a revoke,
+      // creating the replacement session needs just the explicit POST.
+      const invalidatesKnownSession = hasKnownConsoleToken(qc.getQueryData(tokenQueryKey));
+
+      if (invalidatesKnownSession) {
+        try {
+          await deleteConsoleToken(vps.id);
+        } catch (error) {
+          // A transport failure cannot prove that the backend did not revoke
+          // the token. Stop and hide the cached console instead of showing a
+          // potentially invalid session as connected.
+          throw markConsoleSessionStateUncertain(error);
+        }
       }
 
       try {
         return await createFreshConsoleToken();
       } catch (error) {
-        if (revokedBeforeCreate && error && typeof error === 'object') {
-          (error as Record<string, unknown>)['sessionRevokedBeforeFailure'] = true;
-        }
-        throw error;
+        throw invalidatesKnownSession ? markConsoleSessionStateUncertain(error) : error;
       }
+    },
+    onMutate: () => {
+      revokeSessionM.reset();
     },
     onSuccess: (data) => {
       qc.setQueryData(tokenQueryKey, data);
@@ -110,20 +135,11 @@ function MutableVpsConsolePage() {
       resetFrameState();
     },
     onError: (error) => {
-      if ((error as any)?.sessionRevokedBeforeFailure) {
+      if (isConsoleSessionStateUncertain(error)) {
         qc.setQueryData(tokenQueryKey, null);
         setSessionSuspended(true);
         resetFrameState();
       }
-    },
-  });
-
-  const revokeSessionM = useMutation({
-    mutationFn: async () => deleteConsoleToken(vps.id),
-    onSuccess: () => {
-      qc.setQueryData(tokenQueryKey, null);
-      setSessionSuspended(true);
-      resetFrameState();
     },
   });
 
@@ -178,43 +194,12 @@ function MutableVpsConsolePage() {
     setFrameNonce((value) => value + 1);
   };
 
-  const connectionState: ConsoleConnectionState = !server
-    ? 'unavailable'
-    : sessionActionPending || manualReconnect
-      ? 'reconnecting'
-      : tokenQ.isError
-        ? 'failed'
-        : sessionSuspended
-          ? 'revoked'
-          : tokenExpired
-            ? 'expired'
-            : tokenQ.isLoading || tokenQ.isFetching
-              ? 'connecting'
-              : iframeProblem
-                ? 'disconnected'
-                : iframeLoaded
-                  ? 'connected'
-                  : 'connecting';
-
-  const stateVariant: Record<ConsoleConnectionState, string> = {
-    connecting: 'bg-info',
-    connected: 'bg-ok',
-    disconnected: 'bg-warn',
-    failed: 'bg-danger',
-    reconnecting: 'bg-info',
-    expired: 'bg-warn',
-    revoked: 'bg-neutral',
-    unavailable: 'bg-neutral',
-  };
-
-  const expiresAt =
-    activeToken?.expiration && !Number.isNaN(Date.parse(activeToken.expiration))
-      ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
-          new Date(activeToken.expiration)
-        )
-      : null;
-
-  const mutationErrorMessage = (error: unknown): string => String((error as any)?.message ?? error);
+  const connectionState = getConsoleConnectionState({
+    hasServer: Boolean(server), sessionActionPending, manualReconnect, tokenError: tokenQ.isError,
+    sessionSuspended, tokenExpired, tokenFetching: tokenQ.isFetching,
+    hasActiveToken: Boolean(activeToken?.token), iframeProblem, iframeLoaded,
+  });
+  const expiresAt = formatConsoleExpiration(activeToken?.expiration);
 
   return (
     <div className="space-y-3" data-testid="vps.console.page">
@@ -229,7 +214,7 @@ function MutableVpsConsolePage() {
             className="mt-2 inline-flex items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1 text-xs font-medium text-fg"
             data-testid="vps.console.connection_state"
           >
-            <span className={clsx('h-2.5 w-2.5 rounded-full', stateVariant[connectionState])} aria-hidden="true" />
+            <span className={clsx('h-2.5 w-2.5 rounded-full', CONSOLE_CONNECTION_STATE_VARIANT[connectionState])} aria-hidden="true" />
             {t(`vps.console.state.${connectionState}` as any)}
           </div>
         </div>
@@ -240,10 +225,12 @@ function MutableVpsConsolePage() {
             size="sm"
             testId="vps.console.new_session"
             onClick={() => {
-              if (hasActiveLiveToken) {
+              if (sessionSuspended) {
+                newSessionM.mutate();
+              } else if (hasActiveLiveToken) {
                 setNewSessionConfirmOpen(true);
               } else {
-                newSessionM.mutate();
+                void tokenQ.refetch();
               }
             }}
             disabled={disabledNewSession}
@@ -325,6 +312,12 @@ function MutableVpsConsolePage() {
         </div>
       ) : null}
 
+      {server && !activeToken && !sessionSuspended && !tokenQ.isFetching && !tokenQ.isError ? (
+        <Alert variant="info" title={t('vps.console.not_started.title')} testId="vps.console.not_started">
+          {t('vps.console.not_started.body')}
+        </Alert>
+      ) : null}
+
       {sessionSuspended ? (
         <Alert variant="ok" title={t('vps.console.revoked.title')} testId="vps.console.revoked">
           <div className="space-y-3">
@@ -347,7 +340,7 @@ function MutableVpsConsolePage() {
         <Alert variant="danger" title={t('vps.console.new_session.error_title')} testId="vps.console.new_session_error">
           <div className="space-y-1">
             <div>{t('vps.console.new_session.error_body')}</div>
-            <div className="font-mono text-xs">{mutationErrorMessage(newSessionM.error)}</div>
+            <div className="font-mono text-xs">{consoleMutationErrorMessage(newSessionM.error)}</div>
           </div>
         </Alert>
       ) : null}
@@ -356,12 +349,12 @@ function MutableVpsConsolePage() {
         <Alert variant="danger" title={t('vps.console.revoke_error.title')} testId="vps.console.revoke_error">
           <div className="space-y-1">
             <div>{t('vps.console.revoke_error.body')}</div>
-            <div className="font-mono text-xs">{mutationErrorMessage(revokeSessionM.error)}</div>
+            <div className="font-mono text-xs">{consoleMutationErrorMessage(revokeSessionM.error)}</div>
           </div>
         </Alert>
       ) : null}
 
-      {tokenQ.isLoading ? (
+      {tokenQ.isFetching && !activeToken ? (
         <div
           className="flex min-h-48 items-center justify-center rounded-md border border-border bg-code text-sm text-muted"
           data-testid="vps.console.loading"
@@ -443,7 +436,7 @@ function MutableVpsConsolePage() {
         >
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-black px-3 py-2 text-xs text-white">
             <div className="flex min-w-0 items-center gap-2">
-              <span className={clsx('h-2.5 w-2.5 shrink-0 rounded-full', stateVariant[connectionState])} aria-hidden="true" />
+              <span className={clsx('h-2.5 w-2.5 shrink-0 rounded-full', CONSOLE_CONNECTION_STATE_VARIANT[connectionState])} aria-hidden="true" />
               <span className="truncate font-mono">{vps.hostname ?? `vps-${vps.id}`}</span>
             </div>
             <div className="text-white/70" data-testid="vps.console.frame_status">

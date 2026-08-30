@@ -3,6 +3,8 @@ export const enVps_console = {
   'vps.console.title': 'Console',
   'vps.console.subtitle': 'Web-based remote VPS console.',
   'vps.console.basic_hint': 'The console session is temporary.',
+  'vps.console.not_started.title': 'Console session not started',
+  'vps.console.not_started.body': 'Opening this page does not create a session. Select New session to request a temporary console token.',
   'vps.console.expires_at': 'Session expires {time}',
   'vps.console.new_session.label': 'New session',
   'vps.console.new_session.title_hint': 'Create a new console session',

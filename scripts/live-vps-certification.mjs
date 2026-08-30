@@ -20,6 +20,7 @@ import {
   createLiveVpsRunIdentity,
   createVpsCertificationLedger,
   ensurePrivateVpsArtifactDirectory,
+  hasActiveMaintenanceLock,
   markVpsCleanupComplete,
   reconcileUniqueCreatedVps,
   registerCreatedVps,
@@ -32,11 +33,13 @@ import {
   proxyPinnedLiveVpsBrowserRequest,
 } from './live-vps-certification-browser-proxy.mjs';
 import {
+  buildOwnerVpsCountUrl,
   buildExactLiveVpsPresenceUrl,
   buildLiveVpsReconciliationUrl,
   classifyExactLiveVpsPresenceResponse,
   classifyExactVpsCandidateSet,
   classifyLiveVpsHardDeleteEvidence,
+  classifyOwnerVpsCountResponse,
 } from './live-vps-certification-reconciliation.mjs';
 import {
   PINNED_LIVE_VPS_LEAF_DER_SHA256,
@@ -207,7 +210,35 @@ function hardenArtifactTree(targetPath) {
 }
 
 function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  if (cleanupInProgress) return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  throwIfInterrupted();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      interruptController.signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(interruptController.signal.reason);
+    };
+    interruptController.signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+const interruptController = new AbortController();
+let cleanupInProgress = false;
+const requestGracefulInterruption = (signal) => {
+  if (!interruptController.signal.aborted) {
+    interruptController.abort(new Error(`Live VPS certification interrupted by ${signal}; guarded cleanup will run.`));
+  }
+};
+const onSigint = () => requestGracefulInterruption('SIGINT');
+const onSigterm = () => requestGracefulInterruption('SIGTERM');
+process.once('SIGINT', onSigint);
+process.once('SIGTERM', onSigterm);
+
+function throwIfInterrupted() {
+  if (interruptController.signal.aborted) throw interruptController.signal.reason;
 }
 
 function envelopeResource(envelope, namespace) {
@@ -364,7 +395,9 @@ function recordOperation(name, actionStateId, status, extra = {}) {
 async function check(name, callback) {
   const startedAt = new Date().toISOString();
   try {
+    throwIfInterrupted();
     await callback();
+    throwIfInterrupted();
     checks.push({ name, status: 'passed', startedAt, finishedAt: new Date().toISOString() });
   } catch (error) {
     checks.push({
@@ -524,12 +557,7 @@ async function verifyFixtureAndResources() {
   if (resources.node.status !== undefined && resources.node.status !== true) {
     fail('Allowlisted node does not report an explicitly healthy status.');
   }
-  if (
-    resources.node.maintenance_lock !== undefined &&
-    resources.node.maintenance_lock !== null &&
-    resources.node.maintenance_lock !== false &&
-    resources.node.maintenance_lock !== ''
-  ) {
+  if (hasActiveMaintenanceLock(resources.node.maintenance_lock)) {
     fail('Allowlisted node is under maintenance.');
   }
   if (resources.node.maintenance === true || resources.node.locked === true) {
@@ -571,18 +599,18 @@ async function verifyFixtureAndResources() {
   );
   if (maxVpsCount > 0) {
     const ownerVpsResponse = await apiContext.get(
-      paramsUrl(apiVersion, '/vpses', 'vps', {
-        user: fixture.fixtures.owner.id,
-        environment: fixture.fixtures.environment.id,
-        limit: 1,
+      buildOwnerVpsCountUrl({
+        apiVersion,
+        ownerId: fixture.fixtures.owner.id,
+        environmentId: fixture.fixtures.environment.id,
       }),
       { failOnStatusCode: false, maxRedirects: 0, timeout: 30_000 }
     );
-    const ownerVpsEnvelope = await parseEnvelope(ownerVpsResponse, 'GET owner VPS count for environment limit');
-    const currentVpsCount = envelopeTotalCount(ownerVpsEnvelope, 'owner VPS count');
-    if (currentVpsCount === null) {
-      fail('The API omitted total_count, so the owner VPS-count limit cannot be proven safely.');
-    }
+    const ownerVpsEnvelope = await ownerVpsResponse.json().catch(() => null);
+    const currentVpsCount = classifyOwnerVpsCountResponse({
+      httpStatus: ownerVpsResponse.status(),
+      envelope: ownerVpsEnvelope,
+    });
     if (currentVpsCount >= maxVpsCount) {
       fail('The allowlisted owner has no remaining VPS-count capacity in the fixture environment.');
     }
@@ -1372,6 +1400,7 @@ try {
 } catch (error) {
   testError = error;
 } finally {
+  cleanupInProgress = true;
   try {
     if (apiContext) await cleanupOwnedVps();
   } catch (error) {
@@ -1405,6 +1434,8 @@ try {
   persistLedger();
   hardenArtifactTree(runDirectory);
   writeReport();
+  process.removeListener('SIGINT', onSigint);
+  process.removeListener('SIGTERM', onSigterm);
 }
 
 const failed = Boolean(

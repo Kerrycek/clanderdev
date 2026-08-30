@@ -19,10 +19,12 @@ import { classifyLiveVpsBrowserAuthentication } from './live-vps-certification-b
 import {
   buildExactLiveVpsPresenceUrl,
   buildLiveVpsReconciliationUrl,
+  buildOwnerVpsCountUrl,
   classifyExactLiveVpsPresenceEnvelope,
   classifyExactLiveVpsPresenceResponse,
   classifyExactVpsCandidateSet,
   classifyLiveVpsHardDeleteEvidence,
+  classifyOwnerVpsCountResponse,
 } from './live-vps-certification-reconciliation.mjs';
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
@@ -152,6 +154,21 @@ test('failed running VPS cleanup proves identity before stop and gates delete on
     /assertHardDeleteAllowed\(ledger, observation\)/,
     'a running VPS must not be rejected by the stopped-only hard-delete gate before the safety stop'
   );
+});
+
+test('operator signals enter the guarded cleanup path instead of terminating immediately', () => {
+  const source = fs.readFileSync(RUNNER_PATH, 'utf8');
+  const signalSetup = source.indexOf("process.once('SIGINT', onSigint)");
+  const guardedCheck = source.indexOf('throwIfInterrupted();', source.indexOf('async function check'));
+  const catchBlock = source.indexOf('} catch (error) {\n  testError = error;', guardedCheck);
+  const cleanupMode = source.indexOf('cleanupInProgress = true;', catchBlock);
+  const cleanupCall = source.indexOf('await cleanupOwnedVps();', cleanupMode);
+
+  assert.ok(signalSetup >= 0, 'SIGINT must be handled gracefully');
+  assert.match(source, /process\.once\('SIGTERM', onSigterm\)/);
+  assert.ok(guardedCheck > signalSetup && catchBlock > guardedCheck);
+  assert.ok(cleanupMode > catchBlock && cleanupCall > cleanupMode);
+  assert.match(source, /if \(cleanupInProgress\) return new Promise/);
 });
 
 test('TLS exception is code-pinned and a wrong leaf cannot reach token-context construction', () => {
@@ -439,6 +456,79 @@ test('global run-marker reconciliation requests an exact non-truncated count pro
   assert.equal(parsed.searchParams.get('_meta[count]'), 'true');
   assert.equal(parsed.searchParams.get('vps[limit]'), '100');
   assert.equal(parsed.searchParams.get('vps[hostname_exact]'), 'live-cert-20260829-a1b2c3');
+});
+
+test('owner environment-limit preflight requests an explicit total count', () => {
+  const url = buildOwnerVpsCountUrl({
+    apiVersion: '7.0',
+    ownerId: 17,
+    environmentId: 11,
+  });
+  const parsed = new URL(url, 'https://dev.crucio.cz');
+  assert.equal(parsed.pathname, '/v7.0/vpses');
+  assert.equal(parsed.searchParams.get('vps[user]'), '17');
+  assert.equal(parsed.searchParams.get('vps[environment]'), '11');
+  assert.equal(parsed.searchParams.get('vps[limit]'), '1');
+  assert.equal(parsed.searchParams.get('_meta[count]'), 'true');
+});
+
+test('owner environment-limit preflight accepts only a complete one-row count proof', () => {
+  assert.equal(
+    classifyOwnerVpsCountResponse({
+      httpStatus: 200,
+      envelope: { status: true, response: { vpses: [], _meta: { total_count: 0 } } },
+    }),
+    0
+  );
+  assert.equal(
+    classifyOwnerVpsCountResponse({
+      httpStatus: 200,
+      envelope: { status: true, response: { vpses: [{ id: 42 }], _meta: { total_count: 7 } } },
+    }),
+    7
+  );
+});
+
+test('owner environment-limit preflight rejects HTTP, malformed, missing and mismatched count proofs', () => {
+  assert.throws(
+    () => classifyOwnerVpsCountResponse({
+      httpStatus: 503,
+      envelope: { status: true, response: { vpses: [], _meta: { total_count: 0 } } },
+    }),
+    /must return HTTP 2xx/
+  );
+
+  const malformedOrMissing = [
+    null,
+    '<html>error</html>',
+    { status: false, response: { vpses: [], _meta: { total_count: 0 } } },
+    { response: { vpses: [], _meta: { total_count: 0 } } },
+    { status: true, response: {} },
+    { status: true, response: { vpses: null, _meta: { total_count: 0 } } },
+    { status: true, response: { vpses: [], _meta: {} } },
+    { status: true, response: { vpses: [], _meta: { total_count: '0' } } },
+    { status: true, response: { vpses: [], _meta: { total_count: -1 } } },
+    { status: true, response: { vpses: [], _meta: { total_count: Number.MAX_SAFE_INTEGER + 1 } } },
+  ];
+  for (const envelope of malformedOrMissing) {
+    assert.throws(
+      () => classifyOwnerVpsCountResponse({ httpStatus: 200, envelope }),
+      /Owner VPS-count proof/
+    );
+  }
+
+  const mismatched = [
+    { status: true, response: { vpses: [{ id: 42 }], _meta: { total_count: 0 } } },
+    { status: true, response: { vpses: [], _meta: { total_count: 1 } } },
+    { status: true, response: { vpses: [], _meta: { total_count: 7 } } },
+    { status: true, response: { vpses: [{ id: 42 }, { id: 43 }], _meta: { total_count: 2 } } },
+  ];
+  for (const envelope of mismatched) {
+    assert.throws(
+      () => classifyOwnerVpsCountResponse({ httpStatus: 200, envelope }),
+      /rows do not match/
+    );
+  }
 });
 
 test('cleanup absence proof uses an authenticated exact guarded-identity list pinned to the expected ID', () => {

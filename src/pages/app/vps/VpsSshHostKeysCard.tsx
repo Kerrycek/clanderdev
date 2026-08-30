@@ -26,7 +26,7 @@ export function VpsSshHostKeysCard(props: {
   const hostKeys = props.hostKeys;
 
   return (
-    <Card testId="vps.access.host_keys">
+    <Card testId="vps.access.host_keys" className="relative min-w-0 max-w-full overflow-x-hidden">
       <CardHeader
         title={t('vps.access.host_keys.title')}
         subtitle={t('vps.access.host_keys.subtitle')}
@@ -36,7 +36,7 @@ export function VpsSshHostKeysCard(props: {
           </Button>
         }
       />
-      <CardBody className="space-y-4">
+      <CardBody className="min-w-0 max-w-full space-y-4 overflow-x-hidden">
         {props.loading ? <Alert variant="info">{t('vps.access.host_keys.loading')}</Alert> : null}
         {props.error ? <Alert variant="danger">{errorMessage(props.error)}</Alert> : null}
         {!props.loading && !props.error && hostKeys.length === 0 ? (
@@ -66,7 +66,7 @@ export function VpsSshHostKeysCard(props: {
               })}
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="w-0 min-w-full max-w-full overflow-x-auto">
               <Table testId="vps.access.host_keys.table" minWidth="lg">
                 <thead>
                   <tr>

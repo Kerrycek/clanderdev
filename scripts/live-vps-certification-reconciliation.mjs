@@ -10,6 +10,48 @@ function candidateId(match) {
 
 const LIVE_VPS_RECONCILIATION_INCLUDES = 'node__location__environment,user,os_template';
 
+export function buildOwnerVpsCountUrl({ apiVersion, ownerId, environmentId }) {
+  if (apiVersion !== '7.0') fail('Owner VPS-count proof requires API protocol 7.0.');
+  if (!Number.isSafeInteger(ownerId) || ownerId <= 0) {
+    fail('Owner VPS-count proof requires a positive owner ID.');
+  }
+  if (!Number.isSafeInteger(environmentId) || environmentId <= 0) {
+    fail('Owner VPS-count proof requires a positive environment ID.');
+  }
+
+  const query = new URLSearchParams();
+  query.set('vps[user]', String(ownerId));
+  query.set('vps[environment]', String(environmentId));
+  query.set('vps[limit]', '1');
+  // HaveAPI omits total_count unless requested explicitly. A first-page row is
+  // not enough to prove that the owner remains below the environment limit.
+  query.set('_meta[count]', 'true');
+  return `/v${apiVersion}/vpses?${query.toString()}`;
+}
+
+export function classifyOwnerVpsCountResponse({ httpStatus, envelope }) {
+  if (!Number.isInteger(httpStatus) || httpStatus < 200 || httpStatus > 299) {
+    fail(`Owner VPS-count proof must return HTTP 2xx, got ${httpStatus}.`);
+  }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope) || envelope.status !== true) {
+    fail('Owner VPS-count proof requires an authenticated status:true HaveAPI envelope.');
+  }
+
+  const rows = envelope.response?.vpses;
+  const totalCount = envelope.response?._meta?.total_count;
+  if (!Array.isArray(rows)) {
+    fail('Owner VPS-count proof requires a vpses array.');
+  }
+  if (!Number.isSafeInteger(totalCount) || totalCount < 0) {
+    fail('Owner VPS-count proof requires a non-negative safe-integer total_count.');
+  }
+  if (rows.length !== Math.min(totalCount, 1)) {
+    fail('Owner VPS-count proof rows do not match the requested one-row count page.');
+  }
+
+  return totalCount;
+}
+
 export function buildExactLiveVpsPresenceUrl({ apiVersion, vpsId, hostname, ownerId, nodeId }) {
   if (apiVersion !== '7.0') fail('Exact VPS presence proof requires API protocol 7.0.');
   if (!Number.isSafeInteger(vpsId) || vpsId <= 0) fail('Exact VPS presence proof requires a positive VPS ID.');

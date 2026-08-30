@@ -28,18 +28,18 @@ export function TransactionPayloadPanels(props: {
     if (props.maxHeightClass === 'max-h-80') return 'max-h-80';
     return 'max-h-96';
   })();
-  const layoutClass = props.layout === 'stacked' ? 'grid gap-3' : 'grid gap-3 lg:grid-cols-2';
+  const layoutClass = props.layout === 'stacked' ? 'grid min-w-0 gap-3' : 'grid min-w-0 gap-3 lg:grid-cols-2';
 
   return (
     <div className={layoutClass}>
-      <div>
+      <div className="min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs font-medium text-muted">{props.t('transactions.tx.input')}</div>
           {props.input ? <CopyButton text={props.input} /> : null}
         </div>
         {props.input ? (
           <pre
-            className={clsx('mt-2 overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}
+            className={clsx('mt-2 w-0 min-w-full max-w-full overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}
           >
             {props.input}
           </pre>
@@ -48,14 +48,14 @@ export function TransactionPayloadPanels(props: {
         )}
       </div>
 
-      <div>
+      <div className="min-w-0">
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs font-medium text-muted">{props.t('transactions.tx.output')}</div>
           {props.output ? <CopyButton text={props.output} /> : null}
         </div>
         {props.output ? (
           <pre
-            className={clsx('mt-2 overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}
+            className={clsx('mt-2 w-0 min-w-full max-w-full overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}
           >
             {props.output}
           </pre>
@@ -99,14 +99,14 @@ export function TransactionDebugSections(props: {
   const rawText = props.raw === undefined ? '' : safeJson(props.raw);
 
   return (
-    <div className="space-y-4" data-testid={props.testId}>
+    <div className="min-w-0 space-y-4" data-testid={props.testId}>
       {props.errorText ? (
         <div>
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-medium text-danger">{props.t('transactions.tx.error_label')}</div>
             <CopyButton text={props.errorText} />
           </div>
-          <pre className={clsx('mt-2 whitespace-pre-wrap overflow-auto rounded-md border border-danger-border bg-danger-bg p-3 text-xs text-muted', maxH)}>
+          <pre className={clsx('mt-2 max-w-full whitespace-pre-wrap break-all overflow-auto rounded-md border border-danger-border bg-danger-bg p-3 text-xs text-muted', maxH)}>
             {props.errorText}
           </pre>
         </div>
@@ -123,12 +123,12 @@ export function TransactionDebugSections(props: {
       {extras.length ? (
         <div className="grid gap-3 lg:grid-cols-2">
           {extras.map((item) => (
-            <div key={item.key}>
+            <div key={item.key} className="min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs font-medium text-muted">{props.t(`transactions.tx.section.${item.key}`)}</div>
                 <CopyButton text={item.text} />
               </div>
-              <pre className={clsx('mt-2 whitespace-pre-wrap overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}>
+              <pre className={clsx('mt-2 max-w-full whitespace-pre-wrap break-all overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-muted', maxH)}>
                 {item.text}
               </pre>
             </div>
@@ -137,9 +137,9 @@ export function TransactionDebugSections(props: {
       ) : null}
 
       {props.raw !== undefined ? (
-        <details className="rounded-md border border-border bg-surface p-3" open={props.rawInitiallyOpen} data-testid={props.rawTestId}>
+        <details className="min-w-0 max-w-full rounded-md border border-border bg-surface p-3" open={props.rawInitiallyOpen} data-testid={props.rawTestId}>
           <summary className="cursor-pointer select-none text-sm font-medium">{props.t('transactions.items.detail.section.raw')}</summary>
-          <pre className={clsx('mt-2 overflow-auto text-xs text-muted', maxH)} data-testid={props.rawTestId ? `${props.rawTestId}.json` : undefined}>
+          <pre className={clsx('mt-2 w-0 min-w-full max-w-full overflow-auto text-xs text-muted', maxH)} data-testid={props.rawTestId ? `${props.rawTestId}.json` : undefined}>
             {rawText}
           </pre>
         </details>

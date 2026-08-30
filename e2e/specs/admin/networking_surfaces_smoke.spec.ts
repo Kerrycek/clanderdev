@@ -2,6 +2,46 @@ import { expect, test } from '../../fixtures/vpsadmin-window';
 import { bootstrapVpsAdminWindow } from '../../fixtures/bootstrap';
 import { installHaveApiMock } from '../../fixtures/haveapi';
 
+async function expectNoDocumentHorizontalOverflow(page: import('@playwright/test').Page) {
+  const overflow = await page.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    offenders: [...document.querySelectorAll<HTMLElement>('body *')]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName.toLowerCase(),
+          testId: element.dataset.testid ?? null,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+        };
+      })
+      .filter((element) => element.right > document.documentElement.clientWidth + 1)
+      .sort((a, b) => b.right - a.right)
+      .slice(0, 10),
+  }));
+
+  expect(overflow.documentWidth, JSON.stringify(overflow, null, 2)).toBeLessThanOrEqual(overflow.viewportWidth);
+}
+
+async function expectTableScrollContained(page: import('@playwright/test').Page, testId: string) {
+  const metrics = await page.getByTestId(testId).evaluate((card) => {
+    const scroller = card.firstElementChild as HTMLElement | null;
+    const rect = card.getBoundingClientRect();
+    return {
+      cardRight: Math.round(rect.right),
+      viewportWidth: document.documentElement.clientWidth,
+      scrollerClientWidth: scroller?.clientWidth ?? 0,
+      scrollerScrollWidth: scroller?.scrollWidth ?? 0,
+      scrollerOverflowX: scroller ? getComputedStyle(scroller).overflowX : '',
+    };
+  });
+
+  expect(metrics.cardRight).toBeLessThanOrEqual(metrics.viewportWidth);
+  expect(metrics.scrollerOverflowX).toBe('auto');
+  expect(metrics.scrollerScrollWidth).toBeGreaterThan(metrics.scrollerClientWidth);
+}
+
 test.describe('Admin / Networking surfaces (smoke)', () => {
   test('host IP list and assignment audit render', async ({ page }) => {
     await installHaveApiMock(page, {
@@ -58,6 +98,10 @@ test.describe('Admin / Networking surfaces (smoke)', () => {
     await expect(page.getByTestId('admin.host_ip_addresses.row.502.delete')).toHaveAttribute('aria-label', 'Delete');
     await expect(page.getByTestId('admin.host_ip_addresses.row.502.free')).toHaveCount(0);
 
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoDocumentHorizontalOverflow(page);
+    await expectTableScrollContained(page, 'admin.host_ip_addresses.table');
+
     const proofScreenshot = process.env.E2E_HOST_IP_ACTIONS_PROOF_SCREENSHOT?.trim();
     if (proofScreenshot) await page.screenshot({ path: proofScreenshot, fullPage: true });
 
@@ -99,6 +143,10 @@ test.describe('Admin / Networking surfaces (smoke)', () => {
 
     await page.goto('/admin/networking/live');
     await expect(page.getByTestId('admin.network_live.row.901')).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoDocumentHorizontalOverflow(page);
+    await expectTableScrollContained(page, 'admin.network_live.table');
 
     await page.goto('/admin/networking/traffic-users');
     await expect(page.getByTestId('admin.network_traffic_users.row.7')).toBeVisible();

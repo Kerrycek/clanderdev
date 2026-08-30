@@ -18,6 +18,7 @@ import {
   canonicalPayloadSha256,
   classifyBoundedOperationOutcome,
   createLiveVpsRunIdentity,
+  hasActiveMaintenanceLock,
   createVpsCertificationLedger,
   markVpsCleanupComplete,
   reconcileUniqueCreatedVps,
@@ -25,6 +26,13 @@ import {
   verifyCreatedVps,
   writeVpsCertificationLedgerAtomic,
 } from './live-vps-certification-core.mjs';
+
+test('maintenance lock guard accepts only the exact unlocked enum', () => {
+  assert.equal(hasActiveMaintenanceLock('no'), false);
+  for (const value of [undefined, null, false, '', 0, true, 1, '0', 'No', 'NO', ' no', 'no ', 'lock', 'master_lock', {}, []]) {
+    assert.equal(hasActiveMaintenanceLock(value), true);
+  }
+});
 
 const START = new Date('2026-08-29T20:00:00.000Z');
 const OBSERVED = new Date('2026-08-29T20:02:00.000Z');

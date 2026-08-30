@@ -72,7 +72,7 @@ export const USER_STATIC_ROUTES = Object.freeze([
   route('app.action-states', '/app/action-states'),
   route('app.monitoring', '/app/monitoring'),
   route('app.incidents', '/app/incidents', { expectedTestId: 'incidents.list.header' }),
-  route('app.incidents.new', '/app/incidents/new'),
+  route('app.incidents.new', '/app/incidents/new', { expectedTestId: 'incidents.new.forbidden' }),
   route('app.oom-reports', '/app/oom-reports'),
   route('app.payments', '/app/payments'),
   route('app.requests', '/app/requests'),

@@ -117,7 +117,7 @@ export function NetworkLiveDashboard(props: {
     <div className="space-y-4" data-testid="admin.network_live.dashboard">
       <Card testId="admin.network_live.status">
         <CardBody className="flex flex-wrap items-center justify-between gap-3 py-3">
-          <div className="flex min-w-0 items-center gap-2 text-sm">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
             <StatusDot variant={stale ? 'warn' : active ? 'ok' : 'neutral'} />
             <span className="font-medium">
               {props.paused

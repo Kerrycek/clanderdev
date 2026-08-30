@@ -22,6 +22,12 @@ const MAX_CREATION_WINDOW_MS = 60 * 60 * 1000;
 const MAX_OPERATION_WINDOW_MS = 60 * 60 * 1000;
 const MAX_HARD_DELETE_OBSERVATION_AGE_MS = 60 * 1000;
 
+export function hasActiveMaintenanceLock(value) {
+  // Maintainable resources expose the unlocked enum as the literal `no`.
+  // Every missing, legacy or otherwise unknown representation stays fail-closed.
+  return value !== 'no';
+}
+
 function isSecretKey(key) {
   const snakeCase = String(key).replace(/([a-z0-9])([A-Z])/g, '$1_$2');
   return SECRET_KEY_PATTERN.test(snakeCase);

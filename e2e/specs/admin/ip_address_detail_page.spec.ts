@@ -1,8 +1,12 @@
 import { expect, test } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import {
+  expectNoDocumentHorizontalOverflow,
+  expectTableHorizontalScrollUsable,
+} from '../../helpers/horizontalOverflow';
 
-test('admin ip address detail: shows header and links to user/vps', async ({ page }) => {
+test('@pr-smoke @pr-smoke-mobile admin ip address detail: shows header and links to user/vps', async ({ page }) => {
   await bootstrapVpsAdminWindow(page);
 
   await installHaveApiMock(page, {
@@ -43,6 +47,10 @@ test('admin ip address detail: shows header and links to user/vps', async ({ pag
   await expect(page.getByTestId('admin.ip.hosts.row.602.assign')).toHaveAttribute('aria-label', 'Assign');
   await expect(page.getByTestId('admin.ip.hosts.row.602.delete')).toHaveAttribute('aria-label', 'Delete');
   await expect(page.getByTestId('admin.ip.hosts.row.602.ptr')).toHaveText('');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoDocumentHorizontalOverflow(page);
+  await expectTableHorizontalScrollUsable(page, 'admin.ip.hosts.table');
 
   const proofScreenshot = process.env.E2E_IP_DETAIL_ACTIONS_PROOF_SCREENSHOT?.trim();
   if (proofScreenshot) await page.screenshot({ path: proofScreenshot, fullPage: true });

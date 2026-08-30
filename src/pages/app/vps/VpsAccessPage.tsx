@@ -445,14 +445,14 @@ export function VpsAccessPage() {
           ) : null}
 
           {selectedPublicKey ? (
-            <div className="rounded-lg border border-border bg-surface p-4 text-sm">
-              <div className="font-medium text-fg">{selectedKeyLabel}</div>
+            <div className="min-w-0 max-w-full rounded-lg border border-border bg-surface p-4 text-sm">
+              <div className="min-w-0 break-all font-medium text-fg">{selectedKeyLabel}</div>
               {selectedPublicKey.fingerprint ? (
-                <div className="mt-2 text-xs text-muted" data-testid="vps.access.ssh.selected.fingerprint">
+                <div className="mt-2 min-w-0 break-all text-xs text-muted" data-testid="vps.access.ssh.selected.fingerprint">
                   {t('vps.access.ssh.selected.fingerprint')}: <code className="font-mono text-fg">{selectedPublicKey.fingerprint}</code>
                 </div>
               ) : null}
-              {selectedPublicKey.comment ? <div className="mt-1 text-muted">{selectedPublicKey.comment}</div> : null}
+              {selectedPublicKey.comment ? <div className="mt-1 min-w-0 break-all text-muted">{selectedPublicKey.comment}</div> : null}
               {selectedPublicKey.auto_add !== undefined ? (
                 <div className="mt-1 text-xs text-muted">
                   {selectedPublicKey.auto_add ? t('vps.access.ssh.auto_add.yes') : t('vps.access.ssh.auto_add.no')}

@@ -516,7 +516,7 @@ export function IpAddressDetailPage() {
                   </CardBody>
                 </Card>
 
-                <Card testId="admin.ip_address.hosts.card" className="scroll-mt-24" id="hosts">
+                <Card testId="admin.ip_address.hosts.card" className="relative min-w-0 max-w-full overflow-x-hidden scroll-mt-24" id="hosts">
                   <CardHeader
                     title={t('admin.ip.hosts.title')}
                     subtitle={t('admin.ip.hosts.subtitle')}
@@ -534,7 +534,8 @@ export function IpAddressDetailPage() {
                     ) : hostRows.length === 0 ? (
                       <div className="text-sm text-muted">{t('admin.ip.hosts.empty')}</div>
                     ) : (
-                      <Table testId="admin.ip.hosts.table" minWidth="md">
+                      <div className="max-w-full overflow-x-auto">
+                        <Table testId="admin.ip.hosts.table" minWidth="md">
                         <thead>
                           <tr>
                             <th>{t('admin.ip.hosts.field.address')}</th>
@@ -579,7 +580,8 @@ export function IpAddressDetailPage() {
                             </tr>
                           ))}
                         </tbody>
-                      </Table>
+                        </Table>
+                      </div>
                     )}
                   </CardBody>
                 </Card>

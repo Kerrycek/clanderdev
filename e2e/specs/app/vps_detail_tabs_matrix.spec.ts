@@ -169,6 +169,8 @@ test('@workflow-matrix @smoke VPS detail tabs expose storage and backups, access
   await page.getByRole('link', { name: /^Console$/ }).first().click();
   await expect(page).toHaveURL(/\/app\/vps\/123\/console$/);
   await expect(page.getByTestId('vps.console.page')).toBeVisible();
+  await expect(page.getByTestId('vps.console.not_started')).toBeVisible();
+  await page.getByTestId('vps.console.new_session').click();
   await expect(page.getByTestId('vps.console.iframe')).toBeVisible();
 });
 

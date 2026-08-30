@@ -31,6 +31,33 @@ return HTTP 200.
 The unrelated console keyboard changes remain only in `/opt/vpsadmin`; the
 running service does not load code from that checkout.
 
+## Dev-only live-certification lifetime fixture
+
+The first guarded live VPS cleanup on 2026-08-30 exposed a configuration gap,
+not an API-version mismatch. `DELETE /vpses/:id` with `lazy=false` always asks
+the Lifetimes subsystem to derive an expiration for the `hard_delete` state.
+Environment `11` (`playground-lab`) had no matching `DefaultLifetimeValue`, so
+the official endpoint returned HTTP 500 before it could create a deletion
+transaction.
+
+On 2026-08-31 an idempotent, environment-scoped row was created and read back
+through the running 4.2.1 application model:
+
+| Field | Verified value |
+| --- | --- |
+| Row | `default_lifetime_values.id=1` |
+| Environment | `11` (`playground-lab`) |
+| Object / transition | `Vps`, `enter`, `hard_delete` |
+| Added expiration | `0` seconds |
+| Reason | `Dev live VPS certification hard delete` |
+
+This is test-environment data only. It does not alter API source, the public
+contract, another environment, or production. Its purpose is to let guarded
+certification exercise the same official hard-delete endpoint that the UI
+uses, with immediate expiry for disposable test VPSes. Remove only this exact
+row if the `playground-lab` certification fixture is retired; do not delete
+other lifetime defaults by a broad query.
+
 ## Why future upgrades are not pull-and-restart operations
 
 The completed transition from the legacy checkout to 4.2.1 included:
