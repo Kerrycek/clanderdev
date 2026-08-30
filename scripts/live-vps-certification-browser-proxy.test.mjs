@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { chromium } from '@playwright/test';
 
+import { findSystemChromium } from './e2e-harness.mjs';
 import { proxyPinnedLiveVpsBrowserRequest } from './live-vps-certification-browser-proxy.mjs';
 
 const TEST_TOKEN = 'redirect-regression-token';
@@ -54,9 +55,14 @@ test('real Playwright route blocks API and static redirects before foreign or ch
       response.end();
     });
   });
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = process.env.E2E_CHROMIUM_EXECUTABLE_PATH?.trim() || findSystemChromium() || undefined;
+  let browser;
 
   try {
+    browser = await chromium.launch({
+      headless: true,
+      ...(executablePath ? { executablePath } : {}),
+    });
     const page = await browser.newPage();
     await page.goto(`${source.origin}/`);
 
@@ -141,7 +147,10 @@ test('real Playwright route blocks API and static redirects before foreign or ch
     assert.deepEqual(sourceHits, [], 'same-origin changed paths must not receive any redirected request');
     assert.deepEqual(foreignHits, [], 'foreign origins must not receive any redirected request');
   } finally {
-    await browser.close();
-    await Promise.all([source.close(), foreign.close()]);
+    try {
+      await browser?.close();
+    } finally {
+      await Promise.all([source.close(), foreign.close()]);
+    }
   }
 });
