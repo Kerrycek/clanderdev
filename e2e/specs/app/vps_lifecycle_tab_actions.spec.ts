@@ -46,7 +46,7 @@ function runningActionState(id: number, label: string) {
   };
 }
 
-async function installLifecycleMock(page: Page) {
+async function installLifecycleMock(page: Page, options?: { updateVps?: () => unknown }) {
   let ipAddressRequests = 0;
   await installHaveApiMock(page, {
     user: { id: 1, login: 'admin', level: 99 },
@@ -83,6 +83,8 @@ async function installLifecycleMock(page: Page) {
       },
       'GET vpses/123/statuses': () => ({ statuses: [] }),
       'GET vpses/123/state_logs': () => ({ state_logs: [] }),
+      'GET vpses/321/statuses': () => ({ statuses: [] }),
+      'GET vpses/321/state_logs': () => ({ state_logs: [] }),
       'GET transaction_chains': () => ({ transaction_chains: [] }),
       'GET os_templates': () => ({ os_templates: osTemplates }),
       'GET nodes': () => ({
@@ -92,7 +94,7 @@ async function installLifecycleMock(page: Page) {
           { id: 5, domain_name: 'node5.example', location: { id: 5, label: 'Brno', environment: { id: 2, label: 'staging' } } },
         ],
       }),
-      'PUT vpses/123': () => ({ vps, _meta: { action_state_id: 506 } }),
+      'PUT vpses/123': options?.updateVps ?? (() => ({ vps, _meta: { action_state_id: 506 } })),
       'POST vpses/123/start': () => ({ _meta: { action_state_id: 503 } }),
       'POST vpses/123/stop': () => ({ _meta: { action_state_id: 504 } }),
       'POST vpses/123/restart': () => ({ _meta: { action_state_id: 505 } }),
@@ -113,6 +115,30 @@ async function installLifecycleMock(page: Page) {
 }
 
 test.describe('@pr-smoke VPS lifecycle tab', () => {
+  test('resets configuration review and lifetime editor when the VPS route changes', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    await installLifecycleMock(page);
+    const navigate = (path: string) => page.evaluate((nextPath) => {
+      window.history.pushState({}, '', nextPath);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }, path);
+
+    await page.goto('/admin/vps/123/config');
+    await page.getByRole('textbox', { name: /^Hostname / }).fill('draft-for-vps-a.example');
+    await page.getByRole('button', { name: 'Save (1)' }).click();
+    await expect(page.getByText('Review and apply VPS configuration changes?')).toBeVisible();
+    await navigate('/admin/vps/321/config');
+    await expect(page.getByText('Review and apply VPS configuration changes?')).toHaveCount(0);
+    await expect(page.getByRole('textbox', { name: /^Hostname / })).toHaveValue('vps123-playground');
+
+    await navigate('/admin/vps/123/lifecycle/lifetime');
+    await page.getByTestId('lifetimes.admin.edit').click();
+    await expect(page.getByTestId('lifetimes.admin.modal')).toBeVisible();
+    await page.getByTestId('lifetimes.admin.reason').fill('draft reason for VPS A');
+    await navigate('/admin/vps/321/lifecycle/lifetime');
+    await expect(page.getByTestId('lifetimes.admin.modal')).toHaveCount(0);
+  });
+
   test('posts legacy rescue boot payload', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     await installLifecycleMock(page);
@@ -485,7 +511,7 @@ test.describe('@pr-smoke VPS lifecycle tab', () => {
 
   test('admin can change VPS lifecycle expiration payload', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
-    await installLifecycleMock(page);
+    await installLifecycleMock(page, { updateVps: () => ({ vps, _meta: {} }) });
     const expirationInput = '2026-09-15T10:45';
     const expectedExpirationIso = new Date(expirationInput).toISOString();
 
@@ -509,6 +535,8 @@ test.describe('@pr-smoke VPS lifecycle tab', () => {
         change_reason: 'extend staging validation',
       },
     });
+    await expect(page.getByTestId('lifetimes.admin.modal')).toHaveCount(0);
+    await expect(page.getByTestId('vps.mutation.uncertain')).toHaveCount(0);
   });
 
   test('admin can clear VPS lifecycle expiration and reminder payload', async ({ page }) => {
@@ -703,6 +731,27 @@ test.describe('@pr-smoke VPS lifecycle tab', () => {
       },
     });
     await expect(page).toHaveURL(/\/admin\/vps$/);
+  });
+
+  test('delete without an action-state id stays on the VPS and fails closed', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 99 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET ip_addresses': () => ({ ip_addresses: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'DELETE vpses/123': () => ({ _meta: {} }),
+      },
+    });
+
+    await page.goto('/admin/vps/123/lifecycle/delete');
+    await page.getByTestId('vps.lifecycle.delete.submit').click();
+    await page.getByTestId('vps.lifecycle.delete.submit.confirm_dialog.confirm').click();
+
+    await expect(page).toHaveURL(/\/admin\/vps\/123\/lifecycle\/delete$/);
+    await expect(page.getByTestId('vps.lifecycle.delete')).toContainText(/server did not return a task identifier/i);
+    await expect(page.getByTestId('modal.action_progress')).toBeHidden();
   });
 
   test('@workflow-matrix regular user gets legacy reinstall, clone, swap and delete actions without admin-only lifecycle actions', async ({ page }) => {

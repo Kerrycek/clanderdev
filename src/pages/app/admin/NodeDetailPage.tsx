@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -26,7 +26,6 @@ import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { useTierBIntervalMs, useTierCIntervalMs, useTierSlowIntervalMs } from '../../../lib/refreshTiers';
 import { preflightNodeNotBusy } from './adminPreflight';
-
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 import { LockBadge } from '../../../components/ui/LockBadge';
@@ -37,10 +36,10 @@ import { LinkButton } from '../../../components/ui/LinkButton';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { LockStateStaleAlert } from '../../../components/ui/LockStateStaleAlert';
 import { ObjectHeader } from '../../../components/ui/ObjectHeader';
-
 import { NodeDetailTabs, NodeMaintenanceSection, NodeOverviewSection } from './nodeDetail/NodeDetailSections';
 import { NodeStorageCard } from './nodeDetail/NodeStorageCard';
 import { NodeLifecycleHeaderActions } from './nodes/NodeLifecycleHeaderActions';
+import { AdminObjectMutationRecovery } from './AdminObjectMutationRecovery';
 import { parseNodeDetailSection, type NodeDetailSection } from './nodeDetail/NodeStorageModel';
 import {
   buildNodeStatusKeys,
@@ -66,6 +65,8 @@ export function NodeDetailPage() {
   const online = useNetworkStatus();
   const params = useParams();
   const nodeId = Number(params['nodeId']);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   const nodeRef = useMemo(() => {
     const id = Number(nodeId);
@@ -211,99 +212,81 @@ export function NodeDetailPage() {
   const node = nodeQ.data;
   const title = node ? nodeTitle(node, nodeId) : `Node #${nodeId}`;
 
-  const refreshAfterNodeMutation = () => {
+  const refreshAfterNodeMutation = (mutationNodeId: number) => {
     const activeOnly = { refetchType: 'active' as const };
     void Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['nodes', 'show', { id: nodeId }], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({ queryKey: ['nodes', 'show', { id: mutationNodeId }], exact: true, ...activeOnly }),
       queryClient.invalidateQueries({ queryKey: ['nodes', 'public_status'], exact: true, ...activeOnly }),
       queryClient.invalidateQueries({ queryKey: ['nodes', 'index', { limit: 500 }], exact: true, ...activeOnly }),
       queryClient.invalidateQueries({
-        queryKey: ['transaction_chain', 'list', { className: 'Node', rowId: nodeId, state: 'active', limit: 10 }],
+        queryKey: ['transaction_chain', 'list', { className: 'Node', rowId: mutationNodeId, state: 'active', limit: 10 }],
         exact: true,
         ...activeOnly,
       }),
       queryClient.invalidateQueries({
-        queryKey: ['transactions', 'list', { nodeId, limit: txPg.limit, fromId: txPg.fromId ?? null }],
+        queryKey: ['transactions', 'list', { nodeId: mutationNodeId, limit: txPg.limit, fromId: txPg.fromId ?? null }],
         exact: true,
         ...activeOnly,
       }),
     ]);
   };
 
+  const snapshotNodeTarget = () => nodeRef ? Object.freeze({ nodeId, lockRef: Object.freeze({ ...nodeRef }), knownBusy: busyLocalLock || busyTransaction, title }) : null;
+  const acquireMutationContext = async (variables: { lockRef: NonNullable<typeof nodeRef> }) => ({ lockRef: variables.lockRef,
+    mutationGeneration: await chrome.acquireLocalLock(variables.lockRef, { durable: true }) });
+  const handleBusyError = (err: unknown) => { if (typeof err === 'object' && err && 'code' in err && (err as { code?: unknown }).code === 'BUSY') chrome.openTasks(); };
+
   const maintenanceM = useMutation({
-    mutationFn: async (lock: boolean) => {
-      await preflightNodeNotBusy({ nodeId, t, knownBusy: busyLocalLock || busyTransaction });
-      return setNodeMaintenance(nodeId, {
-        lock,
-        reason: lock ? maintReason.trim() || undefined : undefined,
-      });
+    mutationFn: async (variables: NonNullable<ReturnType<typeof snapshotNodeTarget>> & { lock: boolean; reason?: string }) => {
+      await preflightNodeNotBusy({ nodeId: variables.nodeId, t, knownBusy: variables.knownBusy });
+      return setNodeMaintenance(variables.nodeId, { lock: variables.lock, reason: variables.reason });
     },
-    onMutate: async () => {
-      if (nodeRef) chrome.acquireLocalLock(nodeRef);
-    },
-    onSuccess: (res, lock) => {
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          object: nodeRef ?? undefined,
-          actionLabelKey: lock ? 'action.node.maintenance_lock.label' : 'action.node.maintenance_unlock.label',
-          objectLabel: title,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
+          actionLabelKey: variables.lock ? 'action.node.maintenance_lock.label' : 'action.node.maintenance_unlock.label',
+          objectLabel: variables.title,
         });
       }
-      setNotice(lock ? t('admin.node.notice.maintenance_lock_requested') : t('admin.node.notice.maintenance_unlock_requested'));
-      setConfirm(null);
-      refreshAfterNodeMutation();
-    },
-    onError: (err: unknown) => {
-      if (typeof err === 'object' && err && 'code' in err && (err as { code?: unknown }).code === 'BUSY') {
-        chrome.openTasks();
+      if (mountedRef.current) {
+        setNotice(variables.lock ? t('admin.node.notice.maintenance_lock_requested') : t('admin.node.notice.maintenance_unlock_requested'));
+        setConfirm(null);
       }
+      refreshAfterNodeMutation(variables.nodeId);
     },
-    onSettled: () => {
-      if (nodeRef) chrome.releaseLocalLock(nodeRef);
-    },
+    onError: handleBusyError,
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const evacuateM = useMutation({
-    mutationFn: async () => {
-      await preflightNodeNotBusy({ nodeId, t, knownBusy: busyLocalLock || busyTransaction });
-      const dst = Number(evDst);
-      const concurrency = Number(evConcurrency);
-      return evacuateNode(nodeId, {
-        dst_node: dst,
-        concurrency: Number.isFinite(concurrency) ? concurrency : undefined,
-        stop_on_error: evStopOnError,
-        maintenance_window: evMaintenanceWindow,
-        cleanup_data: evCleanupData,
-        send_mail: evSendMail,
-        reason: evReason.trim() || undefined,
-      });
+    mutationFn: async (variables: NonNullable<ReturnType<typeof snapshotNodeTarget>> & { payload: Parameters<typeof evacuateNode>[1] }) => {
+      await preflightNodeNotBusy({ nodeId: variables.nodeId, t, knownBusy: variables.knownBusy });
+      return evacuateNode(variables.nodeId, variables.payload);
     },
-    onMutate: async () => {
-      if (nodeRef) chrome.acquireLocalLock(nodeRef);
-    },
-    onSuccess: (res) => {
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          object: nodeRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           actionLabelKey: 'action.node.evacuate.label',
-          objectLabel: title,
+          objectLabel: variables.title,
         });
       }
-      setEvResult(res.data ?? null);
-      setNotice(t('admin.node.notice.evacuation_started'));
-      setConfirm(null);
-      refreshAfterNodeMutation();
-    },
-    onError: (err: unknown) => {
-      if (typeof err === 'object' && err && 'code' in err && (err as { code?: unknown }).code === 'BUSY') {
-        chrome.openTasks();
+      if (mountedRef.current) {
+        setEvResult(res.data ?? null);
+        setNotice(t('admin.node.notice.evacuation_started'));
+        setConfirm(null);
       }
+      refreshAfterNodeMutation(variables.nodeId);
     },
-    onSettled: () => {
-      if (nodeRef) chrome.releaseLocalLock(nodeRef);
-    },
+    onError: handleBusyError,
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const metricsRows = useMemo(() => sortStatusesByTimeAsc(metricsQ.data ?? []), [metricsQ.data]);
@@ -399,7 +382,7 @@ export function NodeDetailPage() {
         meta={loc ? t('admin.node.meta.location', { location: loc }) : ' '}
         actions={
           <>
-            {node ? <NodeLifecycleHeaderActions node={node} busyTransaction={busyTransaction} onUpdated={() => { setNotice(t('admin.node.editor.notice.updated')); refreshAfterNodeMutation(); }} /> : null}
+            {node ? <NodeLifecycleHeaderActions node={node} busyTransaction={busyTransaction} onUpdated={() => { setNotice(t('admin.node.editor.notice.updated')); refreshAfterNodeMutation(nodeId); }} /> : null}
             {typeof nodeId === 'number' && Number.isFinite(nodeId) && nodeId > 0 ? (
               <LinkButton to={`${basePath}/vps?node=${nodeId}`} variant="secondary" title={t('admin.node.action.show_vps.title')}>
                 {t('nav.vps')}
@@ -429,6 +412,7 @@ export function NodeDetailPage() {
           </>
         }
       />
+      <AdminObjectMutationRecovery object={nodeRef} refetchObject={nodeQ.refetch} refetchChains={chainsQ.refetch} online={online} testIdPrefix="admin.node.mutation.recovery" />
 
       {chainsStale ? (
         <LockStateStaleAlert
@@ -566,7 +550,10 @@ export function NodeDetailPage() {
         confirmLabel={t('common.lock')}
         confirmDisabled={!maintenanceLockGate.allowed}
         confirmLoading={maintenanceM.isPending}
-        onConfirm={() => maintenanceM.mutate(true)}
+        onConfirm={() => {
+          const target = snapshotNodeTarget();
+          if (target) maintenanceM.mutate(Object.freeze({ ...target, lock: true, reason: maintReason.trim() || undefined }));
+        }}
         onCancel={() => setConfirm(null)}
       />
 
@@ -577,7 +564,10 @@ export function NodeDetailPage() {
         confirmLabel={t('common.unlock')}
         confirmDisabled={!maintenanceUnlockGate.allowed}
         confirmLoading={maintenanceM.isPending}
-        onConfirm={() => maintenanceM.mutate(false)}
+        onConfirm={() => {
+          const target = snapshotNodeTarget();
+          if (target) maintenanceM.mutate(Object.freeze({ ...target, lock: false }));
+        }}
         onCancel={() => setConfirm(null)}
       />
 
@@ -589,7 +579,18 @@ export function NodeDetailPage() {
         confirmLabel={t('common.start')}
         confirmDisabled={!canEvacuate || !evacuateGate.allowed}
         confirmLoading={evacuateM.isPending}
-        onConfirm={() => evacuateM.mutate()}
+        onConfirm={() => {
+          const target = snapshotNodeTarget();
+          if (!target) return;
+          const concurrency = Number(evConcurrency);
+          evacuateM.mutate(Object.freeze({ ...target, payload: Object.freeze({
+            dst_node: Number(evDst),
+            concurrency: Number.isFinite(concurrency) ? concurrency : undefined,
+            stop_on_error: evStopOnError, maintenance_window: evMaintenanceWindow,
+            cleanup_data: evCleanupData, send_mail: evSendMail,
+            reason: evReason.trim() || undefined,
+          }) }));
+        }}
         onCancel={() => setConfirm(null)}
       >
         <div className="text-sm text-muted">

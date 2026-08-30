@@ -1,4 +1,4 @@
-import { haveApiCall, expectArray } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './app';
 
 export type VpsUserDataFormat =
@@ -106,5 +106,5 @@ export async function deployVpsUserData(id: number, vpsId: number): Promise<{ me
     },
   });
 
-  return { meta: res.meta };
+  return requireActionStateResult({ meta: res.meta }, 'VPS user-data deployment');
 }

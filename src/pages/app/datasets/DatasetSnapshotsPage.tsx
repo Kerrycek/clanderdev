@@ -161,6 +161,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
           objectLabel: datasetLabelForToast,
           object: datasetRef,
           progressTitleKey: 'modal.dataset.snapshot.create.title',
+          blockUi: true,
         });
 
       setCreateOpen(false);
@@ -261,6 +262,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
           objectLabel: datasetLabelForToast,
           object: datasetRef,
           progressTitleKey: 'modal.dataset.download.create.title',
+          blockUi: true,
         });
 
       setCreatedDownload(r.data ?? null);

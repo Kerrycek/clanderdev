@@ -82,7 +82,9 @@ test.describe('@pr-smoke VPS network tab', () => {
         'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
         'PUT network_interfaces/1': () => ({
           network_interface: { ...netifs[0] },
+          _meta: { action_state_id: 1201 },
         }),
+        'GET action_states/1201': () => ({ action_state: { id: 1201, finished: true, status: true, current: 1, total: 1 } }),
       },
     });
 
@@ -124,6 +126,57 @@ test.describe('@pr-smoke VPS network tab', () => {
     await expect(page.getByTestId('vps.network.edit')).toBeHidden();
   });
 
+  test('keeps an in-flight interface edit bound to its original VPS after route rerender', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    let releaseUpdate!: () => void;
+    const updateGate = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 90 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET vpses/456': () => ({ vps: { ...vps, id: 456, hostname: 'vps456.example' } }),
+        'GET ip_addresses': () => ({ ip_addresses: ips }),
+        'GET host_ip_addresses': () => ({ host_ip_addresses: [] }),
+        'GET environments': () => ({ environments: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'GET network_interfaces': () => ({ network_interfaces: netifs }),
+        'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
+        'PUT network_interfaces/1': async () => {
+          await updateGate;
+          return { network_interface: { ...netifs[0] }, _meta: { action_state_id: 1250 } };
+        },
+        'GET action_states/1250': () => ({ action_state: { id: 1250, finished: true, status: true, current: 1, total: 1 } }),
+      },
+    });
+
+    await page.goto('/admin/vps/123/network');
+    await interfaceEditButton(page).click();
+    await page.getByTestId('vps.network.edit.name').fill('vps123-interface');
+
+    const originalRequest = page.waitForRequest(
+      (request) => request.method() === 'PUT' && request.url().includes('/api/v7.0/network_interfaces/1')
+    );
+    await page.getByTestId('vps.network.edit.save').click();
+    expect((await originalRequest).postDataJSON()).toMatchObject({ network_interface: { name: 'vps123-interface' } });
+
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/admin/vps/456/network');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByText('vps456.example')).toBeVisible();
+    await expect(page.getByTestId('vps.network.edit')).toHaveCount(0);
+    await interfaceEditButton(page).click();
+    await page.getByTestId('vps.network.edit.name').fill('vps456-unsaved');
+    releaseUpdate();
+
+    await expect(page.getByTestId('vps.network.edit')).toBeVisible();
+    await expect(page.getByTestId('vps.network.edit.name')).toHaveValue('vps456-unsaved');
+  });
+
   test('disables VPS networking with a change reason', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
@@ -141,8 +194,9 @@ test.describe('@pr-smoke VPS network tab', () => {
         'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
         'PUT vpses/123': async () => {
           enabled = false;
-          return { vps: { ...vps, enable_network: enabled } };
+          return { vps: { ...vps, enable_network: enabled }, _meta: { action_state_id: 1210 } };
         },
+        'GET action_states/1210': () => ({ action_state: { id: 1210, finished: true, status: true, current: 1, total: 1 } }),
       },
     });
 
@@ -207,30 +261,36 @@ test.describe('@pr-smoke VPS network tab', () => {
         'GET environments': () => ({ environments: [{ id: 3, label: 'env-test' }] }),
         'POST ip_addresses/2/assign': () => {
           currentIps = currentIps.map((ip) => (ip.id === 2 ? { ...ip, network_interface: { id: 1 }, routed: true } : ip));
-          return { ip_address: currentIps.find((ip) => ip.id === 2) };
+          return { ip_address: currentIps.find((ip) => ip.id === 2), _meta: { action_state_id: 1202 } };
         },
         'POST ip_addresses/1/free': () => {
           currentIps = currentIps.map((ip) => (ip.id === 1 ? { ...ip, network_interface: null, routed: false } : ip));
-          return { ip_address: currentIps.find((ip) => ip.id === 1) };
+          return { ip_address: currentIps.find((ip) => ip.id === 1), _meta: { action_state_id: 1203 } };
         },
         'PUT ip_addresses/1': () => {
           currentIps = currentIps.map((ip) => (ip.id === 1 ? { ...ip, user: { id: 77, login: 'new-owner' } } : ip));
-          return { ip_address: currentIps.find((ip) => ip.id === 1) };
+          return { ip_address: currentIps.find((ip) => ip.id === 1), _meta: { action_state_id: 1204 } };
         },
         'POST host_ip_addresses/51/assign': () => {
           hostAddresses = hostAddresses.map((h) => (h.id === 51 ? { ...h, assigned: true } : h));
-          return { host_ip_address: hostAddresses.find((h) => h.id === 51) };
+          return { host_ip_address: hostAddresses.find((h) => h.id === 51), _meta: { action_state_id: 1205 } };
         },
         'POST host_ip_addresses/50/free': () => {
           hostAddresses = hostAddresses.map((h) => (h.id === 50 ? { ...h, assigned: false } : h));
-          return { host_ip_address: hostAddresses.find((h) => h.id === 50) };
+          return { host_ip_address: hostAddresses.find((h) => h.id === 50), _meta: { action_state_id: 1206 } };
         },
         'PUT host_ip_addresses/50': () => {
           hostAddresses = hostAddresses.map((h) =>
             h.id === 50 ? { ...h, reverse_record_value: 'new.example.test.' } : h
           );
-          return { host_ip_address: hostAddresses[0] };
+          return { host_ip_address: hostAddresses[0], _meta: { action_state_id: 1207 } };
         },
+        'GET action_states/1202': () => ({ action_state: { id: 1202, finished: true, status: true, current: 1, total: 1 } }),
+        'GET action_states/1203': () => ({ action_state: { id: 1203, finished: true, status: true, current: 1, total: 1 } }),
+        'GET action_states/1204': () => ({ action_state: { id: 1204, finished: true, status: true, current: 1, total: 1 } }),
+        'GET action_states/1205': () => ({ action_state: { id: 1205, finished: true, status: true, current: 1, total: 1 } }),
+        'GET action_states/1206': () => ({ action_state: { id: 1206, finished: true, status: true, current: 1, total: 1 } }),
+        'GET action_states/1207': () => ({ action_state: { id: 1207, finished: true, status: true, current: 1, total: 1 } }),
       },
     });
 
@@ -451,7 +511,9 @@ test.describe('@pr-smoke VPS network tab', () => {
         'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
         'POST ip_addresses/77/assign': () => ({
           ip_address: { ...freePrivate, network_interface: { id: 1 } },
+          _meta: { action_state_id: 1277 },
         }),
+        'GET action_states/1277': () => ({ action_state: { id: 1277, finished: true, status: true, current: 1, total: 1 } }),
       },
     });
 

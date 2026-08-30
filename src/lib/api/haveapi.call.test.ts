@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getMetaActionStateId, haveApiCall, isExpiredSessionError, SESSION_EXPIRED_EVENT } from './haveapi';
+import {
+  getMetaActionStateId,
+  HaveApiError,
+  haveApiCall,
+  isAmbiguousMutationError,
+  isExpiredSessionError,
+  MALFORMED_HAVEAPI_ENVELOPE_ERROR_CODE,
+  MissingActionStateError,
+  requireActionStateResult,
+  SESSION_EXPIRED_EVENT,
+} from './haveapi';
 
 function makeOkResponse(body: unknown, extraHeaders?: Record<string, string>) {
   return new Response(JSON.stringify(body), {
@@ -191,6 +201,38 @@ describe('haveApiCall', () => {
 
     window.removeEventListener(SESSION_EXPIRED_EVENT, listener);
   });
+
+  it.each([
+    ['missing status', {}],
+    ['non-boolean status', { status: 'true', response: { ok: true } }],
+    ['non-object envelope', 'ok'],
+  ])('treats a 2xx %s response as an ambiguous malformed envelope', async (_label, body) => {
+    setMockRuntime();
+    vi.stubGlobal('fetch', vi.fn(async () => makeOkResponse(body)));
+
+    const error = await haveApiCall<any>({ method: 'POST', path: '/vpses/123/start' })
+      .then(() => undefined, (err: unknown) => err);
+
+    expect(error).toBeInstanceOf(HaveApiError);
+    expect((error as HaveApiError).envelope.errors).toBe(MALFORMED_HAVEAPI_ENVELOPE_ERROR_CODE);
+    expect(isAmbiguousMutationError(error)).toBe(true);
+  });
+
+  it('keeps an explicit status:false 2xx envelope authoritative', async () => {
+    setMockRuntime();
+    vi.stubGlobal('fetch', vi.fn(async () => makeOkResponse({
+      status: false,
+      message: 'Validation failed',
+      errors: { vps: { memory: ['too large'] } },
+      response: null,
+    })));
+
+    const error = await haveApiCall<any>({ method: 'POST', path: '/vpses/123/start' })
+      .then(() => undefined, (err: unknown) => err);
+
+    expect(error).toBeInstanceOf(HaveApiError);
+    expect(isAmbiguousMutationError(error)).toBe(false);
+  });
 });
 
 describe('getMetaActionStateId', () => {
@@ -199,5 +241,57 @@ describe('getMetaActionStateId', () => {
     expect(getMetaActionStateId({ state_id: '43' })).toBe(43);
     expect(getMetaActionStateId({ action_state: 44 })).toBe(44);
     expect(getMetaActionStateId({ action_state: { id: '45' } })).toBe(45);
+  });
+
+  it('requires a positive integer id for asynchronous action results', () => {
+    expect(requireActionStateResult({ meta: { action_state_id: 46 } }, 'test action')).toEqual({
+      meta: { action_state_id: 46 },
+    });
+    expect(() => requireActionStateResult({ meta: {} }, 'test action')).toThrow(MissingActionStateError);
+    expect(() => requireActionStateResult({ meta: { action_state_id: 0 } }, 'test action')).toThrow(MissingActionStateError);
+    expect(() => requireActionStateResult({ meta: { action_state_id: 'invalid' } }, 'test action')).toThrow(MissingActionStateError);
+  });
+});
+
+describe('isAmbiguousMutationError', () => {
+  it('keeps fail-closed guards for outcomes that cannot prove the server rejected the mutation', () => {
+    expect(isAmbiguousMutationError(new MissingActionStateError('VPS start'))).toBe(true);
+    expect(isAmbiguousMutationError(new TypeError('network connection lost'))).toBe(true);
+    expect(isAmbiguousMutationError(new DOMException('request aborted', 'AbortError'))).toBe(true);
+    expect(isAmbiguousMutationError(new HaveApiError(
+      { status: false, errors: 'INVALID_JSON_RESPONSE', message: 'Invalid JSON response' },
+      'Invalid JSON response',
+      200
+    ))).toBe(true);
+    expect(isAmbiguousMutationError(new HaveApiError(
+      { status: false, errors: 'INVALID_JSON_RESPONSE', message: 'Invalid JSON response' },
+      'Invalid JSON response',
+      422
+    ))).toBe(true);
+    expect(isAmbiguousMutationError(new HaveApiError(
+      { status: false, message: 'server failure' },
+      'server failure',
+      503
+    ))).toBe(true);
+    for (const status of [408, 425, 429]) {
+      expect(isAmbiguousMutationError(new HaveApiError(
+        { status: false, message: `ambiguous HTTP ${status}` },
+        `ambiguous HTTP ${status}`,
+        status
+      ))).toBe(true);
+    }
+  });
+
+  it('releases guards after authoritative API validation rejections', () => {
+    expect(isAmbiguousMutationError(new HaveApiError(
+      { status: false, message: 'Validation failed', errors: { vps: { memory: ['too large'] } } },
+      'Validation failed',
+      422
+    ))).toBe(false);
+    expect(isAmbiguousMutationError(new HaveApiError(
+      { status: false, message: 'Rejected' },
+      'Rejected'
+    ))).toBe(false);
+    expect(isAmbiguousMutationError(new Error('client-side validation'))).toBe(false);
   });
 });

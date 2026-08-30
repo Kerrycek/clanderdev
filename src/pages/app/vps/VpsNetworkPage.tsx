@@ -6,6 +6,7 @@ import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 import { useChrome } from '../../../components/layout/ChromeContext';
+import { MutationUncertaintyPanel, type MutationReconcileResult } from '../../../components/layout/MutationUncertaintyPanel';
 import { ActionButton } from '../../../components/ui/ActionButton';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
@@ -17,6 +18,7 @@ import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { fetchEnvironments } from '../../../lib/api/infra';
 import {
   assignIpAddressRoute,
+  fetchIpAddress,
   fetchIpAddressesForVps,
   freeIpAddressRoute,
   updateIpAddress,
@@ -34,6 +36,9 @@ import { fetchNetworkInterfaceAccountingForVps, fetchNetworkInterfaces, updateNe
 import { updateVps } from '../../../lib/api/vps';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { gateVpsMutation } from '../../../lib/gates/vps';
+import { ipOwnerUpdateIntent, ipRouteAssignIntent, ipRouteFreeIntent, reconcileIpAddressMutation } from '../../../lib/ipAddressMutationIntent';
+import { objectRef, type ObjectRef } from '../../../lib/objectRef';
+import type { LocalMutationGeneration, LocalMutationIntent } from '../../../lib/localLocks';
 import { preflightVpsNotBusy } from './vpsPreflight';
 import { useVps } from './VpsContext';
 import { VpsNetworkInterfacesCard } from './VpsNetworkInterfacesCard';
@@ -57,6 +62,29 @@ import {
   validatePtrValue,
 } from './VpsNetworkModel';
 
+type NetworkMutationContext = {
+  lockRef: ObjectRef;
+  vpsLockRef: ObjectRef;
+  mutationGeneration: LocalMutationGeneration;
+  objectLabel: string;
+};
+type VpsMutationSnapshot = {
+  vpsId: number;
+  vpsLockRef: ObjectRef;
+  canMutateVps: boolean;
+  knownBusy: boolean;
+  permissionError: string;
+  busyError: string;
+  objectLabel: string;
+};
+type NetifMutation = VpsMutationSnapshot & { networkInterfaceId: number; params: Record<string, unknown> };
+type ToggleMutation = VpsMutationSnapshot & { enable: boolean; reason?: string };
+type PtrMutation = VpsMutationSnapshot & { hostIpId: number; reverseRecordValue: string };
+type HostMutation = VpsMutationSnapshot & { hostIpId: number };
+type AssignHostMutation = HostMutation & { networkInterfaceId: number };
+type IpMutation = VpsMutationSnapshot & { ipId: number; lockRef: ObjectRef; intent: LocalMutationIntent };
+type AssignRouteMutation = IpMutation & { networkInterfaceId: number };
+type OwnerMutation = IpMutation & { user: number | null; environment: number | null };
 export function VpsNetworkPage() {
   const auth = useAuth();
   const { basePath, mode } = useAppMode();
@@ -64,54 +92,47 @@ export function VpsNetworkPage() {
   const qc = useQueryClient();
   const { t } = useI18n();
   const { pushToast } = useToasts();
-
   const { vps, canMutateVps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
-
   const vpsId = vps.id;
   const canAdmin = mode === 'admin' && auth.role === 'admin';
   const adminBasePath = mode === 'admin' ? basePath : '/admin';
-
   const netEnabled = canonicalBool(vps.enable_network, true);
   const objectLabel = String(vps.hostname ?? '') || `#${vpsId}`;
-
   const netifsQ = useQuery({
     queryKey: ['network_interface', 'list', { vpsId, limit: 100 }],
     queryFn: async () => (await fetchNetworkInterfaces(vpsId, { limit: 100 })).data,
     refetchOnWindowFocus: false,
   });
-
   const ipsQ = useQuery({
     queryKey: ['ip_address', 'list', { vpsId, limit: 250 }],
-    queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 250 })).data,
+    queryFn: async () => (
+      await fetchIpAddressesForVps(vpsId, {
+        limit: 250,
+        includes: 'network,user,network_interface__vps,charged_environment',
+      })
+    ).data,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
-
   const acctMonth = useMemo(() => monthKey(new Date()), []);
-
   const acctQ = useQuery({
     queryKey: ['network_interface', 'accounting', { vpsId, year: acctMonth.year, month: acctMonth.month }],
     queryFn: async () => (await fetchNetworkInterfaceAccountingForVps(vpsId, acctMonth.year, acctMonth.month)).data,
     refetchOnWindowFocus: false,
   });
-
   const hostAddrsQ = useQuery({
     queryKey: ['host_ip_addresses', 'vps', { vpsId, limit: 250 }],
     queryFn: async () => (await fetchHostIpAddresses({ vps: vpsId, limit: 250, order: 'interface' })).data,
     refetchOnWindowFocus: false,
   });
-
   const environmentsQ = useQuery({
     queryKey: ['environments', 'vps-network-ip-owner'],
     queryFn: async () => (await fetchEnvironments({ limit: 250 })).data,
     enabled: canAdmin,
     staleTime: 60_000,
   });
-
   const acctTotals = useMemo(() => sumAccountingRows(acctQ.data ?? []), [acctQ.data]);
-
   const ipByNetif = useMemo(() => groupIpByInterface(ipsQ.data ?? []), [ipsQ.data]);
-
   const [editNetif, setEditNetif] = useState<NetworkInterface | null>(null);
   const [editName, setEditName] = useState('');
   const [editEnable, setEditEnable] = useState(true);
@@ -131,7 +152,29 @@ export function VpsNetworkPage() {
   const [ownerUser, setOwnerUser] = useState('');
   const [ownerEnvironment, setOwnerEnvironment] = useState('');
   const [addIpOpen, setAddIpOpen] = useState(false);
-
+  const snapshotVpsMutation = (): VpsMutationSnapshot => ({
+    vpsId,
+    vpsLockRef: vpsRef,
+    canMutateVps,
+    knownBusy: busyTransaction || busyLocalLock,
+    permissionError: t('gate.blocked.permission.body'),
+    busyError: t('toast.action_blocked.body'),
+    objectLabel,
+  });
+  const acquireMutationContext = async (
+    snapshot: VpsMutationSnapshot,
+    lockRef: ObjectRef = snapshot.vpsLockRef,
+    intent?: LocalMutationIntent
+  ): Promise<NetworkMutationContext> => {
+    if (!snapshot.canMutateVps) throw new Error(snapshot.permissionError);
+    await preflightVpsNotBusy({
+      vpsId: snapshot.vpsId,
+      t: () => snapshot.busyError,
+      knownBusy: snapshot.knownBusy,
+    });
+    const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true, intent });
+    return { lockRef, vpsLockRef: snapshot.vpsLockRef, mutationGeneration, objectLabel: snapshot.objectLabel };
+  };
   const openEdit = (ni: NetworkInterface) => {
     if (!canMutateVps) return;
     setEditNetif(ni);
@@ -141,39 +184,32 @@ export function VpsNetworkPage() {
     setEditMaxTx(typeof ni.max_tx === 'number' ? String(Math.round(ni.max_tx / 1024 / 1024)) : '');
     setEditMaxRx(typeof ni.max_rx === 'number' ? String(Math.round(ni.max_rx / 1024 / 1024)) : '');
   };
-
+  // audit:ignore missing-local-lock -- acquired by acquireMutationContext
   const updateNetifM = useMutation({
-    mutationFn: async (payload: { id: number; params: Record<string, unknown> }) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return updateNetworkInterface(payload.id, payload.params);
-    },
-    onMutate: () => {
-      chrome.acquireLocalLock(vpsRef);
-    },
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId, limit: 100 }] });
-      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId, limit: 250 }] });
-
+    mutationFn: (payload: NetifMutation) => updateNetworkInterface(payload.networkInterfaceId, payload.params),
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: (r, variables, context) => {
+      if (variables.vpsId === vpsId) setEditNetif(null);
+      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId: variables.vpsId, limit: 100 }] });
+      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId: variables.vpsId, limit: 250 }] });
       const asId = getMetaActionStateId(r.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.network.interface_update.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: context?.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
-
-      refetchChains();
+      qc.invalidateQueries({ queryKey: ['transaction_chain'] });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
-
   const parseLimit = (raw: string, which: 'tx' | 'rx'): number | null => {
     const v = raw.trim();
     if (!v) return null;
@@ -184,300 +220,319 @@ export function VpsNetworkPage() {
     }
     return Math.round(n * 1024 * 1024);
   };
-
   const editDirty = useMemo(() => {
     if (!editNetif) return false;
     const nameDirty = (editName ?? '').trim() !== String(editNetif.name ?? '');
-
     if (!canAdmin) return nameDirty;
-
     const enableDirty = canonicalBool(editEnable, true) !== canonicalBool(editNetif.enable, true);
-
     const txDirty = (() => {
       const raw = editMaxTx.trim();
       const curr = typeof editNetif.max_tx === 'number' ? String(Math.round(editNetif.max_tx / 1024 / 1024)) : '';
       return raw !== curr;
     })();
-
     const rxDirty = (() => {
       const raw = editMaxRx.trim();
       const curr = typeof editNetif.max_rx === 'number' ? String(Math.round(editNetif.max_rx / 1024 / 1024)) : '';
       return raw !== curr;
     })();
-
     return nameDirty || enableDirty || txDirty || rxDirty;
   }, [canAdmin, editEnable, editMaxRx, editMaxTx, editName, editNetif]);
-
   const saveNetif = async () => {
     if (!canMutateVps) return;
     if (!editNetif) return;
-
     const params: Record<string, unknown> = {
       name: editName.trim(),
     };
-
     if (canAdmin) {
       params['enable'] = editEnable;
-
       const tx = parseLimit(editMaxTx, 'tx');
       if (editMaxTx.trim() && tx === null) return;
       if (tx !== null) params['max_tx'] = tx;
-
       const rx = parseLimit(editMaxRx, 'rx');
       if (editMaxRx.trim() && rx === null) return;
       if (rx !== null) params['max_rx'] = rx;
     }
-
     setEditError(null);
-
     try {
-      await updateNetifM.mutateAsync({ id: editNetif.id, params });
-      setEditNetif(null);
+      await updateNetifM.mutateAsync({
+        ...snapshotVpsMutation(),
+        networkInterfaceId: editNetif.id,
+        params,
+      });
     } catch (e: any) {
       setEditError(String(e?.message ?? e));
     }
   };
-
   // VPS-level enable_network toggle (admin only)
   const [confirmDisableOpen, setConfirmDisableOpen] = useState(false);
   const [confirmEnableOpen, setConfirmEnableOpen] = useState(false);
   const [changeReason, setChangeReason] = useState('');
   const [netToggleError, setNetToggleError] = useState<string | null>(null);
-
+  // audit:ignore missing-local-lock -- acquired by acquireMutationContext
   const toggleNetM = useMutation({
-    mutationFn: async (payload: { enable: boolean; reason?: string }) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-
+    mutationFn: async (payload: ToggleMutation) => {
       const params: Record<string, unknown> = { enable_network: payload.enable };
       if (!payload.enable && String(payload.reason ?? '').trim()) {
         params['change_reason'] = String(payload.reason ?? '').trim();
       }
-
-      return updateVps(vpsId, params);
+      return updateVps(payload.vpsId, params);
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(vpsRef);
-    },
-    onSuccess: (r, vars) => {
-      setNetToggleError(null);
-      refetch();
-      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId, limit: 100 }] });
-      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId, limit: 250 }] });
-
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: (r, vars, context) => {
+      if (vars.vpsId === vpsId) {
+        setNetToggleError(null);
+        if (vars.enable) {
+          setConfirmEnableOpen(false);
+        } else {
+          setConfirmDisableOpen(false);
+          setChangeReason('');
+        }
+      }
+      qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vars.vpsId }] });
+      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId: vars.vpsId, limit: 100 }] });
+      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId: vars.vpsId, limit: 250 }] });
       const asId = getMetaActionStateId(r.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: vars.enable ? 'action.vps.network.enable.label' : 'action.vps.network.disable.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: context?.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
-
-      refetchChains();
+      qc.invalidateQueries({ queryKey: ['transaction_chain'] });
     },
-    onError: (e: any) => {
+    onError: (e: any, variables) => {
       if (e?.code === 'BUSY') chrome.openTasks();
-      setNetToggleError(String(e?.message ?? e));
+      if (variables.vpsId === vpsId) setNetToggleError(String(e?.message ?? e));
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
-
-  const refreshNetworkData = async () => {
+  const refreshNetworkData = async (targetVpsId: number) => {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ['host_ip_addresses'] }),
       qc.invalidateQueries({ queryKey: ['ip_address'] }),
       qc.invalidateQueries({ queryKey: ['ip_addresses'] }),
-      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId, limit: 100 }] }),
-      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId, limit: 250 }] }),
-      hostAddrsQ.refetch(),
-      ipsQ.refetch(),
-      netifsQ.refetch(),
+      qc.invalidateQueries({ queryKey: ['network_interface', 'list', { vpsId: targetVpsId, limit: 100 }] }),
+      qc.invalidateQueries({ queryKey: ['ip_address', 'list', { vpsId: targetVpsId, limit: 250 }] }),
     ]);
   };
-
-  const trackNetworkAction = (meta: unknown, labelKey: string) => {
+  const trackNetworkAction = (
+    meta: unknown,
+    labelKey: string,
+    context?: NetworkMutationContext
+  ) => {
     const asId = getMetaActionStateId(meta);
     if (asId !== undefined) {
       chrome.trackActionState(asId, {
         actionLabelKey: labelKey,
-        objectLabel,
-        object: vpsRef,
+        objectLabel: context?.objectLabel,
+        object: context?.lockRef,
+        mutationGeneration: context?.mutationGeneration,
       });
-    }
-    refetchChains();
-  };
-
-  const updatePtrM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!ptrEditor) throw new Error(t('vps.network.host_addresses.validation.missing'));
-      const validation = validatePtrValue(ptrValue);
-      if (!validation.ok) {
-        throw new Error(t('vps.network.host_addresses.ptr.validation.invalid', { value: validation.invalidValue ?? ptrValue.trim() }));
+      if (context && (context.lockRef.kind !== context.vpsLockRef.kind || context.lockRef.id !== context.vpsLockRef.id)) {
+        chrome.acquireLocalLock(context.vpsLockRef, { actionStateId: asId });
       }
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return updateHostIpAddress(ptrEditor.id, { reverse_record_value: ptrValue.trim() });
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setPtrEditor(null);
-      setPtrValue('');
-      trackNetworkAction(res.meta, 'action.vps.network.ptr_update.label');
-      await refreshNetworkData();
+    }
+    qc.invalidateQueries({ queryKey: ['transaction_chain'] });
+  };
+  const updatePtrM = useMutation({
+    mutationFn: (payload: PtrMutation) => updateHostIpAddress(payload.hostIpId, { reverse_record_value: payload.reverseRecordValue }),
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) {
+        setPtrEditor(null);
+        setPtrValue('');
+      }
+      trackNetworkAction(res.meta, 'action.vps.network.ptr_update.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.host_addresses.toast.ptr_saved') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
   const freeHostM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!freeHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return freeHostIpAddress(freeHost.id);
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setFreeHost(null);
-      trackNetworkAction(res.meta, 'action.vps.network.host_free.label');
-      await refreshNetworkData();
+    mutationFn: (payload: HostMutation) => freeHostIpAddress(payload.hostIpId),
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) setFreeHost(null);
+      trackNetworkAction(res.meta, 'action.vps.network.host_free.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.host_addresses.toast.freed') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
   const assignHostM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!assignHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
-      const networkInterface = Number(assignHostInterface);
-      if (!Number.isInteger(networkInterface) || networkInterface <= 0) {
-        throw new Error(t('vps.network.host_addresses.assign.validation.interface'));
+    mutationFn: (payload: AssignHostMutation) => assignHostIpAddress(payload.hostIpId, { network_interface: payload.networkInterfaceId }),
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) {
+        setAssignHost(null);
+        setAssignHostInterface('');
       }
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return assignHostIpAddress(assignHost.id, { network_interface: networkInterface });
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setAssignHost(null);
-      setAssignHostInterface('');
-      trackNetworkAction(res.meta, 'action.vps.network.host_assign.label');
-      await refreshNetworkData();
+      trackNetworkAction(res.meta, 'action.vps.network.host_assign.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.host_addresses.toast.assigned') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
   const deleteHostM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!deleteHost) throw new Error(t('vps.network.host_addresses.validation.missing'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return deleteHostIpAddress(deleteHost.id);
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async () => {
-      setDeleteHost(null);
-      await refreshNetworkData();
+    mutationFn: (payload: HostMutation) => deleteHostIpAddress(payload.hostIpId),
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) setDeleteHost(null);
+      trackNetworkAction(res.meta, 'action.vps.network.host_delete.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.host_addresses.toast.deleted') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
+  const freeRouteRef = freeRouteIp ? objectRef('IpAddress', freeRouteIp.id) : null;
   const freeRouteM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!freeRouteIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return freeIpAddressRoute(freeRouteIp.id);
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setFreeRouteIp(null);
-      trackNetworkAction(res.meta, 'action.vps.network.route_free.label');
-      await refreshNetworkData();
+    mutationFn: (payload: IpMutation) => freeIpAddressRoute(payload.ipId),
+    onMutate: (payload) => acquireMutationContext(payload, payload.lockRef, payload.intent),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) setFreeRouteIp(null);
+      trackNetworkAction(res.meta, 'action.vps.network.route_free.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.ip_addresses.toast.route_freed') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
+    },
   });
 
+  const assignRouteRef = assignRouteIp ? objectRef('IpAddress', assignRouteIp.id) : null;
+  const assignRouteLock = assignRouteRef
+    ? chrome.localLocks.find((lock) => lock.kind === assignRouteRef.kind && lock.id === assignRouteRef.id)
+    : undefined;
+  const assignRouteUncertainLock = assignRouteLock?.uncertain === true ? assignRouteLock : undefined;
+  const assignRouteLocked = Boolean(assignRouteRef && chrome.isLocallyLocked(assignRouteRef));
+
   const assignRouteM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!assignRouteIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
-      const networkInterface = Number(assignRouteInterface);
-      if (!Number.isInteger(networkInterface) || networkInterface <= 0) {
-        throw new Error(t('vps.network.ip_addresses.assign.validation.interface'));
+    mutationFn: (payload: AssignRouteMutation) => assignIpAddressRoute(payload.ipId, { network_interface: payload.networkInterfaceId }),
+    onMutate: (payload) => acquireMutationContext(payload, payload.lockRef, payload.intent),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) {
+        setAssignRouteIp(null);
+        setAssignRouteInterface('');
       }
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return assignIpAddressRoute(assignRouteIp.id, { network_interface: networkInterface });
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setAssignRouteIp(null);
-      setAssignRouteInterface('');
-      trackNetworkAction(res.meta, 'action.vps.network.route_assign.label');
-      await refreshNetworkData();
+      trackNetworkAction(res.meta, 'action.vps.network.route_assign.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.ip_addresses.toast.route_assigned') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
+    },
   });
 
+  const reconcileAssignRoute = async (): Promise<MutationReconcileResult> => {
+    if (!assignRouteRef || !assignRouteUncertainLock) return 'error';
+    try {
+      const current = (await fetchIpAddress(assignRouteRef.id, {
+        includes: 'network_interface__vps,user,charged_environment,vps',
+      })).data;
+      await refreshNetworkData(vpsId);
+      return reconcileIpAddressMutation(assignRouteUncertainLock, current);
+    } catch {
+      return 'error';
+    }
+  };
+
+  const ownerRef = ownerIp ? objectRef('IpAddress', ownerIp.id) : null;
+
+  const ownerMutationTarget = () => {
+    const user = ownerUser.trim() ? parsePositiveId(ownerUser) : null;
+    if (ownerUser.trim() && !user) throw new Error(t('vps.network.ip_addresses.owner.validation.user'));
+    const environment = user ? parsePositiveId(ownerEnvironment) : null;
+    if (user && !environment) {
+      throw new Error(t('vps.network.ip_addresses.owner.validation.environment'));
+    }
+    return { user, environment };
+  };
+
   const updateOwnerM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      if (!ownerIp) throw new Error(t('vps.network.ip_addresses.validation.missing'));
-      const user = ownerUser.trim() ? parsePositiveId(ownerUser) : null;
-      if (ownerUser.trim() && !user) throw new Error(t('vps.network.ip_addresses.owner.validation.user'));
-
+    mutationFn: async (payload: OwnerMutation) => {
+      const { user, environment } = payload;
       const params: Record<string, unknown> = { user };
-      if (user) {
-        const environment = parsePositiveId(ownerEnvironment);
-        if (!environment) throw new Error(t('vps.network.ip_addresses.owner.validation.environment'));
-        params['environment'] = environment;
-      }
-
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return updateIpAddress(ownerIp.id, params);
+      if (environment) params['environment'] = environment;
+      return updateIpAddress(payload.ipId, params);
     },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: async (res) => {
-      setOwnerIp(null);
-      setOwnerUser('');
-      setOwnerEnvironment('');
-      trackNetworkAction(res.meta, 'action.vps.network.route_owner_update.label');
-      await refreshNetworkData();
+    onMutate: (payload) => acquireMutationContext(payload, payload.lockRef, payload.intent),
+    onSuccess: async (res, variables, context) => {
+      if (variables.vpsId === vpsId) {
+        setOwnerIp(null);
+        setOwnerUser('');
+        setOwnerEnvironment('');
+      }
+      trackNetworkAction(res.meta, 'action.vps.network.route_owner_update.label', context);
+      await refreshNetworkData(variables.vpsId);
       pushToast({ variant: 'ok', title: t('vps.network.ip_addresses.owner.toast.saved') });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
+    },
   });
+  const submitPtr = () => {
+    if (!ptrEditor) return;
+    const validation = validatePtrValue(ptrValue);
+    if (!validation.ok) return;
+    updatePtrM.mutate({ ...snapshotVpsMutation(), hostIpId: ptrEditor.id, reverseRecordValue: ptrValue.trim() });
+  };
+  const submitFreeHost = () => freeHost && freeHostM.mutate({ ...snapshotVpsMutation(), hostIpId: freeHost.id });
+  const submitAssignHost = () => {
+    const networkInterfaceId = parsePositiveId(assignHostInterface);
+    if (!assignHost || !networkInterfaceId) return;
+    assignHostM.mutate({ ...snapshotVpsMutation(), hostIpId: assignHost.id, networkInterfaceId });
+  };
+  const submitDeleteHost = () => deleteHost && deleteHostM.mutate({ ...snapshotVpsMutation(), hostIpId: deleteHost.id });
+  const submitFreeRoute = () => {
+    if (!freeRouteIp || !freeRouteRef) return;
+    const intent = ipRouteFreeIntent(freeRouteIp);
+    if (!intent) return;
+    freeRouteM.mutate({ ...snapshotVpsMutation(), ipId: freeRouteIp.id, lockRef: freeRouteRef, intent });
+  };
+  const submitAssignRoute = () => {
+    const networkInterfaceId = parsePositiveId(assignRouteInterface);
+    if (!assignRouteIp || !assignRouteRef || !networkInterfaceId) return;
+    const intent = ipRouteAssignIntent(assignRouteIp, networkInterfaceId, vpsId);
+    if (!intent) return;
+    assignRouteM.mutate({ ...snapshotVpsMutation(), ipId: assignRouteIp.id, lockRef: assignRouteRef, intent, networkInterfaceId });
+  };
+  const submitOwner = () => {
+    if (!ownerIp || !ownerRef) return;
+    const { user, environment } = ownerMutationTarget();
+    const intent = ipOwnerUpdateIntent(ownerIp, user, environment);
+    if (!intent) return;
+    updateOwnerM.mutate({ ...snapshotVpsMutation(), ipId: ownerIp.id, lockRef: ownerRef, intent, user, environment });
+  };
 
+  const busyIpResourceLock = (ipsQ.data ?? []).some((ip) => chrome.isLocallyLocked(objectRef('IpAddress', ip.id)));
   const busyLocal =
     busyLocalLock ||
+    busyIpResourceLock ||
     updateNetifM.isPending ||
     toggleNetM.isPending ||
     updatePtrM.isPending ||
@@ -486,6 +541,7 @@ export function VpsNetworkPage() {
     deleteHostM.isPending ||
     freeRouteM.isPending ||
     assignRouteM.isPending ||
+    assignRouteLocked ||
     updateOwnerM.isPending;
   const gate = gateVpsMutation({ vps, busyLocal, busyTransaction });
 
@@ -493,6 +549,20 @@ export function VpsNetworkPage() {
   const ips = ipsQ.data ?? [];
   const hostRows = hostAddrsQ.data ?? [];
   const unassignedIps = ipByNetif.get(-1) ?? [];
+  const uncertainRouteLocks = chrome.localLocks.filter(
+    (lock) => lock.kind === 'IpAddress' && lock.uncertain === true && ips.some((ip) => ip.id === lock.id)
+  );
+  const reconcilePersistedRoute = async (lock: (typeof uncertainRouteLocks)[number]): Promise<MutationReconcileResult> => {
+    try {
+      const current = (await fetchIpAddress(lock.id, {
+        includes: 'network_interface__vps,user,charged_environment,vps',
+      })).data;
+      await refreshNetworkData(vpsId);
+      return reconcileIpAddressMutation(lock, current);
+    } catch {
+      return 'error';
+    }
+  };
   const networkSummary = useMemo(() => buildNetworkRouteSummary({ netifs, ips, hostAddresses: hostRows }), [hostRows, ips, netifs]);
   const ptrValidation = useMemo(() => validatePtrValue(ptrValue), [ptrValue]);
   const networkActionError =
@@ -512,6 +582,19 @@ export function VpsNetworkPage() {
           <div data-testid="vps.network.read_only">{t('gate.blocked.permission.body')}</div>
         </Alert>
       ) : null}
+
+      {uncertainRouteLocks.map((lock) => {
+        const ref = objectRef('IpAddress', lock.id);
+        return (
+          <MutationUncertaintyPanel
+            key={`${lock.id}:${lock.uncertaintyId ?? 'uncertain'}`}
+            object={ref}
+            lock={lock}
+            reconcile={() => reconcilePersistedRoute(lock)}
+            testIdPrefix={`vps.network.route_assign.uncertain.${lock.id}`}
+          />
+        );
+      })}
 
       <VpsNetworkOverviewCard
         netEnabled={netEnabled}
@@ -605,7 +688,7 @@ export function VpsNetworkPage() {
         testId="vps.network.ip_addresses.add_modal"
         onClose={() => setAddIpOpen(false)}
         onAssigned={() => {
-          void refreshNetworkData();
+          void refreshNetworkData(vpsId);
         }}
       />
 
@@ -737,7 +820,7 @@ export function VpsNetworkPage() {
               loading={updatePtrM.isPending}
               disabled={!ptrValidation.ok || !gate.allowed}
               disabledReason={!gate.allowed ? gate.reason : undefined}
-              onClick={() => updatePtrM.mutate()}
+              onClick={submitPtr}
             >
               {t('common.save')}
             </ActionButton>
@@ -772,7 +855,7 @@ export function VpsNetworkPage() {
         confirmLoading={freeHostM.isPending}
         confirmDisabled={!gate.allowed}
         onCancel={() => setFreeHost(null)}
-        onConfirm={() => freeHostM.mutate()}
+        onConfirm={submitFreeHost}
       />
 
       <Modal
@@ -806,7 +889,7 @@ export function VpsNetworkPage() {
               loading={assignHostM.isPending}
               disabled={!assignHostInterface || !gate.allowed}
               disabledReason={!gate.allowed ? gate.reason : undefined}
-              onClick={() => assignHostM.mutate()}
+              onClick={submitAssignHost}
             >
               {t('vps.network.host_addresses.action.assign')}
             </ActionButton>
@@ -869,7 +952,7 @@ export function VpsNetworkPage() {
               loading={updateOwnerM.isPending}
               disabled={!canAdmin || (!ownerUser.trim() && !idFromResourceRef(ownerIp?.user)) || !gate.allowed}
               disabledReason={!gate.allowed ? gate.reason : undefined}
-              onClick={() => updateOwnerM.mutate()}
+              onClick={submitOwner}
             >
               {ownerUser.trim() ? t('vps.network.ip_addresses.owner.save') : t('vps.network.ip_addresses.owner.clear')}
             </ActionButton>
@@ -935,7 +1018,7 @@ export function VpsNetworkPage() {
         confirmLoading={deleteHostM.isPending}
         confirmDisabled={!gate.allowed}
         onCancel={() => setDeleteHost(null)}
-        onConfirm={() => deleteHostM.mutate()}
+        onConfirm={submitDeleteHost}
       />
 
       <ConfirmDialog
@@ -954,7 +1037,7 @@ export function VpsNetworkPage() {
         confirmLoading={freeRouteM.isPending}
         confirmDisabled={!gate.allowed}
         onCancel={() => setFreeRouteIp(null)}
-        onConfirm={() => freeRouteM.mutate()}
+        onConfirm={submitFreeRoute}
       />
 
       <Modal
@@ -988,9 +1071,9 @@ export function VpsNetworkPage() {
             <ActionButton
               testId="vps.network.ip_addresses.assign_route.submit"
               loading={assignRouteM.isPending}
-              disabled={!assignRouteInterface || !gate.allowed}
+              disabled={!assignRouteInterface || !gate.allowed || assignRouteLocked}
               disabledReason={!gate.allowed ? gate.reason : undefined}
-              onClick={() => assignRouteM.mutate()}
+              onClick={submitAssignRoute}
             >
               {t('vps.network.ip_addresses.action.assign_route')}
             </ActionButton>
@@ -998,6 +1081,14 @@ export function VpsNetworkPage() {
         }
       >
         <div className="space-y-4">
+          {assignRouteRef && assignRouteUncertainLock ? (
+            <MutationUncertaintyPanel
+              object={assignRouteRef}
+              lock={assignRouteUncertainLock}
+              reconcile={reconcileAssignRoute}
+              testIdPrefix="vps.network.route_assign.uncertain"
+            />
+          ) : null}
           <label className="block">
             <div className="mb-1 text-sm font-medium">{t('vps.network.ip_addresses.assign.interface')}</div>
             <Select
@@ -1029,9 +1120,7 @@ export function VpsNetworkPage() {
         onCancel={() => setConfirmDisableOpen(false)}
         onConfirm={async () => {
           try {
-            await toggleNetM.mutateAsync({ enable: false, reason: changeReason });
-            setConfirmDisableOpen(false);
-            setChangeReason('');
+            await toggleNetM.mutateAsync({ ...snapshotVpsMutation(), enable: false, reason: changeReason });
           } catch {
             // errors are shown via netToggleError
           }
@@ -1063,8 +1152,7 @@ export function VpsNetworkPage() {
         onCancel={() => setConfirmEnableOpen(false)}
         onConfirm={async () => {
           try {
-            await toggleNetM.mutateAsync({ enable: true });
-            setConfirmEnableOpen(false);
+            await toggleNetM.mutateAsync({ ...snapshotVpsMutation(), enable: true });
           } catch {
             // errors are shown via netToggleError
           }

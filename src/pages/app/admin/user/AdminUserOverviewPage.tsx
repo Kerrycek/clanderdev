@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
 
@@ -15,6 +14,7 @@ import { Select } from '../../../../components/ui/Select';
 import { SwitchRow } from '../../../../components/ui/SwitchRow';
 
 import { updateUser } from '../../../../lib/api/users';
+import { getMetaActionStateId } from '../../../../lib/api/haveapi';
 import { fetchUserPayments } from '../../../../lib/api/payments';
 import { adminDateTimeInputToIso } from '../../../../lib/datetimeLocal';
 import { formatDateTime } from '../../../../lib/format';
@@ -24,6 +24,10 @@ import { roleFromLevel } from '../../../../lib/roles';
 import { objectStateBadge } from '../../../../lib/taskStatus';
 
 import { useAdminUserContext } from './AdminUserLayout';
+import {
+  AdminUserMutationGuardAlert,
+  useAdminUserLifetimeMutationGuard,
+} from './AdminUserMutationGuard';
 import {
   makeEditDraft,
   makeStateDraft,
@@ -42,6 +46,7 @@ export function AdminUserOverviewPage() {
   const [editError, setEditError] = useState<string | null>(null);
   const [stateDraft, setStateDraft] = useState<StateDraft>(() => makeStateDraft(u));
   const [stateError, setStateError] = useState<string | null>(null);
+  const lifetimeMutationGuard = useAdminUserLifetimeMutationGuard(u.id);
   const userInfo = optionalStringField(u, 'info');
   const userRole = roleFromLevel(typeof u.level === 'number' ? u.level : undefined);
   const paidUntil = typeof u.paid_until === 'string' && u.paid_until.trim() ? u.paid_until : null;
@@ -158,26 +163,38 @@ export function AdminUserOverviewPage() {
   });
 
   const stateM = useMutation({
-    mutationFn: async () => {
-      if (!stateValid) throw new Error(t('admin.user.lifecycle.validation.no_changes'));
-      return updateUser(u.id, statePayload);
-    },
-    onSuccess: async (res) => {
-      setStateError(null);
-      setStateDraft(makeStateDraft(res.data ?? u));
+    mutationFn: (variables: { userId: number; objectLabel: string; payload: Record<string, unknown> }) => updateUser(variables.userId, variables.payload),
+    onMutate: (variables) => lifetimeMutationGuard.acquire(variables.userId),
+    onSuccess: (res, variables, context) => {
+      const actionStateId = getMetaActionStateId(res.meta);
+      if (actionStateId !== undefined) {
+        lifetimeMutationGuard.track(actionStateId, t('admin.user.lifecycle.action_label'), variables.objectLabel, context);
+      }
+      if (u.id === variables.userId) {
+        setStateError(null);
+        setStateDraft(makeStateDraft(res.data ?? u));
+        void refetch().catch(() => undefined);
+      }
       toasts.pushToast({ variant: 'ok', title: t('admin.user.lifecycle.toast.saved') });
-      await refetch();
     },
     onError: (err: any) => setStateError(String(err?.message ?? err)),
+    onSettled: (_data, error, _variables, context) => lifetimeMutationGuard.settle(error, context),
   });
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <AdminUserMutationGuardAlert userId={u.id} refetch={refetch} />
       <Card testId="admin.user.details.card">
         <CardHeader
           title={t('common.details')}
           actions={
-            <Button variant="secondary" size="sm" onClick={openEdit} testId="admin.user.edit.open">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openEdit}
+              disabled={lifetimeMutationGuard.locked}
+              testId="admin.user.edit.open"
+            >
               {t('admin.user.edit.open')}
             </Button>
           }
@@ -301,7 +318,11 @@ export function AdminUserOverviewPage() {
               className="space-y-3 rounded-lg border border-border bg-surface-2 p-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                stateM.mutate();
+                if (!stateValid) {
+                  setStateError(t('admin.user.lifecycle.validation.no_changes'));
+                  return;
+                }
+                stateM.mutate(Object.freeze({ userId: u.id, objectLabel: String(u.login ?? `#${u.id}`), payload: Object.freeze({ ...statePayload }) }));
               }}
               data-testid="admin.user.lifecycle.form"
             >
@@ -360,7 +381,7 @@ export function AdminUserOverviewPage() {
                   variant="primary"
                   type="submit"
                   loading={stateM.isPending}
-                  disabled={!stateValid}
+                  disabled={!stateValid || lifetimeMutationGuard.locked}
                   testId="admin.user.lifecycle.save"
                 >
                   {t('admin.user.lifecycle.save')}

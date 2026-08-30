@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import { fetchUserPublicKeys, type UserPublicKey } from './userDossier';
 import { fetchCurrentUser, type User } from './users';
 
@@ -48,7 +48,7 @@ export async function resetVpsRootPassword(vpsId: number, options?: VpsPasswordO
     params: { type: options?.type ?? 'secure' },
   });
 
-  return withRaw(res);
+  return withRaw(requireActionStateResult(res, 'VPS password reset'));
 }
 
 export async function getCurrentUser(): Promise<ApiResult<UserIdentity>> {
@@ -68,7 +68,7 @@ export async function deployVpsPublicKey(vpsId: number, publicKeyId: number): Pr
     params: { public_key: publicKeyId },
   });
 
-  return withRaw(res);
+  return withRaw(requireActionStateResult(res, 'VPS public-key deployment'));
 }
 
 export async function listVpsSshHostKeys(vpsId: number): Promise<ApiResult<VpsSshHostKey[]>> {

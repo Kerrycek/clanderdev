@@ -4,15 +4,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 import { useChrome } from '../../../components/layout/ChromeContext';
+import { MutationUncertaintyPanel, type MutationReconcileResult } from '../../../components/layout/MutationUncertaintyPanel';
 import { ActionButton } from '../../../components/ui/ActionButton';
 import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { Select } from '../../../components/ui/Select';
 import { Spinner } from '../../../components/ui/Spinner';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   assignIpAddressRoute,
+  fetchIpAddress,
   fetchIpAddresses,
   type IpAddress,
 } from '../../../lib/api/ipAddresses';
@@ -20,6 +22,11 @@ import { fetchNetworkInterfaces } from '../../../lib/api/networkInterfaces';
 import { fetchVpsList, type Vps } from '../../../lib/api/vps';
 import { formatErrorMessage } from '../../../lib/errors';
 import type { GateDecision } from '../../../lib/gates/types';
+import {
+  ipRouteAssignIntent,
+  reconcileIpAddressMutation,
+} from '../../../lib/ipAddressMutationIntent';
+import { isLocalLockPersistenceError } from '../../../lib/localLocks';
 import { objectRef } from '../../../lib/objectRef';
 import {
   assignableIpKind,
@@ -146,16 +153,27 @@ export function AssignIpAddressModal(props: {
   const assignM = useMutation({
     mutationFn: async (payload: { ip: IpAddress; vps: Vps; networkInterface: number }) =>
       assignIpAddressRoute(payload.ip.id, { network_interface: payload.networkInterface }),
-    onMutate: (payload) => {
-      chrome.acquireLocalLock(objectRef('Vps', payload.vps.id));
+    onMutate: async (payload) => {
+      // The IP address is the mutated resource. Guarding only the destination
+      // VPS would let two tabs assign the same detached address to two
+      // different VPSes concurrently.
+      const intent = ipRouteAssignIntent(payload.ip, payload.networkInterface, payload.vps.id);
+      if (!intent) throw new Error(t('vps.network.ip_addresses.validation.missing'));
+      const lockRef = objectRef('IpAddress', payload.ip.id);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, {
+        durable: true,
+        intent,
+      });
+      return { lockRef, mutationGeneration };
     },
-    onSuccess: async (response, payload) => {
+    onSuccess: async (response, payload, context) => {
       const actionStateId = getMetaActionStateId(response.meta);
       if (actionStateId !== undefined) {
         chrome.trackActionState(actionStateId, {
           actionLabelKey: 'action.vps.network.route_assign.label',
           objectLabel: payload.vps.hostname || `#${payload.vps.id}`,
-          object: objectRef('Vps', payload.vps.id),
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
 
@@ -179,18 +197,51 @@ export function AssignIpAddressModal(props: {
     onError: (error: any) => {
       if (error?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: (_data, _error, payload) => {
-      if (payload) chrome.releaseLocalLock(objectRef('Vps', payload.vps.id));
+    onSettled: (_data, error, _payload, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
 
   const selectedIp = availableIps.find((ip) => String(ip.id) === ipId);
   const selectedInterface = (interfacesQ.data ?? []).find((item) => String(item.id) === interfaceId);
+  const selectedIpRef = selectedIp ? objectRef('IpAddress', selectedIp.id) : null;
+  const selectedIpLock = selectedIpRef
+    ? chrome.localLocks.find((lock) => lock.kind === selectedIpRef.kind && lock.id === selectedIpRef.id)
+    : undefined;
+  const selectedIpUncertainLock = selectedIpLock?.uncertain === true ? selectedIpLock : undefined;
+  const selectedIpLocked = Boolean(selectedIpRef && chrome.isLocallyLocked(selectedIpRef));
   const gateAllowed = props.gate?.allowed ?? true;
   const gateReason = props.gate && !props.gate.allowed ? props.gate.reason : undefined;
-  const canContinue = !!selectedVps && !!selectedInterface && !!locationId && gateAllowed;
-  const canSubmit = canContinue && !!selectedIp;
+  const canContinue = !!selectedVps && !!selectedInterface && !!locationId && gateAllowed
+    && !(props.initialIp && selectedIpLocked);
+  const canSubmit = canContinue && !!selectedIp && !selectedIpLocked;
   const error = vpsesQ.error ?? interfacesQ.error ?? availableQ.error ?? assignM.error;
+  const errorMessage = error && !selectedIpUncertainLock
+    ? isLocalLockPersistenceError(error)
+      ? t('vps.mutation.error.guard_storage')
+      : isAmbiguousMutationError(error)
+        ? t('vps.mutation.error.outcome_uncertain')
+        : formatErrorMessage(error)
+    : null;
+
+  const reconcileSelectedIp = async (): Promise<MutationReconcileResult> => {
+    if (!selectedIpRef || !selectedIpUncertainLock) return 'error';
+    try {
+      const current = (await fetchIpAddress(selectedIpRef.id, {
+        includes:
+          'network__primary_location__environment,network_interface__vps,'
+          + 'user,vps,charged_environment',
+      })).data;
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['ip_address'] }),
+        qc.invalidateQueries({ queryKey: ['ip_addresses'] }),
+        qc.invalidateQueries({ queryKey: ['network_interface'] }),
+      ]);
+      return reconcileIpAddressMutation(selectedIpUncertainLock, current);
+    } catch {
+      return 'error';
+    }
+  };
 
   const close = () => {
     if (assignM.isPending) return;
@@ -280,9 +331,24 @@ export function AssignIpAddressModal(props: {
           {step === 1 ? t('network.user.assign.help_step1') : t('network.user.assign.help_step2')}
         </p>
 
-        {error ? (
-          <Alert title={t('network.user.assign.error')} variant="danger">
-            {formatErrorMessage(error)}
+        {errorMessage ? (
+          <Alert title={t('network.user.assign.error')} variant="danger" testId="network.user.assign.error">
+            {errorMessage}
+          </Alert>
+        ) : null}
+
+        {selectedIpRef && selectedIpUncertainLock ? (
+          <MutationUncertaintyPanel
+            object={selectedIpRef}
+            lock={selectedIpUncertainLock}
+            reconcile={reconcileSelectedIp}
+            testIdPrefix="network.user.assign.uncertain"
+          />
+        ) : null}
+
+        {selectedIpLocked && !selectedIpUncertainLock && !errorMessage ? (
+          <Alert title={t('network.user.assign.error')} variant="warn" testId="network.user.assign.locked">
+            {t('network.user.assign.locked')}
           </Alert>
         ) : null}
 

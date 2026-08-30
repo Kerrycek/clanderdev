@@ -1,19 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Camera, RotateCw } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchActionState } from '../../../lib/api/actionStates';
 import { fetchIpAddressesForVps } from '../../../lib/api/ipAddresses';
 import { fetchTransactionChains } from '../../../lib/api/transactions';
 import { fetchVps, vpsPasswd, vpsRestart, vpsStart, vpsStop } from '../../../lib/api/vps';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
 import { useAuth } from '../../../app/auth';
 import { useObjectScope } from '../../../app/objectScope';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
 import { DetailShell } from '../../../components/layout/DetailShell';
+import { MutationUncertaintyPanel, type MutationReconcileResult } from '../../../components/layout/MutationUncertaintyPanel';
 import { objectRef } from '../../../lib/objectRef';
 import { Badge } from '../../../components/ui/Badge';
 import { LockBadge } from '../../../components/ui/LockBadge';
@@ -45,22 +45,20 @@ import { useFastPollIntervalMs, useTierAIntervalMs } from '../../../lib/refreshT
 import { useNetworkStatus } from '../../../lib/useNetworkStatus';
 import { deriveChainLockState } from '../../../lib/lockState';
 import { primarySshIpAddress } from './VpsOverviewModel';
-
+import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
 export function VpsLayout() {
   const { basePath, mode } = useAppMode();
   const auth = useAuth();
   const canMutateVps = mode !== 'admin' || auth.role === 'admin';
   const scope = useObjectScope();
   const chrome = useChrome();
+  const qc = useQueryClient();
   const { t } = useI18n();
   const online = useNetworkStatus();
-
   const location = useLocation();
   const navigate = useNavigate();
-
   const params = useParams();
   const vpsId = Number(params['vpsId']);
-
   const vpsRef = useMemo(() => {
     if (!Number.isFinite(vpsId) || vpsId <= 0) return null;
     return objectRef('Vps', vpsId);
@@ -95,7 +93,6 @@ export function VpsLayout() {
     | { kind: 'stop' | 'restart'; force: boolean }
     | { kind: 'passwd'; type: 'secure' | 'simple' }
   >(null);
-
   const [lastAction, setLastAction] = useState<
     | null
     | {
@@ -105,140 +102,145 @@ export function VpsLayout() {
         objectLabel?: string;
       }
   >(null);
+  const acquireMutationContext = async (variables: { vpsId: number }) => {
+    const lockRef = objectRef('Vps', variables.vpsId); return { lockRef, mutationGeneration: await chrome.acquireLocalLock(lockRef, { durable: true }) };
+  };
 
   const startM = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return vpsStart(vpsId);
+    mutationFn: async (variables: VpsMutationSnapshot) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return vpsStart(variables.vpsId);
     },
-    onMutate: () => {
-      if (vpsRef) chrome.acquireLocalLock(vpsRef);
-    },
+    onMutate: acquireMutationContext,
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (vpsRef) chrome.releaseLocalLock(vpsRef);
-    },
-    onSuccess: (res) => {
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
-        const objectLabel = vpsQ.data?.hostname ? String(vpsQ.data.hostname) : t('common.vps_ref', { id: vpsId });
+        const objectLabel = variables.objectLabel;
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.start.label',
           objectLabel,
-          object: vpsRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.vps.start.title',
         });
         setLastAction({ actionLabelKey: 'action.vps.start.label', objectLabel, id: asId });
       }
-      void vpsQ.refetch();
-      void chainsQ.refetch();
+      void Promise.all([qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.vpsId }] }), qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] })]);
     },
   });
 
   const stopM = useMutation({
-    mutationFn: async (force: boolean) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return vpsStop(vpsId, { force });
+    mutationFn: async (variables: VpsMutationSnapshot & { force: boolean }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return vpsStop(variables.vpsId, { force: variables.force });
     },
-    onMutate: () => {
-      if (vpsRef) chrome.acquireLocalLock(vpsRef);
-    },
+    onMutate: acquireMutationContext,
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (vpsRef) chrome.releaseLocalLock(vpsRef);
-    },
-    onSuccess: (res) => {
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
-        const objectLabel = vpsQ.data?.hostname ? String(vpsQ.data.hostname) : t('common.vps_ref', { id: vpsId });
+        const objectLabel = variables.objectLabel;
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.stop.label',
           objectLabel,
-          object: vpsRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.vps.stop.title',
         });
         setLastAction({ actionLabelKey: 'action.vps.stop.label', objectLabel, id: asId });
       }
-      void vpsQ.refetch();
-      void chainsQ.refetch();
+      void Promise.all([qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.vpsId }] }), qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] })]);
     },
   });
-
   const restartM = useMutation({
-    mutationFn: async (force: boolean) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return vpsRestart(vpsId, { force });
+    mutationFn: async (variables: VpsMutationSnapshot & { force: boolean }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return vpsRestart(variables.vpsId, { force: variables.force });
     },
-    onMutate: () => {
-      if (vpsRef) chrome.acquireLocalLock(vpsRef);
-    },
+    onMutate: acquireMutationContext,
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (vpsRef) chrome.releaseLocalLock(vpsRef);
-    },
-    onSuccess: (res) => {
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
-        const objectLabel = vpsQ.data?.hostname ? String(vpsQ.data.hostname) : t('common.vps_ref', { id: vpsId });
+        const objectLabel = variables.objectLabel;
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.restart.label',
           objectLabel,
-          object: vpsRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.vps.restart.title',
         });
         setLastAction({ actionLabelKey: 'action.vps.restart.label', objectLabel, id: asId });
       }
-      void vpsQ.refetch();
-      void chainsQ.refetch();
+      void Promise.all([qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.vpsId }] }), qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] })]);
     },
   });
 
+  const [passwdFlow, setPasswdFlow] = useState<{ vpsId: number; password: string; asId: number } | null>(null);
+  const [passwdWaitOpen, setPasswdWaitOpen] = useState(false);
+  const [revealedPassword, setRevealedPassword] = useState<{ vpsId: number; password: string } | null>(null);
+  const [passwdAsyncError, setPasswdAsyncError] = useState<{ vpsId: number; asId: number } | null>(null);
   const passwdM = useMutation({
-    mutationFn: async (type: 'secure' | 'simple') => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return vpsPasswd(vpsId, type);
+    mutationFn: async (variables: VpsMutationSnapshot & { type: 'secure' | 'simple' }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return vpsPasswd(variables.vpsId, variables.type);
     },
-    onMutate: () => {
-      if (vpsRef) chrome.acquireLocalLock(vpsRef);
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      const asId = getMetaActionStateId(res.meta);
+      if (asId === undefined) return;
+      const objectLabel = variables.objectLabel;
+      chrome.trackActionState(asId, {
+        actionLabelKey: 'action.vps.root_password.label',
+        objectLabel,
+        object: context?.lockRef,
+        mutationGeneration: context?.mutationGeneration,
+      });
+      setLastAction({ actionLabelKey: 'action.vps.root_password.label', objectLabel, id: asId });
+      const password = String((res.data as any)?.password ?? '');
+      if (variables.vpsId === vpsId && password) {
+        setPasswdFlow({ vpsId: variables.vpsId, password, asId });
+        setPasswdWaitOpen(true);
+      }
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (vpsRef) chrome.releaseLocalLock(vpsRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
-  const [passwdFlow, setPasswdFlow] = useState<{ password: string; asId: number } | null>(null);
-  const [passwdWaitOpen, setPasswdWaitOpen] = useState(false);
-  const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
-  const [passwdAsyncError, setPasswdAsyncError] = useState<{ asId: number } | null>(null);
-
+  const currentPasswdFlow = passwdFlow?.vpsId === vpsId ? passwdFlow : null;
+  const currentRevealedPassword = revealedPassword?.vpsId === vpsId ? revealedPassword.password : null;
+  const currentPasswdAsyncError = passwdAsyncError?.vpsId === vpsId ? passwdAsyncError : null;
   const passwdStateQ = useQuery({
-    queryKey: ['action_state', 'show', { id: passwdFlow?.asId ?? -1 }],
-    queryFn: async () => (await fetchActionState(passwdFlow!.asId)).data,
-    enabled: passwdFlow !== null,
+    queryKey: ['action_state', 'show', { id: currentPasswdFlow?.asId ?? -1 }],
+    queryFn: async () => (await fetchActionState(currentPasswdFlow!.asId)).data,
+    enabled: currentPasswdFlow !== null,
     refetchInterval: (data) => {
       if (!data) return fastPollMs;
       return (data as any)?.finished ? false : fastPollMs;
@@ -246,21 +248,21 @@ export function VpsLayout() {
   });
 
   useEffect(() => {
-    if (!passwdFlow) return;
+    if (!currentPasswdFlow) return;
     if (!passwdStateQ.data) return;
     if (!passwdStateQ.data.finished) return;
 
     if (passwdStateQ.data.status === false) {
-      setPasswdAsyncError({ asId: passwdFlow.asId });
+      setPasswdAsyncError({ vpsId: currentPasswdFlow.vpsId, asId: currentPasswdFlow.asId });
     } else {
-      setRevealedPassword(passwdFlow.password);
+      setRevealedPassword({ vpsId: currentPasswdFlow.vpsId, password: currentPasswdFlow.password });
     }
 
     setPasswdFlow(null);
     setPasswdWaitOpen(false);
     void vpsQ.refetch();
     void chainsQ.refetch();
-  }, [passwdFlow, passwdStateQ.data]);
+  }, [currentPasswdFlow, passwdStateQ.data]);
 
   const nav = useMemo(
     () => [
@@ -349,17 +351,25 @@ export function VpsLayout() {
   const chainsStale = chainLock.stale;
 
   const busyLocalLock = vpsRef ? chrome.isLocallyLocked(vpsRef) : false;
-  const busyLocal = busyLocalLock || startM.isPending || stopM.isPending || restartM.isPending || passwdM.isPending;
+  const uncertainLocalLock = vpsRef
+    ? chrome.localLocks.find((lock) => lock.kind === vpsRef.kind && lock.id === vpsRef.id && lock.uncertain === true)
+    : undefined;
+  const currentPasswdMutationPending = passwdM.isPending && passwdM.variables?.vpsId === vpsId;
+  const currentPasswdMutationError = passwdM.isError && passwdM.variables?.vpsId === vpsId ? passwdM.error : null;
+  const busyLocal = busyLocalLock || startM.isPending || stopM.isPending || restartM.isPending || currentPasswdMutationPending;
 
   const startGate = gateVpsAction('start', { vps, busyLocal, busyTransaction });
   const stopGate = gateVpsAction('stop', { vps, busyLocal, busyTransaction });
   const restartGate = gateVpsAction('restart', { vps, busyLocal, busyTransaction });
   const passwdGate = gateVpsAction('passwd', { vps, busyLocal, busyTransaction });
+  const snapshotPowerVariables = (): VpsMutationSnapshot => freezeVpsMutationSnapshot({
+    vpsId, canMutate: canMutateVps, knownBusy: busyTransaction || busyLocalLock, objectLabel: vps.hostname ? String(vps.hostname) : t('common.vps_ref', { id: vpsId }),
+  });
 
   const rt = runtimeStateBadge(vps.is_running, t);
   const lc = objectStateBadge(vps.object_state, t);
 
-  const showAsyncError = passwdAsyncError !== null;
+  const showAsyncError = currentPasswdAsyncError !== null;
   const primaryHeaderAction = vps.is_running !== true ? 'start' : 'console';
 
   const handleHeaderMoreAction = (value: string) => {
@@ -367,7 +377,7 @@ export function VpsLayout() {
 
     switch (value) {
       case 'action:start':
-        if (startGate.allowed) startM.mutate();
+        if (startGate.allowed) startM.mutate(snapshotPowerVariables());
         return;
       case 'action:restart':
         if (restartGate.allowed) setConfirm({ kind: 'restart', force: false });
@@ -384,6 +394,19 @@ export function VpsLayout() {
       default:
         navigate(value);
     }
+  };
+
+  const reconcileUncertainOutcome = async (): Promise<MutationReconcileResult> => {
+    const [freshVps, freshChains] = await Promise.all([vpsQ.refetch(), chainsQ.refetch()]);
+    if (freshVps.isError || freshChains.isError || !freshVps.data || !freshChains.data) {
+      return 'error';
+    }
+    const reconciledLock = deriveChainLockState({
+      chains: freshChains.data,
+      updatedAt: Date.now(),
+      unreliable: !online,
+    });
+    return reconciledLock.busy ? 'busy' : 'clear';
   };
 
   return (
@@ -481,7 +504,7 @@ export function VpsLayout() {
                   testId="vps.action.start"
                   disabled={!startGate.allowed}
                   disabledReason={!startGate.allowed ? startGate.reason : undefined}
-                  onClick={() => startM.mutate()}
+                  onClick={() => startM.mutate(snapshotPowerVariables())}
                   title={t('action.vps.start.label')}
                 >
                   {t('action.vps.start.label')}
@@ -585,20 +608,29 @@ export function VpsLayout() {
           />
         ) : null}
 
-        {(startM.isError || stopM.isError || restartM.isError || passwdM.isError || showAsyncError) ? (
+        {vpsRef ? (
+          <MutationUncertaintyPanel
+            object={vpsRef}
+            lock={uncertainLocalLock}
+            reconcile={reconcileUncertainOutcome}
+          />
+        ) : null}
+
+        {(startM.isError || stopM.isError || restartM.isError || currentPasswdMutationError || showAsyncError) ? (
           <Card>
             <div className="p-4">
               <div className="text-sm font-medium">{t('common.action_failed')}</div>
               <div className="mt-1 text-sm text-muted">
                 {showAsyncError
-                  ? t('vps.power.error.task_failed', { id: passwdAsyncError!.asId })
-                  : String(
-                      (startM.error as any)?.message ??
-                        (stopM.error as any)?.message ??
-                        (restartM.error as any)?.message ??
-                        (passwdM.error as any)?.message ??
-                        t('common.unknown_error')
-                    )}
+                  ? t('vps.power.error.task_failed', { id: currentPasswdAsyncError!.asId })
+                  : (() => {
+                      const error = startM.error ?? stopM.error ?? restartM.error ?? currentPasswdMutationError;
+                      return isMissingActionStateError(error)
+                        ? t('vps.mutation.error.missing_action_state')
+                        : error instanceof Error
+                          ? error.message
+                          : t('common.unknown_error');
+                    })()}
               </div>
             </div>
           </Card>
@@ -616,7 +648,7 @@ export function VpsLayout() {
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             const force = confirm && confirm.kind === 'stop' ? confirm.force : false;
-            stopM.mutate(force);
+            stopM.mutate(freezeVpsMutationSnapshot({ ...snapshotPowerVariables(), force }));
             setConfirm(null);
           }}
         >
@@ -640,7 +672,7 @@ export function VpsLayout() {
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             const force = confirm && confirm.kind === 'restart' ? confirm.force : false;
-            restartM.mutate(force);
+            restartM.mutate(freezeVpsMutationSnapshot({ ...snapshotPowerVariables(), force }));
             setConfirm(null);
           }}
         >
@@ -664,24 +696,7 @@ export function VpsLayout() {
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             const type = confirm && confirm.kind === 'passwd' ? confirm.type : 'secure';
-            passwdM.mutate(type, {
-              onSuccess: (res) => {
-                const asId = getMetaActionStateId(res.meta);
-                const pwd = String((res.data as any)?.password ?? '');
-
-                if (asId !== undefined && pwd) {
-                  const objectLabel = vpsQ.data?.hostname ? String(vpsQ.data.hostname) : t('common.vps_ref', { id: vpsId });
-                  chrome.trackActionState(asId, { actionLabelKey: 'action.vps.root_password.label', objectLabel, object: vpsRef ?? undefined });
-                  setLastAction({ actionLabelKey: 'action.vps.root_password.label', objectLabel, id: asId });
-                  setRevealedPassword(pwd);
-                  setPasswdFlow({ password: pwd, asId });
-                  setPasswdWaitOpen(true);
-                } else if (pwd) {
-                  // Fall back to legacy behaviour: show immediately
-                  setRevealedPassword(pwd);
-                }
-              },
-            });
+            passwdM.mutate(freezeVpsMutationSnapshot({ ...snapshotPowerVariables(), type }));
             setConfirm(null);
           }}
         >
@@ -706,7 +721,7 @@ export function VpsLayout() {
         </ConfirmDialog>
 
         <Modal
-          open={passwdWaitOpen}
+          open={passwdWaitOpen && currentPasswdFlow !== null}
           onClose={() => setPasswdWaitOpen(false)}
           title={t('modal.vps.root_password.title')}
           size="sm"
@@ -755,7 +770,7 @@ export function VpsLayout() {
         </Modal>
 
         <ConfirmDialog
-          open={revealedPassword !== null}
+          open={currentRevealedPassword !== null}
           title={t('modal.root_password_reveal.title')}
           description={t('modal.root_password_reveal.body')}
           confirmLabel={t('common.close')}
@@ -763,11 +778,11 @@ export function VpsLayout() {
           onConfirm={() => setRevealedPassword(null)}
         >
           <div className="mt-3 rounded-md border border-border bg-surface-2 p-3 font-mono text-sm break-all">
-            {revealedPassword ?? t('common.na')}
+            {currentRevealedPassword ?? t('common.na')}
           </div>
-          {revealedPassword ? (
+          {currentRevealedPassword ? (
             <div className="mt-3 flex items-center gap-2">
-              <CopyButton text={revealedPassword} label={t('common.copy')} />
+              <CopyButton text={currentRevealedPassword} label={t('common.copy')} />
             </div>
           ) : null}
         </ConfirmDialog>

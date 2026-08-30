@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -25,9 +24,11 @@ import {
   type VpsSshHostKey,
 } from '../../../lib/api/vpsAccess';
 import { gateVpsMutation } from '../../../lib/gates/vps';
+import { objectRef } from '../../../lib/objectRef';
 import { useFastPollIntervalMs } from '../../../lib/refreshTiers';
 import { preflightVpsNotBusy } from './vpsPreflight';
 import { useVps } from './VpsContext';
+import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
 import {
   actionStateFailed,
   actionStateFinished,
@@ -48,14 +49,13 @@ import { buildVpsAccessChecklist, findDuplicatePublicKeyGroups } from './VpsAcce
 import { VpsAccessMutationGuardAlerts } from './VpsAccessMutationGuardAlerts';
 import { VpsAccessChecklistCard, VpsAccessStatusCard } from './VpsAccessSummary';
 import { VpsSshHostKeysCard } from './VpsSshHostKeysCard';
-
 export function VpsAccessPage() {
   const { basePath, mode } = useAppMode();
   const chrome = useChrome();
   const qc = useQueryClient();
   const fastPollMs = useFastPollIntervalMs();
   const { t } = useI18n();
-  const { vps, canMutateVps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, busyTransaction, busyLocalLock } = useVps();
   const vpsId = Number(vps.id);
   const vpsData = vps as Record<string, unknown>;
   const objectLabel = String(vpsData['hostname'] ?? '') || `#${vpsId}`;
@@ -63,16 +63,18 @@ export function VpsAccessPage() {
   const ownerUserId = resourceId(vpsData['user']);
   const ownerLabel = resourceLabel(vpsData['user']);
   const [passwordType, setPasswordType] = useState<VpsPasswordType>('secure');
-  const [pendingPasswordType, setPendingPasswordType] = useState<VpsPasswordType | null>(null);
-  const [selectedPublicKeyId, setSelectedPublicKeyId] = useState<number | null>(null);
-  const [pendingPublicKeyId, setPendingPublicKeyId] = useState<number | null>(null);
-  const [generated, setGenerated] = useState<GeneratedCredential | null>(null);
+  const [pendingPasswordType, setPendingPasswordType] = useState<{ vpsId: number; type: VpsPasswordType } | null>(null);
+  const [selectedPublicKeyId, setSelectedPublicKeyId] = useState<number | null>(null); const [pendingPublicKeyId, setPendingPublicKeyId] = useState<number | null>(null);
+  const [generated, setGenerated] = useState<(GeneratedCredential & { vpsId: number }) | null>(null);
   const [pendingGenerated, setPendingGenerated] = useState<PendingGeneratedCredential | null>(null);
-  const [missingPassword, setMissingPassword] = useState(false);
-  const [passwordActivationError, setPasswordActivationError] = useState<{ asId: number } | null>(null);
-  const [keyDeployMessage, setKeyDeployMessage] = useState('');
-  const [pendingKeyDeployment, setPendingKeyDeployment] = useState<PendingPublicKeyDeployment | null>(null);
+  const [missingPassword, setMissingPassword] = useState<{ vpsId: number } | null>(null); const [passwordActivationError, setPasswordActivationError] = useState<{ vpsId: number; asId: number } | null>(null);
+  const [passwordMutationError, setPasswordMutationError] = useState<{ vpsId: number; error: unknown } | null>(null);
+  const [keyDeployMessage, setKeyDeployMessage] = useState(''); const [pendingKeyDeployment, setPendingKeyDeployment] = useState<PendingPublicKeyDeployment | null>(null);
   const [keyDeploymentError, setKeyDeploymentError] = useState<PendingPublicKeyDeployment | null>(null);
+  const invalidateMutationTarget = (targetVpsId: number) => {
+    void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: targetVpsId }] });
+    void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: targetVpsId }] });
+  };
 
   const currentUserQ = useQuery<ApiResult<UserIdentity>>({
     queryKey: ['user', 'current'],
@@ -93,10 +95,13 @@ export function VpsAccessPage() {
     queryFn: () => listVpsSshHostKeys(vpsId),
   });
 
+  const currentPendingGenerated = pendingGenerated?.vpsId === vpsId ? pendingGenerated : null; const currentGenerated = generated?.vpsId === vpsId ? generated : null;
+  const currentMissingPassword = missingPassword?.vpsId === vpsId ? missingPassword : null; const currentPasswordActivationError = passwordActivationError?.vpsId === vpsId ? passwordActivationError : null;
+  const currentPasswordMutationError = passwordMutationError?.vpsId === vpsId ? passwordMutationError : null; const currentPendingPasswordType = pendingPasswordType?.vpsId === vpsId ? pendingPasswordType : null;
   const passwordStateQ = useQuery({
-    queryKey: ['action_state', 'show', { id: pendingGenerated?.asId ?? -1 }],
-    queryFn: async () => (await fetchActionState(pendingGenerated!.asId)).data,
-    enabled: canMutateVps && pendingGenerated !== null,
+    queryKey: ['action_state', 'show', { id: currentPendingGenerated?.asId ?? -1 }],
+    queryFn: async () => (await fetchActionState(currentPendingGenerated!.asId)).data,
+    enabled: canMutateVps && currentPendingGenerated !== null,
     refetchInterval: (query) => {
       const state = query.state.data;
       if (!state) return fastPollMs;
@@ -139,21 +144,19 @@ export function VpsAccessPage() {
   }, [publicKeys, selectedPublicKeyId]);
 
   useEffect(() => {
-    if (!pendingGenerated) return;
+    if (!currentPendingGenerated) return;
     if (!passwordStateQ.data) return;
     if (!actionStateFinished(passwordStateQ.data)) return;
 
     if (actionStateFailed(passwordStateQ.data)) {
-      setPasswordActivationError({ asId: pendingGenerated.asId });
+      setPasswordActivationError({ vpsId: currentPendingGenerated.vpsId, asId: currentPendingGenerated.asId });
     } else {
-      setGenerated({ password: pendingGenerated.password, passwordType: pendingGenerated.passwordType });
+      setGenerated({ vpsId: currentPendingGenerated.vpsId, password: currentPendingGenerated.password, passwordType: currentPendingGenerated.passwordType });
     }
 
     setPendingGenerated(null);
-    void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vpsId }] });
-    refetch();
-    refetchChains();
-  }, [passwordStateQ.data, pendingGenerated, qc, refetch, refetchChains, vpsId]);
+    invalidateMutationTarget(currentPendingGenerated.vpsId);
+  }, [passwordStateQ.data, currentPendingGenerated, qc]);
 
   useEffect(() => {
     if (!pendingKeyDeployment) return;
@@ -167,82 +170,79 @@ export function VpsAccessPage() {
     }
 
     setPendingKeyDeployment(null);
-    void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vpsId }] });
-    refetch();
-    refetchChains();
-  }, [keyDeploymentStateQ.data, pendingKeyDeployment, qc, refetch, refetchChains, vpsId]);
+    invalidateMutationTarget(pendingKeyDeployment.vpsId);
+  }, [keyDeploymentStateQ.data, pendingKeyDeployment, qc]);
 
   const passwdM = useMutation({
-    mutationFn: async (type: VpsPasswordType) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return resetVpsRootPassword(vpsId, { type });
+    mutationFn: async (variables: VpsMutationSnapshot & { type: VpsPasswordType }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return resetVpsRootPassword(variables.vpsId, { type: variables.type });
     },
-    onMutate: () => {
-      setGenerated(null);
-      setPendingGenerated(null);
-      setMissingPassword(false);
-      setPasswordActivationError(null);
-      chrome.acquireLocalLock(vpsRef);
+    onMutate: async (variables) => {
+      setGenerated((current) => current?.vpsId === variables.vpsId ? null : current);
+      setPendingGenerated((current) => current?.vpsId === variables.vpsId ? null : current);
+      setMissingPassword((current) => current?.vpsId === variables.vpsId ? null : current);
+      setPasswordActivationError((current) => current?.vpsId === variables.vpsId ? null : current);
+      setPasswordMutationError((current) => current?.vpsId === variables.vpsId ? null : current);
+      const lockRef = objectRef('Vps', variables.vpsId);
+      return { lockRef, mutationGeneration: await chrome.acquireLocalLock(lockRef, { durable: true }) };
     },
-    onSuccess: (res: ApiResult<VpsGeneratedPassword>, type: VpsPasswordType) => {
-      setPendingPasswordType(null);
+    onSuccess: (res: ApiResult<VpsGeneratedPassword>, variables, context) => {
+      setPendingPasswordType((current) => current?.vpsId === variables.vpsId ? null : current);
       const password = extractPassword(res);
       const asId = getMetaActionStateId(res.meta);
       if (password && asId !== undefined) {
-        setPendingGenerated({ password, passwordType: type, asId });
+        setPendingGenerated({ password, passwordType: variables.type, asId, vpsId: variables.vpsId });
       } else if (password) {
-        setGenerated({ password, passwordType: type });
+        setGenerated({ vpsId: variables.vpsId, password, passwordType: variables.type });
       } else {
-        setMissingPassword(true);
+        setMissingPassword({ vpsId: variables.vpsId });
       }
-      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vpsId }] });
-      refetch();
-      refetchChains();
+      invalidateMutationTarget(variables.vpsId);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.access.passwd.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.vps.root_password.title',
         });
       }
     },
-    onError: (e: unknown) => {
+    onError: (e: unknown, variables) => {
+      setPendingPasswordType((current) => current?.vpsId === variables.vpsId ? null : current);
+      setPasswordMutationError({ vpsId: variables.vpsId, error: e });
       if (isBusyError(e)) chrome.openTasks();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
   const deployKeyM = useMutation({
-    mutationFn: async (publicKeyId: number) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return deployVpsPublicKey(vpsId, publicKeyId);
+    mutationFn: async (variables: VpsMutationSnapshot & { publicKeyId: number; keyLabel: string }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return deployVpsPublicKey(variables.vpsId, variables.publicKeyId);
     },
-    onMutate: () => {
+    onMutate: async (variables) => {
       setKeyDeployMessage('');
       setPendingKeyDeployment(null);
       setKeyDeploymentError(null);
-      chrome.acquireLocalLock(vpsRef);
+      const lockRef = objectRef('Vps', variables.vpsId);
+      return { lockRef, mutationGeneration: await chrome.acquireLocalLock(lockRef, { durable: true }) };
     },
-    onSuccess: (res: ApiResult<Record<string, never>>, publicKeyId: number) => {
-      const deployedKey = publicKeys.find((key: VpsPublicKey) => Number(key.id) === publicKeyId);
-      const keyLabel = publicKeyLabel(deployedKey);
+    onSuccess: (res: ApiResult<Record<string, never>>, variables, context) => {
+      const keyLabel = variables.keyLabel;
       setPendingPublicKeyId(null);
-      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vpsId }] });
-      refetch();
-      refetchChains();
+      invalidateMutationTarget(variables.vpsId);
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
-        setPendingKeyDeployment({ asId, keyLabel });
+        setPendingKeyDeployment({ asId, keyLabel, vpsId: variables.vpsId });
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.access.deploy_public_key.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.vps.deploy_public_key.title',
         });
@@ -251,20 +251,22 @@ export function VpsAccessPage() {
       }
     },
     onError: (e: unknown) => {
+      setPendingPublicKeyId(null);
       if (isBusyError(e)) chrome.openTasks();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
-  const busyLocal = busyLocalLock || passwdM.isPending || deployKeyM.isPending || pendingGenerated !== null || pendingKeyDeployment !== null;
+  const currentPasswdMutationPending = passwdM.isPending && passwdM.variables?.vpsId === vpsId;
+  const busyLocal = busyLocalLock || currentPasswdMutationPending || deployKeyM.isPending || currentPendingGenerated !== null || pendingKeyDeployment !== null;
   const gate = gateVpsMutation({ vps, busyLocal, busyTransaction });
-  const canGenerate = canMutateVps && gate.allowed && !passwdM.isPending && pendingGenerated === null;
+  const snapshotAccessTarget = () => freezeVpsMutationSnapshot({
+    vpsId, canMutate: canMutateVps, knownBusy: busyTransaction || busyLocalLock, objectLabel,
+  });
+  const canGenerate = canMutateVps && gate.allowed && !currentPasswdMutationPending && currentPendingGenerated === null;
   const canDeployKey = canMutateVps && gate.allowed && !deployKeyM.isPending && pendingKeyDeployment === null && selectedPublicKeyId !== null && publicKeys.length > 0;
   const selectedTypeLabel = t(passwordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple');
-  const pendingTypeLabel = pendingPasswordType
-    ? t(pendingPasswordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple')
+  const pendingTypeLabel = currentPendingPasswordType
+    ? t(currentPendingPasswordType.type === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple')
     : '';
   const selectedKeyLabel = publicKeyLabel(selectedPublicKey);
   const pendingKeyLabel = publicKeyLabel(pendingPublicKey);
@@ -298,18 +300,18 @@ export function VpsAccessPage() {
 
       <VpsAccessMutationGuardAlerts canMutateVps={canMutateVps} gate={gate} onOpenTasks={() => chrome.openTasks()} />
 
-      {passwdM.error ? <Alert variant="danger">{errorMessage(passwdM.error)}</Alert> : null}
-      {deployKeyM.error ? <Alert variant="danger">{errorMessage(deployKeyM.error)}</Alert> : null}
-      {missingPassword ? <Alert variant="warn">{t('vps.access.generated.missing_password')}</Alert> : null}
-      {pendingGenerated ? (
+      {currentPasswordMutationError ? <Alert variant="danger">{errorMessage(currentPasswordMutationError.error, t('vps.mutation.error.missing_action_state'))}</Alert> : null}
+      {deployKeyM.error ? <Alert variant="danger">{errorMessage(deployKeyM.error, t('vps.mutation.error.missing_action_state'))}</Alert> : null}
+      {currentMissingPassword ? <Alert variant="warn">{t('vps.access.generated.missing_password')}</Alert> : null}
+      {currentPendingGenerated ? (
         <Alert variant="info" title={t('vps.access.generated.pending_title')}>
-          {t('vps.access.generated.pending_description', { id: pendingGenerated.asId })}
+          {t('vps.access.generated.pending_description', { id: currentPendingGenerated.asId })}
         </Alert>
       ) : null}
       {passwordStateQ.error ? <Alert variant="danger">{errorMessage(passwordStateQ.error)}</Alert> : null}
-      {passwordActivationError ? (
+      {currentPasswordActivationError ? (
         <Alert variant="danger" title={t('vps.access.generated.activation_failed_title')}>
-          {t('vps.access.generated.activation_failed_description', { id: passwordActivationError.asId })}
+          {t('vps.access.generated.activation_failed_description', { id: currentPasswordActivationError.asId })}
         </Alert>
       ) : null}
       {pendingKeyDeployment ? (
@@ -341,14 +343,14 @@ export function VpsAccessPage() {
               <select
                 value={passwordType}
                 onChange={(event: React.ChangeEvent<HTMLSelectElement>) => setPasswordType(event.target.value as VpsPasswordType)}
-                disabled={passwdM.isPending}
+                disabled={currentPasswdMutationPending}
                 className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg"
                 data-testid="vps.access.password_type"
               >
                 <option value="secure">{t('vps.access.password_type.secure')}</option>
                 <option value="simple">{t('vps.access.password_type.simple')}</option>
               </select>
-              <ActionButton loading={passwdM.isPending} disabled={!canGenerate} onClick={() => setPendingPasswordType(passwordType)} testId="vps.access.password.generate">
+              <ActionButton loading={currentPasswdMutationPending} disabled={!canGenerate} onClick={() => setPendingPasswordType({ vpsId, type: passwordType })} testId="vps.access.password.generate">
                 {t('vps.access.reset.button')}
               </ActionButton>
             </div>
@@ -361,16 +363,16 @@ export function VpsAccessPage() {
         </CardBody>
       </Card> : null}
 
-      {generated ? (
+      {currentGenerated ? (
         <Card>
           <CardHeader
             title={t('vps.access.generated.title')}
             subtitle={t('vps.access.generated.subtitle', {
-              type: t(generated.passwordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple'),
+              type: t(currentGenerated.passwordType === 'secure' ? 'vps.access.password_type.secure' : 'vps.access.password_type.simple'),
             })}
           />
           <CardBody>
-            <PasswordBox password={generated.password} onClear={() => setGenerated(null)} testId="vps.access.generated_password" />
+            <PasswordBox password={currentGenerated.password} onClear={() => setGenerated(null)} testId="vps.access.generated_password" />
           </CardBody>
         </Card>
       ) : null}
@@ -466,15 +468,15 @@ export function VpsAccessPage() {
       </Card> : null}
 
       {canMutateVps ? <ConfirmDialog
-        open={pendingPasswordType !== null}
+        open={currentPendingPasswordType !== null}
         testId="vps.access.password.confirm"
         title={t('vps.access.confirm.title')}
         description={t('vps.access.confirm.description', { hostname: objectLabel, type: pendingTypeLabel })}
         confirmLabel={t('vps.access.confirm.button')}
-        confirmLoading={passwdM.isPending}
-        confirmDisabled={!pendingPasswordType || passwdM.isPending}
+        confirmLoading={currentPasswdMutationPending}
+        confirmDisabled={!currentPendingPasswordType || currentPasswdMutationPending}
         onCancel={() => setPendingPasswordType(null)}
-        onConfirm={() => (pendingPasswordType ? passwdM.mutate(pendingPasswordType) : undefined)}
+        onConfirm={() => currentPendingPasswordType && passwdM.mutate(freezeVpsMutationSnapshot({ ...snapshotAccessTarget(), type: currentPendingPasswordType.type }))}
       /> : null}
 
       {canMutateVps ? <ConfirmDialog
@@ -486,7 +488,9 @@ export function VpsAccessPage() {
         confirmLoading={deployKeyM.isPending}
         confirmDisabled={!pendingPublicKeyId || deployKeyM.isPending}
         onCancel={() => setPendingPublicKeyId(null)}
-        onConfirm={() => (pendingPublicKeyId ? deployKeyM.mutate(pendingPublicKeyId) : undefined)}
+        onConfirm={() => pendingPublicKeyId && deployKeyM.mutate(freezeVpsMutationSnapshot({
+          ...snapshotAccessTarget(), publicKeyId: pendingPublicKeyId, keyLabel: pendingKeyLabel,
+        }))}
       /> : null}
     </div>
   );

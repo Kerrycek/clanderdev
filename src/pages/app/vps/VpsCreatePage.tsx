@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-
 import { useAppMode } from '../../../app/appMode';
 import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
@@ -14,12 +13,23 @@ import { Button } from '../../../components/ui/Button';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { fetchDefaultObjectClusterResources } from '../../../lib/api/clusterResources';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isAmbiguousMutationError, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { fetchLocations } from '../../../lib/api/infra';
 import { fetchNodes } from '../../../lib/api/nodes';
 import { fetchOsTemplates } from '../../../lib/api/osTemplates';
-import { createVps } from '../../../lib/api/vps';
+import { createVps, type CreateVpsPayload } from '../../../lib/api/vps';
 import { objectRef } from '../../../lib/objectRef';
+import type { LocalMutationGeneration } from '../../../lib/localLocks';
+import {
+  beginVpsCreateOutcomeGuard,
+  clearVpsCreateOutcomeMarker,
+  markVpsCreateOutcomeAccepted,
+  markVpsCreateOutcomeUncertain,
+  readLatestVpsCreateOutcomeMarker,
+  vpsCreateOutcomeEntryPrefix,
+  type VpsCreateOutcomeMarker,
+} from '../../../lib/vpsCreateOutcomeGuard';
+import { reconcileVpsCreateOutcome } from '../../../lib/vpsCreateOutcomeReconcile';
 import {
   buildVpsCreatePayload,
   defaultForm,
@@ -45,27 +55,55 @@ import {
   CreateSystemCard,
   CreateTargetCard,
 } from './VpsCreateWizardPrimitives';
-
-export {
-  buildVpsCreatePayload,
-  defaultForm,
-  validateForm,
-  type FormState,
-} from './VpsCreateModel';
+export { buildVpsCreatePayload, defaultForm, validateForm, type FormState } from './VpsCreateModel';
 
 export function VpsCreatePage() {
   const { basePath, mode } = useAppMode();
   const isAdminMode = mode === 'admin';
   const effectiveBasePath = isAdminMode ? '/admin' : basePath;
   const auth = useAuth();
+  const activeUserIdRef = useRef<number | null | undefined>(auth.user?.id); activeUserIdRef.current = auth.user?.id;
+  useEffect(() => { activeUserIdRef.current = auth.user?.id; return () => { activeUserIdRef.current = null; }; }, [auth.user?.id]);
+  const scopeIsActive = (userId?: number) => activeUserIdRef.current === userId;
   const isAdminAccount = auth.role === 'admin';
   const needsAdminPayload = isAdminMode || isAdminAccount;
   const { t } = useI18n();
   const navigate = useNavigate();
   const chrome = useChrome();
   const qc = useQueryClient();
+  const createOutcomeEntryPrefix = vpsCreateOutcomeEntryPrefix(auth.user?.id);
   const [form, setForm] = useState<FormState>(() => defaultForm());
   const [submitted, setSubmitted] = useState(false);
+  const outcomeUserIdRef = useRef(auth.user?.id);
+  const [createOutcomeMarker, setCreateOutcomeMarker] = useState<VpsCreateOutcomeMarker | null>(
+    () => readLatestVpsCreateOutcomeMarker(auth.user?.id)
+  );
+  const scopedCreateOutcomeMarker = outcomeUserIdRef.current === auth.user?.id ? createOutcomeMarker : null;
+  const [reviewedOutcomeId, setReviewedOutcomeId] = useState<string | null>(null);
+  const [outcomeReviewPending, setOutcomeReviewPending] = useState(false);
+  const [outcomeReviewError, setOutcomeReviewError] = useState<string | null>(null);
+  const [outcomeCandidateVpsId, setOutcomeCandidateVpsId] = useState<number | null>(null);
+  useEffect(() => {
+    outcomeUserIdRef.current = auth.user?.id;
+    setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(auth.user?.id));
+    setReviewedOutcomeId(null);
+    setOutcomeReviewPending(false);
+    setOutcomeReviewError(null);
+    setOutcomeCandidateVpsId(null);
+  }, [auth.user?.id]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || !event.key?.startsWith(createOutcomeEntryPrefix)) return;
+      const marker = readLatestVpsCreateOutcomeMarker(auth.user?.id);
+      setCreateOutcomeMarker(marker);
+      setReviewedOutcomeId((current) => current === marker?.id ? current : null);
+      setOutcomeCandidateVpsId(null);
+      setOutcomeReviewError(null);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [auth.user?.id, createOutcomeEntryPrefix]);
 
   const locationQ = useQuery({
     queryKey: ['locations', { limit: 500, hasHypervisor: true, includes: 'environment' }],
@@ -168,46 +206,113 @@ export function VpsCreatePage() {
     [form, hiddenAdminTarget, isAdminMode]
   );
   const canSubmit = validationKeys.length === 0;
-
-  // audit:ignore missing-local-lock -- create has no stable VPS object ref before the API returns the new id.
+  type CreateMutationVariables = { payload: CreateVpsPayload; identity: { hostname: string; ownerId?: number; locationId?: number };
+    userId?: number; effectiveBasePath: string; objectLabel: string; persistenceErrorMessage: string; outcomeUncertainMessage: string };
+  type AcceptedCreateBinding = Readonly<{ userId?: number; actionStateId: number; object: ReturnType<typeof objectRef>; mutationGeneration: LocalMutationGeneration; objectLabel: string }>;
+  type CreateMutationContext = { active: { userId?: number; marker: VpsCreateOutcomeMarker }; responseReceived: boolean; acceptedBinding?: AcceptedCreateBinding };
+  // audit:ignore missing-local-lock missing-local-lock-release -- create uses its own durable receipt before a VPS id exists.
   const createM = useMutation({
-    mutationFn: async () => {
-      const errors = validateForm(form, isAdminMode, hiddenAdminTarget);
-      if (errors.length > 0) {
-        const err = new Error('validation') as Error & { validationKeys?: string[] };
-        err.validationKeys = errors;
-        throw err;
+    mutationFn: (variables: CreateMutationVariables) => createVps(variables.payload),
+    onMutate: async (variables): Promise<CreateMutationContext> => {
+      try {
+        const marker = await beginVpsCreateOutcomeGuard({
+          userId: variables.userId,
+          identity: variables.identity,
+          persistenceErrorMessage: variables.persistenceErrorMessage,
+          outcomeUncertainMessage: variables.outcomeUncertainMessage,
+        });
+        if (scopeIsActive(variables.userId)) {
+          setCreateOutcomeMarker(marker);
+          setReviewedOutcomeId(null);
+        }
+        return { active: { userId: variables.userId, marker }, responseReceived: false };
+      } catch (error) {
+        if (scopeIsActive(variables.userId)) setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(variables.userId));
+        throw error;
       }
-
-      const payload = buildVpsCreatePayload(form, {
-        isAdminMode,
-        needsAdminPayload,
-        hiddenAdminTarget,
-      });
-
-      return createVps(payload);
     },
-    onSuccess: (res) => {
-      void qc.invalidateQueries({ queryKey: ['vps', 'list'] });
-      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'active'] });
-
+    onSuccess: async (res, variables, context) => {
+      // A received create response makes every later failure ambiguous.
+      if (context) context.responseReceived = true;
       const vpsId = Number(res.data?.id);
       const actionStateId = getMetaActionStateId(res.meta);
-      if (actionStateId !== undefined) {
-        chrome.trackActionState(actionStateId, {
-          actionLabelKey: 'action.vps.create.label',
-          objectLabel: form.hostname.trim() || (Number.isFinite(vpsId) ? t('common.vps_ref', { id: vpsId }) : t('vps.create.title')),
-          object: Number.isFinite(vpsId) ? objectRef('Vps', vpsId) : undefined,
-        });
-        chrome.openTasks();
-        navigate(Number.isFinite(vpsId) ? `${effectiveBasePath}/vps/${vpsId}` : `${effectiveBasePath}/vps`);
+      const active = context?.active;
+      if (!active || actionStateId === undefined) throw new Error(variables.persistenceErrorMessage);
+      const receipt = await markVpsCreateOutcomeAccepted({
+        userId: active.userId,
+        marker: active.marker,
+        candidateVpsId: vpsId,
+        actionStateId,
+        persistenceErrorMessage: variables.persistenceErrorMessage,
+      });
+      context.active = { ...active, marker: receipt };
+      if (!scopeIsActive(variables.userId)) return;
+      setCreateOutcomeMarker(receipt);
+      const vpsRef = Number.isInteger(vpsId) && vpsId > 0 ? objectRef('Vps', vpsId) : undefined;
+      if (vpsRef) context.acceptedBinding = Object.freeze({ userId: variables.userId, actionStateId, object: vpsRef,
+        mutationGeneration: await chrome.acquireLocalLock(vpsRef, { durable: true }), objectLabel: variables.objectLabel });
+      const binding = context.acceptedBinding;
+      if (!scopeIsActive(variables.userId) && binding) return void chrome.acquireLocalLock(binding.object, { actionStateId, generation: binding.mutationGeneration });
+      if (!scopeIsActive(variables.userId)) return;
+      void qc.invalidateQueries({ queryKey: ['vps', 'list'] });
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'active'] });
+      chrome.trackActionState(actionStateId, { actionLabelKey: 'action.vps.create.label', objectLabel: variables.objectLabel,
+        object: context.acceptedBinding?.object, mutationGeneration: context.acceptedBinding?.mutationGeneration });
+      chrome.openTasks();
+      navigate(Number.isFinite(vpsId) ? `${variables.effectiveBasePath}/vps/${vpsId}` : `${variables.effectiveBasePath}/vps`);
+    },
+    onError: async (error, variables, context) => {
+      const active = context?.active;
+      if (context?.responseReceived) {
+        if (active && scopeIsActive(active.userId)) {
+          setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(active.userId) ?? active.marker);
+        }
         return;
       }
-
-      navigate(Number.isFinite(vpsId) ? `${effectiveBasePath}/vps/${vpsId}` : `${effectiveBasePath}/vps`);
+      if (active?.marker.phase === 'accepted') {
+        if (scopeIsActive(active.userId)) setCreateOutcomeMarker(active.marker);
+        return;
+      }
+      if (isAmbiguousMutationError(error)) {
+        if (active) {
+          try {
+            const marker = await markVpsCreateOutcomeUncertain({
+              userId: active.userId,
+              marker: active.marker,
+              candidateVpsId: isMissingActionStateError(error)
+                ? Number((error.result as { data?: { id?: unknown } } | undefined)?.data?.id)
+                : undefined,
+              persistenceErrorMessage: variables.persistenceErrorMessage,
+            });
+            if (context) context.active = { ...active, marker };
+            if (scopeIsActive(active.userId)) setCreateOutcomeMarker(marker);
+          } catch {
+            // The durable pending marker remains fail-closed and deliberately
+            // cannot be acknowledged when the phase transition was not saved.
+            if (scopeIsActive(active.userId)) {
+              setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(active.userId));
+            }
+          }
+        }
+        return;
+      }
+      if (active) {
+        await clearVpsCreateOutcomeMarker({
+          userId: active.userId,
+          marker: active.marker,
+          persistenceErrorMessage: variables.persistenceErrorMessage,
+        });
+        if (scopeIsActive(variables.userId)) setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(variables.userId));
+      }
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      const binding = context?.acceptedBinding;
+      if (!binding) return;
+      if (!scopeIsActive(binding.userId)) return void chrome.acquireLocalLock(binding.object, { actionStateId: binding.actionStateId, generation: binding.mutationGeneration });
+      chrome.trackActionState(binding.actionStateId, { actionLabelKey: 'action.vps.create.label',
+        objectLabel: binding.objectLabel, object: binding.object, mutationGeneration: binding.mutationGeneration });
     },
   });
-
   const loading = locationQ.isLoading || (needsAdminPayload && nodesQ.isLoading) || templatesQ.isLoading;
   const loadError = locationQ.error || (needsAdminPayload ? nodesQ.error : null) || templatesQ.error;
 
@@ -228,8 +333,54 @@ export function VpsCreatePage() {
   }
 
   function submit() {
+    if (scopedCreateOutcomeMarker) return;
     setSubmitted(true);
-    if (canSubmit) createM.mutate();
+    if (!canSubmit) return;
+    const formSnapshot = Object.freeze({ ...form });
+    const payload = Object.freeze(buildVpsCreatePayload(formSnapshot, { isAdminMode, needsAdminPayload, hiddenAdminTarget }));
+    const hostname = formSnapshot.hostname.trim();
+    createM.mutate(Object.freeze({
+      payload,
+      identity: Object.freeze({
+        hostname,
+        ownerId: isAdminMode ? optionalResource(formSnapshot.userId) : hiddenAdminTarget?.userId ?? auth.user?.id,
+        locationId: optionalResource(formSnapshot.locationId),
+      }),
+      userId: auth.user?.id,
+      effectiveBasePath,
+      objectLabel: hostname,
+      persistenceErrorMessage: t('vps.mutation.error.guard_storage'),
+      outcomeUncertainMessage: t('vps.mutation.error.outcome_uncertain'),
+    }));
+  }
+
+  async function reviewUncertainCreateOutcome() {
+    const reviewUserId = auth.user?.id;
+    const marker = scopedCreateOutcomeMarker;
+    if (!marker || marker.phase === 'pending' || !marker.identity?.hostname || outcomeReviewPending) return;
+    setReviewedOutcomeId(null);
+    setOutcomeCandidateVpsId(null);
+    setOutcomeReviewError(null);
+    setOutcomeReviewPending(true);
+    chrome.openTasks();
+    try {
+      const result = await reconcileVpsCreateOutcome(marker);
+      if (!scopeIsActive(reviewUserId)) return;
+      if (result.status !== 'matched') {
+        const key = result.status === 'multiple'
+          ? 'vps.create.error.reconcile_multiple'
+          : result.status === 'none'
+            ? 'vps.create.error.reconcile_none'
+            : 'vps.create.error.reconcile_mismatch';
+        throw new Error(t(key));
+      }
+      setOutcomeCandidateVpsId(result.vps.id);
+      setReviewedOutcomeId(marker.id);
+    } catch (error) {
+      if (scopeIsActive(reviewUserId)) setOutcomeReviewError(error instanceof Error ? error.message : t('vps.create.error.reconcile_failed'));
+    } finally {
+      if (scopeIsActive(reviewUserId)) setOutcomeReviewPending(false);
+    }
   }
 
   return (
@@ -307,7 +458,35 @@ export function VpsCreatePage() {
               validationKeys={validationKeys}
               submitted={submitted}
               createError={createM.error}
+              outcomePending={scopedCreateOutcomeMarker?.phase === 'pending' && !createM.isPending}
+              outcomePhase={scopedCreateOutcomeMarker?.phase === 'pending' || createM.isPending
+                ? undefined
+                : scopedCreateOutcomeMarker?.phase}
+              outcomeActionStateId={scopedCreateOutcomeMarker?.actionStateId}
+              outcomeReviewed={Boolean(scopedCreateOutcomeMarker && reviewedOutcomeId === scopedCreateOutcomeMarker.id)}
+              outcomeReviewPending={outcomeReviewPending}
+              outcomeReviewError={outcomeReviewError}
+              outcomeCandidateVpsId={outcomeCandidateVpsId}
               isPending={createM.isPending}
+              submitDisabled={Boolean(scopedCreateOutcomeMarker)}
+              onReviewUncertain={() => void reviewUncertainCreateOutcome()}
+              onAcknowledgeUncertain={async () => {
+                if (!scopedCreateOutcomeMarker || reviewedOutcomeId !== scopedCreateOutcomeMarker.id || !outcomeCandidateVpsId) return;
+                const acknowledgeUserId = auth.user?.id;
+                const cleared = await clearVpsCreateOutcomeMarker({
+                  userId: acknowledgeUserId,
+                  marker: scopedCreateOutcomeMarker,
+                  persistenceErrorMessage: t('vps.mutation.error.guard_storage'),
+                });
+                if (!scopeIsActive(acknowledgeUserId)) return;
+                if (!cleared) {
+                  setOutcomeReviewError(t('vps.create.error.reconcile_failed'));
+                  return;
+                }
+                setCreateOutcomeMarker(readLatestVpsCreateOutcomeMarker(acknowledgeUserId));
+                setReviewedOutcomeId(null);
+                navigate(`${effectiveBasePath}/vps/${outcomeCandidateVpsId}`);
+              }}
               onSubmit={submit}
             />
           </div>

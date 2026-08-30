@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './appTypes';
 import type { User } from './users';
 
@@ -48,26 +48,29 @@ export async function fetchVpsMounts(vpsId: number) {
 }
 
 export async function createVpsMount(vpsId: number, params: Record<string, unknown>) {
-  return haveApiCall<VpsMount>({
+  const res = await haveApiCall<VpsMount>({
     method: 'POST',
     path: `/vpses/${vpsId}/mounts`,
     namespace: 'mount',
     params,
   });
+  return requireActionStateResult(res, 'VPS mount create');
 }
 
 export async function updateVpsMount(vpsId: number, mountId: number, params: Record<string, unknown>) {
-  return haveApiCall<VpsMount>({
+  const res = await haveApiCall<VpsMount>({
     method: 'PUT',
     path: `/vpses/${vpsId}/mounts/${mountId}`,
     namespace: 'mount',
     params,
   });
+  return requireActionStateResult(res, 'VPS mount update');
 }
 
 export async function deleteVpsMount(vpsId: number, mountId: number) {
-  return haveApiCall<void>({
+  const res = await haveApiCall<void>({
     method: 'DELETE',
     path: `/vpses/${vpsId}/mounts/${mountId}`,
   });
+  return requireActionStateResult(res, 'VPS mount delete');
 }

@@ -274,6 +274,7 @@ export const enVps_network = {
   'network.user.assign.location_missing_body': 'A compatible IP address cannot be selected safely without a location.',
   'network.user.assign.submit': 'Add route',
   'network.user.assign.error': 'Failed to add route',
+  'network.user.assign.locked': 'An earlier assignment is still pending or being tracked. Check Tasks before making another change.',
   'network.user.assign.toast.assigned': 'Route added',
   'network.user.assign.toast.assigned_body': '{address} is being added to VPS {vps}.',
 } as const;

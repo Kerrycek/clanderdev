@@ -63,8 +63,6 @@ export function LifecyclePanel(props: {
   const canUseSelfServiceLifetime = !isAdminView;
   const st = String(props.objectState ?? '').trim() || 'unknown';
 
-  const lifetimeObjectRef = useMemo(() => objectRef(props.kind === 'vps' ? 'Vps' : 'User', props.id), [props.id, props.kind]);
-
   const stBadge = objectStateBadge(st, t);
   const helpKey = stateHelpKey(st);
 
@@ -84,22 +82,24 @@ export function LifecyclePanel(props: {
   const snooze = useMemo(() => snoozeIso(snoozePreset, snoozeCustom), [snoozeCustom, snoozePreset]);
 
   const snoozeMut = useMutation({
-    mutationFn: async () => {
-      if (props.kind !== 'vps') throw new Error('Snooze is only supported for VPS');
-      if (!snooze.valid || !snooze.iso) throw new Error('Invalid remind-after date');
-      return await updateVps(props.id, { remind_after_date: snooze.iso });
+    mutationFn: async (variables: { kind: LifetimeKind; id: number; objectLabel: string; remindAfterIso: string }) => {
+      if (variables.kind !== 'vps') throw new Error('Snooze is only supported for VPS');
+      return await updateVps(variables.id, { remind_after_date: variables.remindAfterIso });
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(lifetimeObjectRef);
+    onMutate: async (variables) => {
+      const lockRef = objectRef(variables.kind === 'vps' ? 'Vps' : 'User', variables.id);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
     },
-    onSuccess: (res) => {
+    onSuccess: (res, variables, context) => {
       setSnoozeOpen(false);
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.lifecycle.label',
-          objectLabel: props.objectLabel,
-          object: objectRef('Vps', props.id),
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
       toasts.pushToast({
@@ -108,7 +108,7 @@ export function LifecyclePanel(props: {
         body: t('lifetimes.snooze.success.body'),
       });
       props.onUpdated?.();
-      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: props.id }] });
+      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.id }] });
     },
     onError: (err) => {
       toasts.pushToast({
@@ -118,8 +118,8 @@ export function LifecyclePanel(props: {
         autoDismissMs: false,
       });
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(lifetimeObjectRef);
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
 
@@ -209,15 +209,16 @@ export function LifecyclePanel(props: {
   const adminPayloadValid = Boolean(adminPayloadHasChanges && expParsed.valid && remindParsed.valid);
 
   const adminMut = useMutation({
-    mutationFn: async () => {
-      if (!adminPayload || !adminPayloadValid) throw new Error('Nothing to update');
-      if (props.kind === 'vps') return await updateVps(props.id, adminPayload);
-      return await updateUser(props.id, adminPayload);
+    mutationFn: async (variables: { kind: LifetimeKind; id: number; objectLabel: string; payload: Record<string, unknown> }) => {
+      if (variables.kind === 'vps') return await updateVps(variables.id, variables.payload);
+      return await updateUser(variables.id, variables.payload);
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(lifetimeObjectRef);
+    onMutate: async (variables) => {
+      const lockRef = objectRef(variables.kind === 'vps' ? 'Vps' : 'User', variables.id);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
     },
-    onSuccess: (res) => {
+    onSuccess: (res, variables, context) => {
       setAdminOpen(false);
       setConfirmDeleteOpen(false);
       setAdminReason('');
@@ -225,10 +226,11 @@ export function LifecyclePanel(props: {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          actionLabelKey: props.kind === 'vps' ? 'action.vps.lifecycle.label' : undefined,
-          actionLabel: props.kind === 'user' ? t('lifetimes.panel.title') : undefined,
-          objectLabel: props.objectLabel,
-          object: objectRef(props.kind === 'vps' ? 'Vps' : 'User', props.id),
+          actionLabelKey: variables.kind === 'vps' ? 'action.vps.lifecycle.label' : undefined,
+          actionLabel: variables.kind === 'user' ? t('lifetimes.panel.title') : undefined,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
 
@@ -240,8 +242,8 @@ export function LifecyclePanel(props: {
       props.onUpdated?.();
 
       // Best-effort cache invalidation
-      if (props.kind === 'vps') void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: props.id }] });
-      if (props.kind === 'user') void qc.invalidateQueries({ queryKey: ['users', props.id] });
+      if (variables.kind === 'vps') void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.id }] });
+      if (variables.kind === 'user') void qc.invalidateQueries({ queryKey: ['users', variables.id] });
     },
     onError: (err) => {
       toasts.pushToast({
@@ -251,8 +253,8 @@ export function LifecyclePanel(props: {
         autoDismissMs: false,
       });
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(lifetimeObjectRef);
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
 
@@ -268,12 +270,14 @@ export function LifecyclePanel(props: {
       return;
     }
 
-    adminMut.mutate();
+    if (!adminPayload) return;
+    adminMut.mutate(Object.freeze({ kind: props.kind, id: props.id, objectLabel: props.objectLabel, payload: Object.freeze({ ...adminPayload }) }));
   }
 
   function confirmAdminSave() {
     setConfirmDeleteOpen(false);
-    adminMut.mutate();
+    if (!adminPayload || !adminPayloadValid) return;
+    adminMut.mutate(Object.freeze({ kind: props.kind, id: props.id, objectLabel: props.objectLabel, payload: Object.freeze({ ...adminPayload }) }));
   }
 
   function openAdminEditor() {
@@ -393,7 +397,15 @@ export function LifecyclePanel(props: {
             </Button>
             <Button
               variant="primary"
-              onClick={() => snoozeMut.mutate()}
+              onClick={() => {
+                if (props.kind !== 'vps' || !snooze.valid || !snooze.iso) return;
+                snoozeMut.mutate(Object.freeze({
+                  kind: props.kind,
+                  id: props.id,
+                  objectLabel: props.objectLabel,
+                  remindAfterIso: snooze.iso,
+                }));
+              }}
               loading={snoozeMut.isPending}
               disabled={!userCanSnooze || !snooze.valid || !snooze.iso}
             >

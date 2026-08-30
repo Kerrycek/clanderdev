@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './appTypes';
 
 export interface VpsFeature {
@@ -19,19 +19,21 @@ export async function fetchVpsFeatures(vpsId: number) {
 }
 
 export async function updateVpsFeature(vpsId: number, featureId: number, enabled: boolean) {
-  return haveApiCall<void>({
+  const res = await haveApiCall<void>({
     method: 'PUT',
     path: `/vpses/${vpsId}/features/${featureId}`,
     namespace: 'feature',
     params: { enabled },
   });
+  return requireActionStateResult(res, 'VPS feature update');
 }
 
 export async function updateVpsFeaturesAll(vpsId: number, params: Record<string, boolean>) {
-  return haveApiCall<void>({
+  const res = await haveApiCall<void>({
     method: 'POST',
     path: `/vpses/${vpsId}/features/update_all`,
     namespace: 'feature',
     params,
   });
+  return requireActionStateResult(res, 'VPS features update');
 }

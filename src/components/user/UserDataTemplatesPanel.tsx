@@ -269,29 +269,25 @@ export function UserDataTemplatesPanel(props: {
   };
 
   const deployM = useMutation({
-    mutationFn: async () => {
-      if (!editor || editor.mode !== 'deploy') throw new Error('Missing template');
-      const tplId = safeUserDataId(editor.item.id);
-      if (!tplId) throw new Error('Missing template');
-      if (!deployVpsId) throw new Error(t('user_data.deploy.validation.vps_required'));
-      return deployVpsUserData(tplId, deployVpsId);
+    mutationFn: async (variables: { templateId: number; vpsId: number }) => {
+      return deployVpsUserData(variables.templateId, variables.vpsId);
     },
-    onMutate: () => {
-      if (!deployVpsId) return {};
-      const ref = objectRef('Vps', deployVpsId);
-      chrome.acquireLocalLock(ref);
-      return { lockRef: ref };
+    onMutate: async (variables) => {
+      const ref = objectRef('Vps', variables.vpsId);
+      const mutationGeneration = await chrome.acquireLocalLock(ref, { durable: true });
+      return { lockRef: ref, mutationGeneration };
     },
-    onSettled: (_data, _err, _vars, ctx) => {
-      if (ctx?.lockRef) chrome.releaseLocalLock(ctx.lockRef);
+    onSettled: (_data, error, _vars, ctx) => {
+      if (ctx?.lockRef) chrome.settleLocalLock(ctx.lockRef, error, ctx.mutationGeneration);
     },
-    onSuccess: (res) => {
+    onSuccess: (res, variables, ctx) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'user_data.deploy.action',
-          objectLabel: deployVpsId ? `#${deployVpsId}` : undefined,
-          object: deployVpsId ? objectRef('Vps', deployVpsId) : undefined,
+          objectLabel: `#${variables.vpsId}`,
+          object: ctx?.lockRef,
+          mutationGeneration: ctx?.mutationGeneration,
           blockUi: true,
           progressTitleKey: 'modal.progress.deploy_user_data.title',
         });
@@ -385,7 +381,20 @@ export function UserDataTemplatesPanel(props: {
         pending={deployM.isPending}
         onChangeVpsId={setDeployVpsId}
         onClose={closeEditor}
-        onSubmit={() => deployM.mutate()}
+        onSubmit={() => {
+          const templateId = safeUserDataId(deployItem?.id);
+          if (!templateId) return;
+          if (!deployVpsId) {
+            toasts.pushToast({
+              variant: 'danger',
+              title: t('common.error'),
+              body: t('user_data.deploy.validation.vps_required'),
+              autoDismissMs: false,
+            });
+            return;
+          }
+          deployM.mutate(Object.freeze({ templateId, vpsId: deployVpsId }));
+        }}
       />
 
       <ConfirmDialog

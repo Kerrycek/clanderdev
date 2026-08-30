@@ -11,10 +11,12 @@ import { Checkbox } from '../../../components/ui/Checkbox';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { Spinner } from '../../../components/ui/Spinner';
 import { fetchVpsFeatures, updateVpsFeaturesAll, type VpsFeature } from '../../../lib/api/vpsFeatures';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { gateVpsMutation } from '../../../lib/gates/vps';
+import { objectRef } from '../../../lib/objectRef';
 import { preflightVpsNotBusy } from './vpsPreflight';
 import { useVps } from './VpsContext';
+import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
 
 function featureLabel(f: VpsFeature): string {
   return (f.label as any) ?? f.name;
@@ -43,7 +45,7 @@ export function VpsFeaturesPage() {
   const qc = useQueryClient();
   const { t } = useI18n();
 
-  const { vps, canMutateVps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, busyTransaction, busyLocalLock } = useVps();
   const vpsId = vps.id;
   const objectLabel = String((vps as any).hostname ?? '') || `#${vpsId}`;
 
@@ -80,35 +82,38 @@ export function VpsFeaturesPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const m = useMutation({
-    mutationFn: async () => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return updateVpsFeaturesAll(vpsId, effective);
+    mutationFn: async (variables: VpsMutationSnapshot & { features: Record<string, boolean> }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return updateVpsFeaturesAll(variables.vpsId, variables.features);
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(vpsRef);
+    onMutate: async (variables) => {
+      const lockRef = objectRef('Vps', variables.vpsId);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
     },
-    onSuccess: (r) => {
+    onSuccess: (r, variables, context) => {
       setConfirmOpen(false);
       setDraft(null);
-      qc.invalidateQueries({ queryKey: ['vps_feature', 'list', { vpsId }] });
+      void qc.invalidateQueries({ queryKey: ['vps_feature', 'list', { vpsId: variables.vpsId }] });
 
       const asId = getMetaActionStateId(r.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.features.apply.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
 
-      refetchChains();
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
+    onSettled: (_data, error, _variables, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
 
@@ -219,7 +224,11 @@ export function VpsFeaturesPage() {
           {dirty ? <div className="mt-3 text-xs text-muted">{t('vps.features.unsaved', { n: dirtyCount })}</div> : null}
           {m.error ? (
             <Alert title={t('vps.features.apply_error')} variant="danger" className="mt-3">
-              {String((m.error as any)?.message ?? m.error)}
+              {isMissingActionStateError(m.error)
+                ? t('vps.mutation.error.missing_action_state')
+                : m.error instanceof Error
+                  ? m.error.message
+                  : String(m.error)}
             </Alert>
           ) : null}
         </CardBody>
@@ -234,7 +243,10 @@ export function VpsFeaturesPage() {
         confirmLoading={m.isPending}
         confirmDisabled={!gate.allowed}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => m.mutate()}
+        onConfirm={() => m.mutate(freezeVpsMutationSnapshot({
+          vpsId, features: Object.freeze({ ...effective }), canMutate: canMutateVps,
+          knownBusy: busyTransaction || busyLocalLock, objectLabel,
+        }))}
       >
         {dirty ? (
           <div className="text-xs text-muted">

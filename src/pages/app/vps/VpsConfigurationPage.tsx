@@ -16,12 +16,14 @@ import { Select, type SelectOption } from '../../../components/ui/Select';
 import { Spinner } from '../../../components/ui/Spinner';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { fetchDnsResolvers } from '../../../lib/api/dnsResolvers';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { fetchUserNamespaceMaps } from '../../../lib/api/userNamespaces';
 import { updateVps } from '../../../lib/api/vps';
 import { gateVpsMutation } from '../../../lib/gates/vps';
+import { objectRef } from '../../../lib/objectRef';
 import { preflightVpsNotBusy } from './vpsPreflight';
 import { useVps } from './VpsContext';
+import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
 import {
   ADMIN_LOCK_TYPES,
   CONFIG_FIELD_META,
@@ -78,7 +80,7 @@ export function VpsConfigurationPage() {
   const chrome = useChrome();
   const qc = useQueryClient();
   const { t } = useI18n();
-  const { vps, refetch, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, busyTransaction, busyLocalLock } = useVps();
   const vpsId = Number(vps.id);
   const objectLabel = String(vps.hostname ?? '') || `#${vpsId}`;
 
@@ -109,35 +111,31 @@ export function VpsConfigurationPage() {
   }, [baseline, canEditAdminConfig, effective, t]);
 
   const saveM = useMutation({
-    mutationFn: async (payload: Record<string, unknown>) => {
-      if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-      await preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
-      return updateVps(vpsId, payload);
+    mutationFn: async (variables: VpsMutationSnapshot & { payload: Record<string, unknown> }) => {
+      if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+      await preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
+      return updateVps(variables.vpsId, variables.payload);
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(vpsRef);
-    },
-    onSuccess: (res) => {
+    onMutate: async (variables) => { const lockRef = objectRef('Vps', variables.vpsId); return { lockRef, mutationGeneration: await chrome.acquireLocalLock(lockRef, { durable: true }) }; },
+    onSuccess: (res, variables, context) => {
       setDraft(null);
       setConfirmOpen(false);
-      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: vpsId }] });
-      refetch();
-      refetchChains();
+      void qc.invalidateQueries({ queryKey: ['vps', 'show', { id: variables.vpsId }] });
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] });
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.config.save.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
         });
       }
     },
     onError: (e: unknown) => {
       if (e && typeof e === 'object' && 'code' in e && e.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(vpsRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const patchDraft = (patch: Partial<VpsConfigDraft>) => {
@@ -280,7 +278,7 @@ export function VpsConfigurationPage() {
 
       {result.validationError && !result.validationFieldKey ? <Alert variant="danger">{result.validationError}</Alert> : null}
       <VpsConfigFieldErrorsAlert errors={fieldErrors} labelForKey={labelForKey} />
-      {saveM.error && fieldErrors.length === 0 ? <Alert variant="danger">{String((saveM.error as Error)?.message ?? saveM.error)}</Alert> : null}
+      {saveM.error && fieldErrors.length === 0 ? <Alert variant="danger">{isMissingActionStateError(saveM.error) ? t('vps.mutation.error.missing_action_state') : String((saveM.error as Error)?.message ?? saveM.error)}</Alert> : null}
 
       <VpsConfigReviewPanel
         changes={changes}
@@ -487,7 +485,10 @@ export function VpsConfigurationPage() {
         confirmLoading={saveM.isPending}
         confirmDisabled={saveDisabled}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={() => saveM.mutate(result.payload)}
+        onConfirm={() => saveM.mutate(freezeVpsMutationSnapshot({
+          vpsId, payload: Object.freeze({ ...result.payload }), canMutate: canMutateVps,
+          knownBusy: busyTransaction || busyLocalLock, objectLabel,
+        }))}
       >
         <VpsConfigChangesList changes={changes} compact />
       </ConfirmDialog>

@@ -60,6 +60,49 @@ function choicesHandlers() {
 }
 
 test.describe('@workflow-matrix @pr-smoke VPS create admin flow', () => {
+  test('keeps guard identity, payload and callback scope on the submitted form snapshot across rerender', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_USER' });
+    const createBodies: any[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/vpses')) {
+        createBodies.push(request.postDataJSON());
+      }
+    });
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'member', level: 1 },
+      handlers: choicesHandlers(),
+    });
+    await page.goto('/app/vps/new');
+    await page.getByTestId('vps.create.location').selectOption('2');
+    await page.getByTestId('vps.create.os_template').selectOption('6');
+    await page.getByTestId('vps.create.hostname').fill('snapshot-a.example');
+    await page.evaluate(() => {
+      const locks = navigator.locks as any;
+      const original = locks.request.bind(locks);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      (window as any).__releaseCreateGuard = release;
+      locks.request = (name: string, ...args: any[]) => (
+        name.includes('vps-create-outcome-uncertain') ? gate.then(() => original(name, ...args)) : original(name, ...args)
+      );
+    });
+
+    await page.getByTestId('vps.create.submit').click();
+    await page.getByTestId('vps.create.hostname').fill('rerendered-b.example');
+    await page.evaluate(() => (window as any).__releaseCreateGuard());
+    await expect(page).toHaveURL(/\/app\/vps\/150$/);
+
+    expect(createBodies).toHaveLength(1);
+    expect(createBodies[0].vps.hostname).toBe('snapshot-a.example');
+    const receipts = await page.evaluate(() => Object.values(window.localStorage)
+      .map((value) => { try { return JSON.parse(value); } catch { return null; } })
+      .filter(Boolean));
+    expect(receipts).toContainEqual(expect.objectContaining({
+      phase: 'accepted',
+      identity: expect.objectContaining({ hostname: 'snapshot-a.example', ownerId: 2, locationId: 2 }),
+    }));
+  });
+
   test('keeps an admin in user-scope create flow on app route', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_ADMIN' });
     const createBodies: unknown[] = [];

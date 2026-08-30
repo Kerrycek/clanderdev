@@ -29,6 +29,7 @@
  *   - trackActionState-no-object
  *   - missing-local-lock
  *   - missing-local-lock-release
+ *   - async-onMutate-without-snapshot-variables
  *
  * Parsing strategy:
  * - If the optional `typescript` dependency is available (in a developer install),
@@ -156,6 +157,16 @@ function buildWarnings(entry) {
 
   const facts = entry.facts || {};
 
+  // React Query awaits onMutate and then reads the mutation options again.
+  // Explicit async guards therefore need immutable request variables on both
+  // sides of that await, otherwise a rerender can swap route/form closures.
+  if (facts.asyncOnMutateWithoutSnapshotVariables) {
+    warn(
+      'async-onMutate-without-snapshot-variables',
+      'Uses an inline async onMutate without snapshot variables in both onMutate and mutationFn.'
+    );
+  }
+
   // Strong rule: if we read action_state_id, we should track it (otherwise locks/toasts won't bind)
   if (facts.getMetaActionStateId && !facts.trackActionState) {
     warn(
@@ -238,18 +249,60 @@ function objectHasProp(objLit, name) {
   return false;
 }
 
+function propertyNameText(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name)) return name.text;
+  return null;
+}
+
+function objectFunctionProp(objLit, name) {
+  for (const prop of objLit.properties) {
+    if (ts.isPropertyAssignment(prop) && propertyNameText(prop.name) === name) {
+      const initializer = prop.initializer;
+      if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) return initializer;
+    }
+    if (ts.isMethodDeclaration(prop) && propertyNameText(prop.name) === name) return prop;
+  }
+  return null;
+}
+
+function hasAsyncModifier(node) {
+  return Boolean(node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword));
+}
+
+function hasAsyncOnMutateSnapshotRisk(objLit) {
+  const onMutate = objectFunctionProp(objLit, 'onMutate');
+  if (!onMutate || !hasAsyncModifier(onMutate)) return false;
+
+  const mutationFn = objectFunctionProp(objLit, 'mutationFn');
+  return onMutate.parameters.length === 0 || Boolean(mutationFn && mutationFn.parameters.length === 0);
+}
+
 function scanForFactsTs(node, facts) {
+  if (ts.isIdentifier(node) && node.text === 'acquireMutationContext') {
+    facts.acquireLocalLock = true;
+  }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    const parts = calleeParts(node);
+    const last = parts.at(-1);
+    if (last === 'acquire' && parts.at(-2) === 'lifetimeMutationGuard') facts.acquireLocalLock = true;
+    if (last === 'settle' && parts.at(-2) === 'lifetimeMutationGuard') facts.releaseLocalLock = true;
+  }
+
   if (ts.isCallExpression(node)) {
     const parts = calleeParts(node.expression);
     const last = parts[parts.length - 1];
 
-    if (last === 'acquireLocalLock') facts.acquireLocalLock = true;
-    if (last === 'releaseLocalLock') facts.releaseLocalLock = true;
+    if (last === 'acquireLocalLock' || last === 'acquireMutationContext'
+      || (last === 'acquire' && parts.at(-2) === 'lifetimeMutationGuard')) facts.acquireLocalLock = true;
+    if (last === 'releaseLocalLock' || last === 'settleLocalLock'
+      || (last === 'settle' && parts.at(-2) === 'lifetimeMutationGuard')) facts.releaseLocalLock = true;
 
     if (last === 'getMetaActionStateId') facts.getMetaActionStateId = true;
 
-    if (last === 'trackActionState') {
+    if (last === 'trackActionState' || (last === 'track' && parts.at(-2) === 'lifetimeMutationGuard')) {
       facts.trackActionState = true;
+      if (last === 'track') facts.trackActionStateWithObject = true;
       const arg2 = node.arguments[1];
       if (arg2 && ts.isObjectLiteralExpression(arg2) && objectHasProp(arg2, 'object')) {
         facts.trackActionStateWithObject = true;
@@ -282,10 +335,12 @@ function analyzeMutationCallTs(sf, sourceText, callExpr, filePath) {
     trackActionStateWithObject: false,
     preflight: false,
     hasObjectLiteralArg: ts.isObjectLiteralExpression(arg0),
+    asyncOnMutateWithoutSnapshotVariables: false,
   };
 
   if (ts.isObjectLiteralExpression(arg0)) {
     scanForFactsTs(arg0, facts);
+    facts.asyncOnMutateWithoutSnapshotVariables = hasAsyncOnMutateSnapshotRisk(arg0);
   }
 
   const entry = {
@@ -542,19 +597,31 @@ function scanFactsRegex(bodyText) {
     trackActionStateWithObject: false,
     preflight: false,
     hasObjectLiteralArg: true,
+    asyncOnMutateWithoutSnapshotVariables: false,
   };
 
-  facts.acquireLocalLock = bodyText.includes('acquireLocalLock');
-  facts.releaseLocalLock = bodyText.includes('releaseLocalLock');
+  facts.acquireLocalLock = bodyText.includes('acquireLocalLock')
+    || bodyText.includes('acquireMutationContext')
+    || bodyText.includes('lifetimeMutationGuard.acquire');
+  facts.releaseLocalLock = bodyText.includes('releaseLocalLock')
+    || bodyText.includes('settleLocalLock')
+    || bodyText.includes('lifetimeMutationGuard.settle');
   facts.getMetaActionStateId = bodyText.includes('getMetaActionStateId');
-  facts.trackActionState = bodyText.includes('trackActionState');
+  const customGuardTracksObject = bodyText.includes('lifetimeMutationGuard.track');
+  facts.trackActionState = bodyText.includes('trackActionState') || customGuardTracksObject;
 
   if (facts.trackActionState) {
     // Heuristic: a trackActionState call with an object in the metadata.
-    facts.trackActionStateWithObject = /trackActionState\s*\([\s\S]{0,500}\{\s*[\s\S]{0,500}\bobject\s*:/.test(bodyText);
+    facts.trackActionStateWithObject = customGuardTracksObject
+      || /trackActionState\s*\([\s\S]{0,500}\{\s*[\s\S]{0,500}\bobject\s*:/.test(bodyText);
   }
 
   facts.preflight = /\bpreflight[A-Za-z0-9_]*\s*\(/.test(bodyText);
+  const explicitAsyncOnMutate = /\bonMutate\s*:\s*async\s*(?:function\s*)?\(/.test(bodyText);
+  const zeroArgAsyncOnMutate = /\bonMutate\s*:\s*async\s*(?:function\s*)?\(\s*\)/.test(bodyText);
+  const zeroArgMutationFn = /\bmutationFn\s*:\s*(?:async\s*)?(?:function\s*)?\(\s*\)/.test(bodyText);
+  facts.asyncOnMutateWithoutSnapshotVariables =
+    explicitAsyncOnMutate && (zeroArgAsyncOnMutate || zeroArgMutationFn);
 
   return facts;
 }

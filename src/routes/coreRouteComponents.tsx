@@ -75,7 +75,7 @@ export const MonitoringEventDetailPage = lazyRoute(
   () => import('../pages/app/MonitoringEventDetailPage'),
   'MonitoringEventDetailPage',
 );
-export const VpsLayout = lazyRoute(() => import('../pages/app/vps/VpsLayout'), 'VpsLayout');
+export const VpsLayout = lazyRoute(() => import('../pages/app/vps/VpsLayoutRoute'), 'VpsLayoutRoute');
 export const VpsCreatePage = lazyRoute(() => import('../pages/app/vps/VpsCreatePage'), 'VpsCreatePage');
 export const VpsOverviewPage = lazyRoute(() => import('../pages/app/vps/VpsOverviewPage'), 'VpsOverviewPage');
 export const VpsConfigurationPage = lazyRoute(

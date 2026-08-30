@@ -14,11 +14,14 @@ export interface TrackedActionStateSeed {
   progressTitleKey?: string;
 }
 
-export async function seedTrackedActionStates(page: Page, states: TrackedActionStateSeed[]) {
+export async function seedTrackedActionStates(page: Page, states: TrackedActionStateSeed[], userId = 1) {
   await page.addInitScript(
-    ({ states }) => {
-      window.sessionStorage.setItem('webui-next.tracked_action_states', JSON.stringify(states ?? []));
+    ({ states, userId }) => {
+      window.sessionStorage.setItem(
+        `webui-next.tracked_action_states.user-${userId}`,
+        JSON.stringify(states ?? [])
+      );
     },
-    { states }
+    { states, userId }
   );
 }

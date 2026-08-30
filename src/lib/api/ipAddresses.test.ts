@@ -157,7 +157,7 @@ describe('network address API wrappers', () => {
   });
 
   test('assignIpAddressRoute posts the legacy route assign payload', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 }, _meta: { action_state_id: 901 } }) as typeof fetch;
 
     await assignIpAddressRoute(42, { network_interface: 501, route_via: 700 });
 
@@ -173,7 +173,7 @@ describe('network address API wrappers', () => {
   });
 
   test('assignIpAddressRouteWithHostAddress posts the combined route and host action', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 }, _meta: { action_state_id: 902 } }) as typeof fetch;
 
     await assignIpAddressRouteWithHostAddress(42, { network_interface: 501 });
 
@@ -188,7 +188,7 @@ describe('network address API wrappers', () => {
   });
 
   test('freeIpAddressRoute posts route free without a namespaced payload', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 }, _meta: { action_state_id: 903 } }) as typeof fetch;
 
     await freeIpAddressRoute(42);
 
@@ -199,7 +199,7 @@ describe('network address API wrappers', () => {
   });
 
   test('updateIpAddress sends owner changes through the ip_address namespace', async () => {
-    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 } }) as typeof fetch;
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 }, _meta: { action_state_id: 904 } }) as typeof fetch;
 
     await updateIpAddress(42, { user: 7, environment: 2 });
 
@@ -215,7 +215,10 @@ describe('network address API wrappers', () => {
   });
 
   test('host IP wrappers cover create, PTR update, assign, free and delete endpoints', async () => {
-    globalThis.fetch = mockFetchOk({ host_ip_address: { id: 9 } }) as typeof fetch;
+    globalThis.fetch = mockFetchOk({
+      host_ip_address: { id: 9 },
+      _meta: { action_state_id: 905 },
+    }) as typeof fetch;
 
     await createHostIpAddress({ ip_address: 42, addr: '192.0.2.10' });
     let [url, init] = lastFetchCall();
@@ -257,5 +260,20 @@ describe('network address API wrappers', () => {
     [url, init] = lastFetchCall();
     expect(new URL(url).pathname).toBe('/v7.0/host_ip_addresses/9');
     expect(init?.method).toBe('DELETE');
+  });
+
+  test.each([
+    ['IP update', () => updateIpAddress(42, { user: 7 })],
+    ['route assign', () => assignIpAddressRoute(42, { network_interface: 501 })],
+    ['route and host assign', () => assignIpAddressRouteWithHostAddress(42, { network_interface: 501 })],
+    ['route free', () => freeIpAddressRoute(42)],
+    ['host IP update', () => updateHostIpAddress(9, { reverse_record_value: 'host.example.org.' })],
+    ['host IP assign', () => assignHostIpAddress(9, { network_interface: 501 })],
+    ['host IP free', () => freeHostIpAddress(9)],
+    ['host IP delete', () => deleteHostIpAddress(9)],
+  ])('%s fails closed without an action-state id', async (_label, mutation) => {
+    globalThis.fetch = mockFetchOk({ ip_address: { id: 42 }, host_ip_address: { id: 9 } }) as typeof fetch;
+
+    await expect(mutation()).rejects.toMatchObject({ code: 'MISSING_ACTION_STATE' });
   });
 });

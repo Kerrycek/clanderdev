@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { createMigrationPlanVpsMigration, cancelMigrationPlan, deleteMigrationPlan, fetchMigrationPlan, fetchMigrationPlanVpsMigrations, startMigrationPlan, type MigrationPlan, type VpsMigration } from '../../../lib/api/migrations';
 import { fetchActiveTransactionChains } from '../../../lib/api/transactions';
 import { fetchNodes } from '../../../lib/api/nodes';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -19,6 +19,7 @@ import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useTierBIntervalMs } from '../../../lib/refreshTiers';
 
 import { preflightMigrationPlanNotBusy } from './adminPreflight';
+import { AdminObjectMutationRecovery } from './AdminObjectMutationRecovery';
 
 import { gateMigrationPlanAction } from '../../../lib/gates/migrationPlan';
 import { deriveChainLockState } from '../../../lib/lockState';
@@ -114,10 +115,13 @@ export function MigrationPlanDetailPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
   const chrome = useChrome();
+  const queryClient = useQueryClient();
   const online = useNetworkStatus();
   const navigate = useNavigate();
   const params = useParams();
   const planId = Number(params['planId']);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
   const tierBRefetchMs = useTierBIntervalMs();
 
@@ -204,218 +208,191 @@ export function MigrationPlanDetailPage() {
     null | { ok: number[]; failed: { id: number; error: string }[] }
   >(null);
 
+  const snapshotPlanTarget = () => planRef ? Object.freeze({
+    planId,
+    lockRef: Object.freeze({ ...planRef }),
+    knownBusy: busyLocalLock || busyTransaction,
+  }) : null;
+  type PlanTarget = NonNullable<ReturnType<typeof snapshotPlanTarget>>;
+  type ScheduleRequest = Readonly<Parameters<typeof createMigrationPlanVpsMigration>[1]>;
+  const acquireMutationContext = async (variables: PlanTarget) => ({
+    lockRef: variables.lockRef,
+    mutationGeneration: await chrome.acquireLocalLock(variables.lockRef, { durable: true }),
+  });
+  const invalidatePlanMutation = (mutationPlanId: number) => {
+    const activeOnly = { refetchType: 'active' as const };
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['migration_plans', 'show', { id: mutationPlanId }], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'MigrationPlan', rowId: mutationPlanId, state: 'active', limit: 10 }], exact: true, ...activeOnly }),
+      queryClient.invalidateQueries({ queryKey: ['migration_plans', 'vps_migrations', { planId: mutationPlanId }], ...activeOnly }),
+    ]);
+  };
+
   const scheduleM = useMutation({
-    mutationFn: async (vars: {
-      vps: number;
-      dstNode: number;
-      maintenanceWindow: boolean;
-      cleanupData: boolean;
-    }) => {
-      await preflightMigrationPlanNotBusy({ planId, t, knownBusy: busyLocalLock || busyTransaction });
-      return createMigrationPlanVpsMigration(planId, {
-        vps: vars.vps,
-        dst_node: vars.dstNode,
-        maintenance_window: vars.maintenanceWindow,
-        cleanup_data: vars.cleanupData,
-      });
+    mutationFn: async (variables: PlanTarget & { request: ScheduleRequest }) => {
+      await preflightMigrationPlanNotBusy({ planId: variables.planId, t, knownBusy: variables.knownBusy });
+      return createMigrationPlanVpsMigration(variables.planId, variables.request);
     },
-    onMutate: async () => {
-      if (planRef) chrome.acquireLocalLock(planRef);
-    },
-    onSuccess: (res, vars) => {
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          object: objectRef('Vps', vars.vps),
+          object: objectRef('Vps', variables.request.vps),
           actionLabelKey: 'action.migration_plan.schedule.label',
-          objectLabel: t('common.vps_ref', { id: vars.vps }),
+          objectLabel: t('common.vps_ref', { id: variables.request.vps }),
         });
       }
-
-      setNotice(t('admin.migration_plan.notice.vps_migration_scheduled'));
-      setSchedVpsId('');
-
-      // Newly scheduled migrations appear first → return to page 1.
-      const next = new URLSearchParams(searchParams);
-      next.delete('from_id');
-      next.set('page', '1');
-      setSearchParams(next, { replace: true });
-
-      void migQ.refetch();
+      if (mountedRef.current) {
+        setNotice(t('admin.migration_plan.notice.vps_migration_scheduled'));
+        setSchedVpsId('');
+        const next = new URLSearchParams(searchParams);
+        next.delete('from_id');
+        next.set('page', '1');
+        setSearchParams(next, { replace: true });
+      }
+      invalidatePlanMutation(variables.planId);
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (planRef) chrome.releaseLocalLock(planRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const batchScheduleM = useMutation({
-    mutationFn: async () => {
-      await preflightMigrationPlanNotBusy({ planId, t, knownBusy: busyLocalLock || busyTransaction });
-
-      const dst = Number(schedDstNode);
-
-      const ids = batchVpsText
-        .split(/[^0-9]+/g)
-        .map((s) => Number(s))
-        .filter((n) => Number.isFinite(n) && n > 0);
-
-      const unique: number[] = [];
-      const seen = new Set<number>();
-      for (const id of ids) {
-        if (seen.has(id)) continue;
-        seen.add(id);
-        unique.push(id);
-      }
-
+    mutationFn: async (variables: PlanTarget & { requests: readonly ScheduleRequest[]; stopOnError: boolean }) => {
+      await preflightMigrationPlanNotBusy({ planId: variables.planId, t, knownBusy: variables.knownBusy });
       const ok: number[] = [];
       const failed: { id: number; error: string }[] = [];
 
-      for (const vps of unique) {
+      for (const request of variables.requests) {
         try {
-          const res = await createMigrationPlanVpsMigration(planId, {
-            vps,
-            dst_node: dst,
-            maintenance_window: schedMaintenanceWindow,
-            cleanup_data: schedCleanupData,
-          });
+          const res = await createMigrationPlanVpsMigration(variables.planId, request);
           const asId = getMetaActionStateId(res.meta);
           if (asId !== undefined) {
             chrome.trackActionState(asId, {
-              object: objectRef('Vps', vps),
+              object: objectRef('Vps', request.vps),
               actionLabelKey: 'action.migration_plan.schedule.label',
-              objectLabel: t('common.vps_ref', { id: vps }),
+              objectLabel: t('common.vps_ref', { id: request.vps }),
             });
           }
-          ok.push(vps);
+          ok.push(request.vps);
         } catch (e: any) {
+          // Fail closed: an ambiguous individual POST may already have committed.
+          if (isAmbiguousMutationError(e)) throw e;
           if (e?.code === 'BUSY') {
             chrome.openTasks();
           }
           const msg = formatErrorMessage(e);
-          failed.push({ id: vps, error: msg });
-          if (batchStopOnError || e?.code === 'BUSY') break;
+          failed.push({ id: request.vps, error: msg });
+          if (variables.stopOnError || e?.code === 'BUSY') break;
         }
       }
 
       return { ok, failed };
     },
-    onMutate: async () => {
-      if (planRef) chrome.acquireLocalLock(planRef);
-    },
-    onSuccess: (r) => {
-      setBatchLastResult(r);
-      const total = r.ok.length + r.failed.length;
-      setNotice(t('admin.migration_plan.notice.batch_finished', { ok: r.ok.length, total }));
-
-      // Newly scheduled migrations appear first → return to page 1.
-      const next = new URLSearchParams(searchParams);
-      next.delete('from_id');
-      next.set('page', '1');
-      setSearchParams(next, { replace: true });
-
-      void migQ.refetch();
+    onMutate: acquireMutationContext,
+    onSuccess: (result, variables) => {
+      if (mountedRef.current) {
+        setBatchLastResult(result);
+        const total = result.ok.length + result.failed.length;
+        setNotice(t('admin.migration_plan.notice.batch_finished', { ok: result.ok.length, total }));
+        const next = new URLSearchParams(searchParams);
+        next.delete('from_id');
+        next.set('page', '1');
+        setSearchParams(next, { replace: true });
+      }
+      invalidatePlanMutation(variables.planId);
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (planRef) chrome.releaseLocalLock(planRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
   const startM = useMutation({
-    mutationFn: async () => {
-      await preflightMigrationPlanNotBusy({ planId, t, knownBusy: busyLocalLock || busyTransaction });
-      return startMigrationPlan(planId);
+    mutationFn: async (variables: PlanTarget & { request: Readonly<{ action: 'start' }> }) => {
+      await preflightMigrationPlanNotBusy({ planId: variables.planId, t, knownBusy: variables.knownBusy });
+      return startMigrationPlan(variables.planId);
     },
-    onMutate: async () => {
-      if (planRef) chrome.acquireLocalLock(planRef);
-    },
-    onSuccess: (res) => {
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          object: planRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           actionLabelKey: 'action.migration_plan.start.label',
-          objectLabel: `#${planId}`,
+          objectLabel: `#${variables.planId}`,
         });
       }
-      setNotice(t('admin.migration_plan.notice.started'));
-      setConfirm(null);
-      void planQ.refetch();
-      void chainsQ.refetch();
-      void migQ.refetch();
+      if (mountedRef.current) {
+        setNotice(t('admin.migration_plan.notice.started'));
+        setConfirm(null);
+      }
+      invalidatePlanMutation(variables.planId);
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (planRef) chrome.releaseLocalLock(planRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const cancelM = useMutation({
-    mutationFn: async () => {
-      await preflightMigrationPlanNotBusy({ planId, t, knownBusy: busyLocalLock || busyTransaction });
-      return cancelMigrationPlan(planId);
+    mutationFn: async (variables: PlanTarget & { request: Readonly<{ action: 'cancel' }> }) => {
+      await preflightMigrationPlanNotBusy({ planId: variables.planId, t, knownBusy: variables.knownBusy });
+      return cancelMigrationPlan(variables.planId);
     },
-    onMutate: async () => {
-      if (planRef) chrome.acquireLocalLock(planRef);
-    },
-    onSuccess: (res) => {
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
       const asId = getMetaActionStateId(res.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
-          object: planRef ?? undefined,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           actionLabelKey: 'action.migration_plan.cancel.label',
-          objectLabel: `#${planId}`,
+          objectLabel: `#${variables.planId}`,
         });
       }
-      setNotice(t('admin.migration_plan.notice.cancelled'));
-      setConfirm(null);
-      void planQ.refetch();
-      void chainsQ.refetch();
-      void migQ.refetch();
+      if (mountedRef.current) {
+        setNotice(t('admin.migration_plan.notice.cancelled'));
+        setConfirm(null);
+      }
+      invalidatePlanMutation(variables.planId);
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (planRef) chrome.releaseLocalLock(planRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const deleteM = useMutation({
-    mutationFn: async () => {
-      await preflightMigrationPlanNotBusy({ planId, t, knownBusy: busyLocalLock || busyTransaction });
-      return deleteMigrationPlan(planId);
+    mutationFn: async (variables: PlanTarget & { request: Readonly<{ action: 'delete' }> }) => {
+      await preflightMigrationPlanNotBusy({ planId: variables.planId, t, knownBusy: variables.knownBusy });
+      return deleteMigrationPlan(variables.planId);
     },
-    onMutate: async () => {
-      if (planRef) chrome.acquireLocalLock(planRef);
-    },
-    onSuccess: () => {
-      setNotice(t('admin.migration_plan.notice.deleted'));
-      setConfirm(null);
-      navigate(`${basePath}/migration-plans`);
+    onMutate: acquireMutationContext,
+    onSuccess: (_res, variables) => {
+      if (mountedRef.current) {
+        setNotice(t('admin.migration_plan.notice.deleted'));
+        setConfirm(null);
+        navigate(`${basePath}/migration-plans`);
+      }
+      invalidatePlanMutation(variables.planId);
     },
     onError: (err: any) => {
       if (err?.code === 'BUSY') {
         chrome.openTasks();
       }
     },
-    onSettled: () => {
-      if (planRef) chrome.releaseLocalLock(planRef);
-    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
 
@@ -547,6 +524,8 @@ export function MigrationPlanDetailPage() {
           </>
         }
       />
+
+      <AdminObjectMutationRecovery object={planRef} refetchObject={planQ.refetch} refetchChains={chainsQ.refetch} online={online} allowTerminalNotFound testIdPrefix="admin.migration_plan.mutation.recovery" />
 
       {chainsStale ? (
         <LockStateStaleAlert
@@ -830,7 +809,20 @@ export function MigrationPlanDetailPage() {
                         </Button>
                         <ActionButton
                           variant="warn"
-                          onClick={() => batchScheduleM.mutate()}
+                          onClick={() => {
+                            const target = snapshotPlanTarget();
+                            if (!target) return;
+                            batchScheduleM.mutate(Object.freeze({
+                              ...target,
+                              requests: Object.freeze(batchIds.map((vps) => Object.freeze({
+                                vps,
+                                dst_node: Number(schedDstNode),
+                                maintenance_window: schedMaintenanceWindow,
+                                cleanup_data: schedCleanupData,
+                              }))),
+                              stopOnError: batchStopOnError,
+                            }));
+                          }}
                           loading={batchScheduleM.isPending}
                           disabled={!batchInputOk || !scheduleGate.allowed}
                           disabledReason={!batchInputOk ? undefined : !scheduleGate.allowed ? scheduleGate.reason : undefined}
@@ -865,14 +857,15 @@ export function MigrationPlanDetailPage() {
                     </Button>
                     <ActionButton
                       variant="ok"
-                      onClick={() =>
-                        scheduleM.mutate({
+                      onClick={() => {
+                        const target = snapshotPlanTarget();
+                        if (target) scheduleM.mutate(Object.freeze({ ...target, request: Object.freeze({
                           vps: Number(schedVpsId),
-                          dstNode: Number(schedDstNode),
-                          maintenanceWindow: schedMaintenanceWindow,
-                          cleanupData: schedCleanupData,
-                        })
-                      }
+                          dst_node: Number(schedDstNode),
+                          maintenance_window: schedMaintenanceWindow,
+                          cleanup_data: schedCleanupData,
+                        }) }));
+                      }}
                       loading={scheduleM.isPending}
                       disabled={!scheduleInputOk || !scheduleGate.allowed}
                       disabledReason={!scheduleInputOk ? undefined : !scheduleGate.allowed ? scheduleGate.reason : undefined}
@@ -1151,7 +1144,10 @@ export function MigrationPlanDetailPage() {
         confirmLabel={t('common.start')}
         confirmDisabled={!startGate.allowed}
         confirmLoading={startM.isPending}
-        onConfirm={() => startM.mutate()}
+        onConfirm={() => {
+          const target = snapshotPlanTarget();
+          if (target) startM.mutate(Object.freeze({ ...target, request: Object.freeze({ action: 'start' as const }) }));
+        }}
         onCancel={() => setConfirm(null)}
       />
 
@@ -1162,7 +1158,10 @@ export function MigrationPlanDetailPage() {
         confirmLabel={t('common.cancel')}
         confirmDisabled={!cancelGate.allowed}
         confirmLoading={cancelM.isPending}
-        onConfirm={() => cancelM.mutate()}
+        onConfirm={() => {
+          const target = snapshotPlanTarget();
+          if (target) cancelM.mutate(Object.freeze({ ...target, request: Object.freeze({ action: 'cancel' as const }) }));
+        }}
         onCancel={() => setConfirm(null)}
       />
 
@@ -1174,7 +1173,10 @@ export function MigrationPlanDetailPage() {
         confirmLabel={t('common.delete')}
         confirmDisabled={!deleteGate.allowed}
         confirmLoading={deleteM.isPending}
-        onConfirm={() => deleteM.mutate()}
+        onConfirm={() => {
+          const target = snapshotPlanTarget();
+          if (target) deleteM.mutate(Object.freeze({ ...target, request: Object.freeze({ action: 'delete' as const }) }));
+        }}
         onCancel={() => setConfirm(null)}
       />
 

@@ -1,6 +1,5 @@
 import React from 'react';
 import { AlertCircle, CheckCircle2, Circle, HardDrive, KeyRound, Network, Plus, Server, SlidersHorizontal } from 'lucide-react';
-
 import { useI18n } from '../../../app/i18n';
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
@@ -14,6 +13,7 @@ import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import type { Location } from '../../../lib/api/infra';
 import type { Node } from '../../../lib/api/nodes';
 import type { OsTemplate } from '../../../lib/api/osTemplates';
+import { isMissingActionStateError } from '../../../lib/api/haveapi';
 import { formatErrorMessage } from '../../../lib/errors';
 import {
   formatMib,
@@ -25,11 +25,9 @@ import {
   type FormState,
   type HiddenAdminTarget,
 } from './VpsCreateModel';
-
+import { VpsCreateOutcomeAlert } from './VpsCreateOutcomeAlert';
 type UpdateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-
 type TemplateGroup = [string, OsTemplate[]];
-
 function fieldLabel(text: string) {
   return <label className="mb-1 block text-sm font-medium text-fg">{text}</label>;
 }
@@ -356,7 +354,17 @@ export function CreateReviewCard(props: {
   validationKeys: string[];
   submitted: boolean;
   createError: unknown;
+  outcomePending?: boolean;
+  outcomePhase?: 'uncertain' | 'accepted';
+  outcomeActionStateId?: number;
+  outcomeReviewed?: boolean;
+  outcomeReviewPending?: boolean;
+  outcomeReviewError?: string | null;
+  outcomeCandidateVpsId?: number | null;
   isPending: boolean;
+  submitDisabled?: boolean;
+  onReviewUncertain?: () => void;
+  onAcknowledgeUncertain?: () => void;
   onSubmit: () => void;
 }) {
   const { t } = useI18n();
@@ -406,15 +414,33 @@ export function CreateReviewCard(props: {
           </Alert>
         ) : null}
 
-        {props.createError && props.validationKeys.length === 0 ? (
+        {props.outcomePending ? (
+          <Alert variant="info" title={t('vps.create.pending.title')} testId="vps.create.pending">
+            {t('vps.create.pending.body')}
+          </Alert>
+        ) : props.outcomePhase ? (
+          <VpsCreateOutcomeAlert
+            phase={props.outcomePhase}
+            error={props.createError}
+            actionStateId={props.outcomeActionStateId}
+            reviewed={Boolean(props.outcomeReviewed)}
+            reviewPending={Boolean(props.outcomeReviewPending)}
+            reviewError={props.outcomeReviewError}
+            candidateVpsId={props.outcomeCandidateVpsId}
+            onReview={props.onReviewUncertain}
+            onAcknowledge={props.onAcknowledgeUncertain}
+          />
+        ) : props.createError && props.validationKeys.length === 0 ? (
           <Alert variant="danger" title={t('vps.create.error.title')} testId="vps.create.error">
-            {formatErrorMessage(props.createError)}
+            {isMissingActionStateError(props.createError)
+              ? t('vps.create.error.missing_action_state')
+              : formatErrorMessage(props.createError)}
           </Alert>
         ) : null}
 
         <Button
           onClick={props.onSubmit}
-          disabled={props.isPending}
+          disabled={props.isPending || props.submitDisabled}
           loading={props.isPending}
           testId="vps.create.submit"
           className="w-full justify-center"

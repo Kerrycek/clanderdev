@@ -50,6 +50,35 @@ function mountItemControl(page: Page, mountId: number, control: 'dataset' | 'del
 }
 
 test.describe('@smoke VPS storage tab mounts', () => {
+  test('resets a mount deletion confirm when the VPS route changes', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    const mounts = [{
+      id: 1, mountpoint: '/mnt/old', type: 'nfs', mode: 'ro', enabled: true,
+      on_start_fail: 'ignore', use_default_map: true, dataset: { id: 9, name: 'tank/old' },
+    }];
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'user', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET vpses/456': () => ({ vps: { ...vps, id: 456, hostname: 'vps456.example', dataset: null } }),
+        'GET ip_addresses': () => ({ ip_addresses: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'GET vpses/123/mounts': () => ({ mounts }),
+        'GET vpses/456/mounts': () => ({ mounts: [] }),
+      },
+    });
+
+    await page.goto('/app/vps/123/storage');
+    await mountItemControl(page, 1, 'delete').click();
+    await expect(page.getByTestId('vps.storage.mounts.delete_confirm')).toBeVisible();
+    await page.evaluate(() => {
+      window.history.pushState({}, '', '/app/vps/456/storage');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await expect(page.getByTestId('vps.storage.mounts.delete_confirm')).toHaveCount(0);
+    await expect(page.getByTestId('vps.storage.page')).toBeVisible();
+  });
+
   test('creates a user subdataset from the VPS storage entrypoint', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
@@ -214,9 +243,9 @@ test.describe('@smoke VPS storage tab mounts', () => {
     });
 
     await expect(page.getByTestId('vps.storage.mounts.create')).toBeHidden();
-    await expect(page.getByTestId('modal.action_progress')).toBeVisible();
-    await expect(page.getByTestId('modal.action_progress')).toContainText('#703');
-    await page.getByTestId('modal.action_progress.continue').click();
+    await expect(page.getByTestId('modal.action_progress')).toBeHidden();
+    await page.getByTestId('tasks.open-button').click();
+    await expect(page.getByTestId('tasks.row.703')).toBeVisible();
     await expect(mountItem(page, 2)).toBeVisible();
   });
 
@@ -246,7 +275,7 @@ test.describe('@smoke VPS storage tab mounts', () => {
         'GET vpses/123/mounts': () => ({ mounts }),
         'DELETE vpses/123/mounts/1': () => {
           mounts = mounts.filter((m) => m.id !== 1);
-          return { status: true, response: null };
+          return { _meta: { action_state_id: 704 } };
         },
       },
     });

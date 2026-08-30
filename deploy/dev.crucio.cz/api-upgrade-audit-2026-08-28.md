@@ -1,27 +1,39 @@
-# vpsAdmin API upgrade audit — 2026-08-28
+# vpsAdmin API upgrade audit - updated 2026-08-30
 
 This note records the API baseline used while developing WebUI Next. It is an
 operational plan, not an authorization to migrate or restart the API.
 
-## Compared versions
+## Current verified state
 
 | Target | Commit | Version | State |
 | --- | --- | --- | --- |
-| Official `vpsfreecz/vpsadmin` upstream | `4a397464d945772bafe0328d2f2c512381f7400c` | 4.2.1 | Current reference |
-| API serving `dev.crucio.cz` | `10eefaccfef46393dab0b0ec82ef140f760220e8` | 4.1.0 | Running test API |
+| Official `vpsfreecz/vpsadmin` upstream | `3ded1bb20e9eceab2e47152cc438aaebda98f767` | 4.2.1 | Current reference as of 2026-08-30 11:55 UTC |
+| API process serving `dev.crucio.cz` | `4a397464d945772bafe0328d2f2c512381f7400c` | 4.2.1 | Clean release, running since 2026-08-29 18:38 CEST |
+| Legacy checkout on the test host (`/opt/vpsadmin`) | `10eefaccfef46393dab0b0ec82ef140f760220e8` | 4.1.0 | Stale and dirty; not used by the API service |
 | Original local reference checkout | `eb9c9dd6b7beedf713a0da50a9be68025285463d` | 4.1.0 | Stale; preserve local files |
 
-The running test API is 191 commits behind the official upstream. The HaveAPI
-protocol remains version 7.0, but the implementation and database schema have
-changed materially.
+The running API is on the current 4.2.1 release line. It is one upstream commit
+behind; that commit only updates gem dependencies. The HaveAPI protocol remains
+version 7.0. No WebUI capability or migration required by this beta pass is
+missing from the running release.
 
 A clean, detached reference checkout of the current upstream was created at
 `/Users/kerrycze/git/vpsadmin-upstream-current`. The original local checkout
 was not reset because it contains user-owned files under `tools/ux-usage/`.
 
-## Why this is not a pull-and-restart upgrade
+The active systemd process was verified to have its working directory at
+`/srv/vpsadmin-release/releases/4a397464d945772bafe0328d2f2c512381f7400c/api`.
+The release checkout is clean. The core and plugin migration logs show all 17
+core and 3 plugin migrations completing successfully, including the latest OOM
+counter migration. The public API description and `dev.crucio.cz` health checks
+return HTTP 200.
 
-The transition from the running commit to the current upstream includes:
+The unrelated console keyboard changes remain only in `/opt/vpsadmin`; the
+running service does not load code from that checkout.
+
+## Why future upgrades are not pull-and-restart operations
+
+The completed transition from the legacy checkout to 4.2.1 included:
 
 - 17 new core database migrations;
 - 3 new plugin migrations, in addition to one already pending outage-report
@@ -31,14 +43,14 @@ The transition from the running commit to the current upstream includes:
   security-advisory evidence, DNS transfer cleanup, livepatch events, MFA and
   OOM counters.
 
-The API checkout on the test machine also contains unrelated local console
-keyboard changes. It must not be pulled, reset, or used as the next release
-checkout.
+The legacy API checkout on the test machine still contains unrelated local
+console keyboard changes. It must not be pulled, reset, or used as a future
+release checkout.
 
 Updating only the code can leave the API running against an incompatible
 schema. Rolling back only the code is likewise insufficient after migrations.
 
-## Required upgrade procedure
+## Required procedure for the next API upgrade
 
 Perform the API upgrade as a separate, explicitly approved maintenance task:
 
@@ -62,9 +74,10 @@ Perform the API upgrade as a separate, explicitly approved maintenance task:
 
 ## WebUI compatibility rule
 
-Until the maintenance upgrade is approved, WebUI Next should use the current
-official upstream as the canonical contract while testing important actions
-against the currently deployed API commit. A feature that depends on a newer
-endpoint or field must be capability-gated and show an honest unavailable
-state on the old API; it must not fabricate data or silently submit a different
-payload.
+WebUI Next should use the official 4.2.1 contract while testing important
+actions against the exact deployed release commit. Updating the test API by the
+single remaining dependency-only commit should be handled as a separate pinned
+release after its dependency build and smoke tests pass; it is not required to
+certify the current WebUI beta candidate. A feature that depends on a newer
+endpoint or field must still be capability-gated and show an honest unavailable
+state; it must not fabricate data or silently submit a different payload.

@@ -151,9 +151,17 @@ test('@pr-smoke @pr-smoke-mobile user network page lists only own addresses and 
       },
       'POST ip_addresses/103/assign': () => ({
         ip_address: { ...freePrivate, network_interface: { id: 501, name: 'eth0', vps: { id: 123 } } },
+        _meta: { action_state_id: 9103 },
       }),
       'POST ip_addresses/102/assign': () => ({
         ip_address: { ...ownedDetached, network_interface: { id: 501, name: 'eth0', vps: { id: 123 } } },
+        _meta: { action_state_id: 9102 },
+      }),
+      'GET action_states/9103': () => ({
+        action_state: { id: 9103, label: 'Assign IP', status: true, finished: true, current: 1, total: 1 },
+      }),
+      'GET action_states/9102': () => ({
+        action_state: { id: 9102, label: 'Assign IP', status: true, finished: true, current: 1, total: 1 },
       }),
     },
   });
@@ -236,6 +244,7 @@ test('@pr-smoke @pr-smoke-mobile user network page lists only own addresses and 
 
   await visibleAddressItem(page, 102).getByTestId('network.user.ip.102.assign').click();
   await page.getByTestId('network.user.assign.vps').selectOption('123');
+  await expect(page.getByTestId('network.user.assign.continue')).toBeEnabled();
   await page.getByTestId('network.user.assign.continue').click();
   await expect(page.getByTestId('network.user.assign.address')).toContainText('2001:db8::10/128');
 

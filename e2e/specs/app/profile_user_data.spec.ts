@@ -90,11 +90,7 @@ test.describe('Profile: user data templates', () => {
         },
 
         'POST vps_user_data/102/deploy': async () => {
-          return {
-            status: true,
-            response: null,
-            _meta: { state_id: 999 },
-          };
+          return { _meta: { action_state_id: 999 } };
         },
 
         'GET action_states/999': async () => {
@@ -163,4 +159,79 @@ test.describe('Profile: user data templates', () => {
 
     await expect(page.getByTestId('profile.user_data.row.102')).toHaveCount(0);
   });
+
+  for (const failure of ['missing action-state', 'transport loss'] as const) {
+    test(`deploy fails closed after ${failure} and does not repeat through reload`, async ({ page }) => {
+      test.setTimeout(90_000);
+      await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_SESSION' });
+
+      let deployRequests = 0;
+      await installHaveApiMock(page, {
+        authorize: {
+          user: { id: 1, login: 'e2e', level: 1 },
+          identity: { id: 1, provider: 'mock' },
+        },
+        handlers: {
+          'GET vps_user_data': () => ({
+            vps_user_data: [
+              {
+                id: 101,
+                label: 'Base cloud-init',
+                format: 'cloudinit_config',
+                content: '#cloud-config\n',
+                created_at: nowIso(),
+                updated_at: nowIso(),
+              },
+            ],
+          }),
+          'POST vps_user_data/101/deploy': () => {
+            deployRequests += 1;
+            return { _meta: {} };
+          },
+        },
+      });
+
+      if (failure === 'transport loss') {
+        await page.route('**/api/v7.0/vps_user_data/101/deploy', async (route) => {
+          deployRequests += 1;
+          await route.abort('connectionreset');
+        });
+      }
+
+      const openAndSubmit = async () => {
+        await page.getByTestId('profile.user_data.row.101.deploy').click();
+        await expect(page.getByTestId('profile.user_data.deploy.drawer')).toBeVisible();
+        await page.getByTestId('profile.user_data.deploy.vps').fill('#500');
+        await page.getByTestId('profile.user_data.deploy.submit').click();
+      };
+
+      await page.goto('/app/profile/user-data');
+      await openAndSubmit();
+      await expect(
+        page
+          .getByTestId('toast.viewport')
+          .getByText(
+            failure === 'missing action-state'
+              ? /missing action_state_id/i
+              : /failed to fetch|network|connection/i
+          )
+      ).toBeVisible();
+      expect(deployRequests).toBe(1);
+
+      // Retrying from the still-open drawer must be stopped by the durable guard.
+      await page.getByTestId('profile.user_data.deploy.submit').click();
+      await expect(
+        page.getByTestId('toast.viewport').getByText(/previous operation still has an uncertain outcome/i)
+      ).toBeVisible();
+      expect(deployRequests).toBe(1);
+
+      await page.reload();
+      await expect(page.getByTestId('profile.user_data.row.101')).toBeVisible();
+      await openAndSubmit();
+      await expect(
+        page.getByTestId('toast.viewport').getByText(/previous operation still has an uncertain outcome/i)
+      ).toBeVisible();
+      expect(deployRequests).toBe(1);
+    });
+  }
 });

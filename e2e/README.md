@@ -227,6 +227,134 @@ from another run. The runner intentionally does not cover users or VPS creation:
 those workflows require environment, node, resource-package and ownership
 prerequisites that must not be guessed on a live cluster.
 
+### Destructive live VPS beta certification
+
+`scripts/live-vps-certification.mjs` is a separate, deliberately destructive
+manual certification for the VPS beta path. It may run only against the exact
+origin `https://dev.crucio.cz`; it is not a CI test and has no production mode.
+The runner creates at most one stopped VPS through the real admin UI, requests
+zero public IPv4, private IPv4 and IPv6 addresses, exercises only UI
+start/restart/stop, and then hard-deletes that exact VPS through an independent
+HaveAPI client. It never sets a password, deploys an SSH key or opens a console.
+
+The private fixture is an allowlist, not a discovery hint. Every ID and label is
+re-fetched before the first POST, relationships must identify one exact
+environment/location/node/template combination, the owner must explicitly be
+allowed to create another VPS, and the owner allocations must prove enough
+`value` and `free` capacity. Resource definitions, bounds and step sizes are
+also checked. Missing or ambiguous capacity, node maintenance/lock state, or
+any fixture mismatch stops the run before mutation.
+
+Example fixture (replace every placeholder with a separately audited dev
+fixture; do not commit this file):
+
+```json
+{
+  "apiProtocolVersion": "7.0",
+  "apiFingerprint": {
+    "version": "4.2.1",
+    "revision": "4a397464d945772bafe0328d2f2c512381f7400c"
+  },
+  "fixtures": {
+    "owner": { "id": 100, "expectedLabel": "live-cert-owner" },
+    "node": { "id": 200, "expectedLabel": "live-cert-node" },
+    "osTemplate": { "id": 300, "expectedLabel": "live-cert-template" },
+    "environment": { "id": 400, "expectedLabel": "live-cert-environment" },
+    "location": { "id": 500, "expectedLabel": "live-cert-location" }
+  },
+  "resources": {
+    "cpu": 1,
+    "memory": 1024,
+    "diskspace": 1024,
+    "swap": 0
+  }
+}
+```
+
+The fixture must be a regular private file (`chmod 600`). The administrator
+token may be supplied through `E2E_LIVE_ADMIN_TOKEN`, but a private
+`E2E_LIVE_ADMIN_TOKEN_FILE` is preferred so it does not end up in shell history;
+when used, that file must also be mode `0600`. The API source version/revision
+and exact SHA-256 of the public `/v7.0/` description are pinned in code. The
+public description hash proves that the deployed API contract matches the
+audited artifact; the revision is a private source attestation, not a
+cryptographic proof that the running process contains that Git commit.
+
+The disposable one-hour administrator session is created by the official
+`POST /v7.0/user_sessions` `NewTokenDetached` flow. Its `auth_type=token`
+credential is sent exclusively as `X-HaveAPI-Auth-Token` on API requests. The
+OAuth resume header `X-HaveAPI-OAuth2-Token` is intentionally rejected and no
+authentication header is attached to static asset requests.
+
+Run the certification manually with a disposable dev administrator token:
+
+```sh
+chmod 600 /secure/path/to/dev-admin-token /secure/path/to/dev-vps-fixture.json
+
+E2E_LIVE_VPS_MUTATIONS=1 \
+E2E_BASE_URL=https://dev.crucio.cz \
+E2E_LIVE_ADMIN_TOKEN_FILE=/secure/path/to/dev-admin-token \
+E2E_LIVE_VPS_FIXTURE_FILE=/secure/path/to/dev-vps-fixture.json \
+npm run e2e:live:vps
+```
+
+Safety and evidence rules:
+
+- `E2E_LIVE_VPS_MUTATIONS=1`, the exact target, a level-90+ token and the
+  complete private fixture are all mandatory. Before any token-bearing request,
+  the runner opens TLS with exact `dev.crucio.cz` host/SNI and verifies the
+  code-owned SHA-256 pin and validity window of the current self-signed leaf.
+  Only that successful proof enables the self-signed TLS exception for the run.
+  Every API request then opens its own pinned TLS socket and verifies that exact
+  socket before constructing the authentication header or body. Chromium uses
+  the code-owned SPKI allowlist and the browser aborts every cross-origin or
+  credential-bearing URL. Browser API traffic is fulfilled only through the
+  same token-bearing pinned client, while static traffic uses the token-free
+  pinned client. Neither path uses browser network continuation; every 3xx is
+  aborted before Chromium can follow it or replay a token/body. Certificate
+  rotation requires reviewed leaf/SPKI pin and audited trust-state updates; no
+  fixture or environment variable can replace them. The private token file is
+  validated locally during fail-fast preflight, but no token-bearing network
+  context or request exists before a per-connection TLS proof.
+- A private intent ledger is written before the create POST. The returned
+  action-state ID, transaction-chain proof, exact create payload digest and
+  resulting VPS ID are recorded without the token.
+- Before any browser request reaches the network, a route-time allowlist permits
+  only read-only GET/HEAD requests plus exactly one ordered create, start,
+  restart and stop POST. The create body must contain only the top-level `vps`
+  key and match the pre-registered canonical payload digest; lifecycle bodies
+  must be exactly empty. Every other
+  same-origin POST/PUT/PATCH/DELETE, a duplicate submit, or an out-of-order
+  lifecycle action is aborted and recorded as a security failure. WebSockets
+  are entirely blocked because none is required by this certification path.
+- Every mutation passes only when both the action state is finished/successful
+  and its transaction chain is `done`. Polling is bounded; timeout, conflicting
+  evidence or a missing proof fails the run.
+- An ambiguous create is reconciled only by the exact guarded hostname, info
+  marker, owner, node, template, nested environment and zero IP assignments.
+  The normal response path also requests `_meta[count]=true`, rejects a missing
+  or truncated `total_count`, and requires one globally unique candidate to stay
+  unique across three bounded observations before it can be verified. Multiple
+  exact candidates are all recorded by ID for manual review; none is
+  automatically deleted. The runner never retries a create blindly and never
+  deletes a merely similar VPS.
+- Cleanup runs from `finally`, re-fetches the full identity, requires zero IP
+  assignments and an explicit `is_running=false`, sends `lazy=false`, waits for
+  both deletion proofs, and confirms object absence only through an
+  authenticated exact guarded-identity list query pinned to the ledger's VPS
+  ID, hostname, owner and node, whose valid `status:true` envelope has
+  `total_count=0` and an empty `vpses` array. Authentication errors, 5xx,
+  `status:false`, malformed responses and HTML 404 pages fail closed for manual
+  review; none is interpreted as absence.
+- Ledgers and reports are under `work/live-vps-certification/` with directory
+  mode `0700` and file mode `0600`. Token values are redacted. Authenticated
+  screenshots are disabled unless `E2E_RECORD_ARTIFACTS=1` is explicitly set;
+  those artifacts remain private and must never be committed.
+
+Use `E2E_CHROMIUM_EXECUTABLE_PATH=/path/to/chromium` only when the managed
+Playwright browser is unavailable. This does not relax any origin, identity,
+capacity, evidence or cleanup gate.
+
 ## Auth model
 
 Most tests use `bootstrapVpsAdminWindow()` plus `installHaveApiMock()` to emulate an authenticated HaveAPI session.
