@@ -221,6 +221,56 @@ test.describe('@workflow-matrix VPS create failure regressions', () => {
     expect(postCount).toBe(1);
   });
 
+  test('waits for the exact accepted create task before requesting the new VPS detail', async ({ page }) => {
+    let createFinished = false;
+    let actionStateReads = 0;
+    let detailReads = 0;
+    const createdVps = {
+      id: 156,
+      hostname: 'eventually-visible.example',
+      user: { id: 2, login: 'member' },
+      node: { id: 3, name: 'node3', location: { id: 2, label: 'Praha' } },
+      object_state: 'active',
+      running: false,
+    };
+    await installCreateMock(page, () => ({
+      vps: createdVps,
+      _meta: { action_state_id: 956 },
+    }), {
+      'GET action_states/956': () => {
+        actionStateReads += 1;
+        return {
+          action_state: {
+            id: 956,
+            label: 'Create VPS',
+            finished: createFinished,
+            status: true,
+            current: createFinished ? 1 : 0,
+            total: 1,
+          },
+        };
+      },
+      'GET vpses/156': () => {
+        detailReads += 1;
+        return { vps: createdVps };
+      },
+    });
+
+    await page.goto('/app/vps/new');
+    await fillCreateForm(page, 'eventually-visible.example');
+    await page.getByTestId('vps.create.submit').click();
+
+    await expect(page).toHaveURL(/\/app\/vps\/156$/);
+    await expect(page.getByTestId('vps.detail.creating')).toBeVisible();
+    await expect.poll(() => actionStateReads).toBeGreaterThan(0);
+    expect(detailReads).toBe(0);
+
+    createFinished = true;
+    await expect(page.getByTestId('vps.header')).toBeVisible({ timeout: 10_000 });
+    expect(detailReads).toBeGreaterThan(0);
+    await expect(page.getByTestId('vps.detail.error')).toHaveCount(0);
+  });
+
   test('does not send create when the durable guard cannot be written', async ({ page }) => {
     let postCount = 0;
     await page.addInitScript(() => {

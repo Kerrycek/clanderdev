@@ -5,7 +5,10 @@ import { ChevronDown, ChevronUp, Info } from 'lucide-react';
 import { useAuth } from '../../app/auth';
 import { useI18n } from '../../app/i18n';
 import { useTheme } from '../../app/theme';
-import { fetchContextualHelpBoxes } from '../../lib/api/helpBoxes';
+import {
+  fetchContextualHelpBoxes,
+  type ContextualHelpAccessMode,
+} from '../../lib/api/helpBoxes';
 import { buildHelpBoxesManageUrl, resolveHelpBoxContext, type HelpBoxScope } from '../../lib/helpBoxContext';
 import { Button } from '../ui/Button';
 import { buttonClassName } from '../ui/buttonStyles';
@@ -49,13 +52,27 @@ export function ContextualHelpPanel(props: {
   const [expanded, setExpanded] = useState<boolean>(() => loadExpandedPreference());
 
   const ctx = useMemo(() => resolveHelpBoxContext(props.pathname, props.scope), [props.pathname, props.scope]);
+  const accessMode: ContextualHelpAccessMode | null =
+    auth.status === 'authenticated'
+      ? 'authenticated'
+      : auth.status === 'anonymous'
+        ? 'public'
+        : null;
 
   const q = useQuery({
-    queryKey: ['help_boxes', 'view', props.scope, ctx?.page ?? null, ctx?.action ?? null],
-    enabled: Boolean(ctx?.page && ctx?.action),
+    queryKey: [
+      'help_boxes',
+      'view',
+      props.scope,
+      ctx?.page ?? null,
+      ctx?.action ?? null,
+      accessMode,
+    ],
+    enabled: Boolean(ctx?.page && ctx?.action && accessMode),
     refetchOnWindowFocus: false,
     staleTime: 60_000,
-    queryFn: async () => (await fetchContextualHelpBoxes(ctx!.page, ctx!.action)).data,
+    queryFn: async () =>
+      (await fetchContextualHelpBoxes(ctx!.page, ctx!.action, accessMode!)).data,
   });
 
   const boxes = useMemo(

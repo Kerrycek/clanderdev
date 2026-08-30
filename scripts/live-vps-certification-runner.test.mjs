@@ -420,6 +420,58 @@ test('browser certification blocks every WebSocket before it can reach a server'
   assert.doesNotMatch(source, /webSocket\.connectToServer\(/);
 });
 
+test('browser observability records every HTTP and transport failure and keeps the verdict strict', () => {
+  const source = fs.readFileSync(RUNNER_PATH, 'utf8');
+  const observersStart = source.indexOf("page.on('console'");
+  const observersEnd = source.indexOf("\n\n  await check('create exactly one guarded", observersStart);
+  assert.ok(observersStart >= 0 && observersEnd > observersStart, 'browser observers must remain inspectable');
+  const observers = source.slice(observersStart, observersEnd);
+
+  assert.match(observers, /page\.on\('response'/);
+  assert.match(observers, /response\.status\(\) >= 400/);
+  assert.match(observers, /browserHttpFailures\.push\(\{[\s\S]*method:[\s\S]*status:[\s\S]*path:[\s\S]*at:/);
+  assert.doesNotMatch(observers, /response\.status\(\) >= 500/);
+  assert.match(observers, /page\.on\('requestfailed'/);
+  assert.match(observers, /browserRequestFailures\.push\(\{[\s\S]*method:[\s\S]*path:[\s\S]*failure:[\s\S]*at:/);
+  assert.match(observers, /sanitizeBrowserPath\(request\.url\(\), token\)/);
+  assert.match(observers, /sanitizeText\(request\.failure\(\)\?\.errorText/);
+
+  assert.match(observers, /location: sanitizeBrowserLocation\(message\.location\(\), token\)/);
+  const locationStart = source.indexOf('function sanitizeBrowserLocation(');
+  const locationEnd = source.indexOf('\n\nfunction readPrivateFile(', locationStart);
+  const locationSource = source.slice(locationStart, locationEnd);
+  assert.match(locationSource, /path: sanitizeBrowserPath/);
+  assert.match(locationSource, /line:/);
+  assert.match(locationSource, /column:/);
+
+  const sanitizerStart = source.indexOf('function sanitizeBrowserPath(');
+  const sanitizerEnd = source.indexOf('\n\nfunction sanitizeBrowserLocation(', sanitizerStart);
+  const sanitizerSource = source.slice(sanitizerStart, sanitizerEnd);
+  assert.match(sanitizerSource, /new URL\(String\(rawUrl\)\)\.pathname/);
+  assert.match(sanitizerSource, /split\(\/\[\?\#\]\//);
+  assert.match(sanitizerSource, /sanitizeText\(pathname, token\)/);
+
+  const reportStart = source.indexOf('function writeReport()');
+  const reportEnd = source.indexOf('\n\npersistLedger();', reportStart);
+  const reportSource = source.slice(reportStart, reportEnd);
+  assert.match(reportSource, /browserHttpFailures,/);
+  assert.match(reportSource, /browserRequestFailures,/);
+
+  assert.equal(
+    [...source.matchAll(/browserHttpFailures\.length > 0/g)].length,
+    2,
+    'both persisted status and process verdict must fail on any browser HTTP error'
+  );
+  assert.equal(
+    [...source.matchAll(/browserRequestFailures\.length > 0/g)].length,
+    2,
+    'both persisted status and process verdict must fail on any failed browser request'
+  );
+  assert.match(source, /browserHttpErrors: browserHttpFailures\.length/);
+  assert.match(source, /browserRequestErrors: browserRequestFailures\.length/);
+  assert.doesNotMatch(source, /session\.json/, 'the strict observer must not special-case a known endpoint');
+});
+
 test('normal create proves stable global run-marker uniqueness before verification', () => {
   const source = fs.readFileSync(RUNNER_PATH, 'utf8');
   const createStart = source.indexOf('async function createVpsThroughUi()');

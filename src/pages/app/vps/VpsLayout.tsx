@@ -46,6 +46,10 @@ import { useNetworkStatus } from '../../../lib/useNetworkStatus';
 import { deriveChainLockState } from '../../../lib/lockState';
 import { primarySshIpAddress } from './VpsOverviewModel';
 import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
+import {
+  resolvePendingVpsCreateActionStateId,
+  shouldDeferVpsDetailQuery,
+} from './VpsDetailVisibility';
 export function VpsLayout() {
   const { basePath, mode } = useAppMode();
   const auth = useAuth();
@@ -67,16 +71,35 @@ export function VpsLayout() {
   const tierARefetchMs = useTierAIntervalMs();
   const fastPollMs = useFastPollIntervalMs();
 
+  const pendingCreateActionStateId = useMemo(
+    () => resolvePendingVpsCreateActionStateId(location.state, chrome.trackedActionStates, vpsId),
+    [chrome.trackedActionStates, location.state, vpsId],
+  );
+  const pendingCreateStateQ = useQuery({
+    queryKey: ['action_state', 'show', { id: pendingCreateActionStateId ?? -1 }],
+    queryFn: async () => (await fetchActionState(pendingCreateActionStateId!)).data,
+    enabled: pendingCreateActionStateId !== undefined,
+    retry: false,
+    refetchInterval: (query) => (
+      (query.state.data as { finished?: boolean } | undefined)?.finished ? false : fastPollMs
+    ),
+  });
+  const deferVpsDetailQuery = shouldDeferVpsDetailQuery(
+    pendingCreateActionStateId,
+    pendingCreateStateQ.data,
+    pendingCreateStateQ.isError,
+  );
+
   const vpsQ = useQuery({
     queryKey: ['vps', 'show', { id: vpsId }],
     queryFn: async () => (await fetchVps(vpsId, { includes: 'node__location__environment,user,dns_resolver,user_namespace_map,os_template,dataset' })).data,
-    enabled: Number.isFinite(vpsId) && vpsId > 0,
+    enabled: Number.isFinite(vpsId) && vpsId > 0 && !deferVpsDetailQuery,
   });
 
   const ipsQ = useQuery({
     queryKey: ['ip_address', 'list', { vpsId, limit: 250 }],
     queryFn: async () => (await fetchIpAddressesForVps(vpsId, { limit: 250 })).data,
-    enabled: Number.isFinite(vpsId) && vpsId > 0,
+    enabled: Number.isFinite(vpsId) && vpsId > 0 && !deferVpsDetailQuery,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
@@ -84,7 +107,7 @@ export function VpsLayout() {
   const chainsQ = useQuery({
     queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: vpsId, limit: 10 }],
     queryFn: async () => (await fetchTransactionChains({ className: 'Vps', rowId: vpsId, limit: 10 })).data,
-    enabled: Number.isFinite(vpsId) && vpsId > 0,
+    enabled: Number.isFinite(vpsId) && vpsId > 0 && !deferVpsDetailQuery,
     refetchInterval: tierARefetchMs,
   });
 
@@ -276,6 +299,7 @@ export function VpsLayout() {
     [basePath, t, vpsId]
   );
 
+  if (deferVpsDetailQuery) return <LoadingState testId="vps.detail.creating" />;
   if (vpsQ.isLoading) return <LoadingState testId="vps.detail.loading" />;
 
   if (vpsQ.isError) {

@@ -118,6 +118,34 @@ function safeError(error, token) {
   return sanitizeText(error instanceof Error ? error.message : String(error), token);
 }
 
+function sanitizeBrowserPath(rawUrl, token) {
+  let pathname;
+  try {
+    pathname = new URL(String(rawUrl)).pathname;
+  } catch {
+    pathname = String(rawUrl ?? '').split(/[?#]/, 1)[0];
+  }
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch {
+    // Keep malformed percent-encoding inspectable without risking a reporter failure.
+  }
+  return sanitizeText(pathname, token).slice(0, 300);
+}
+
+function sanitizeBrowserLocation(location, token) {
+  const rawLocation = location && typeof location === 'object' ? location : {};
+  return {
+    path: sanitizeBrowserPath(rawLocation.url ?? '', token),
+    line: Number.isSafeInteger(rawLocation.lineNumber) && rawLocation.lineNumber >= 0
+      ? rawLocation.lineNumber
+      : null,
+    column: Number.isSafeInteger(rawLocation.columnNumber) && rawLocation.columnNumber >= 0
+      ? rawLocation.columnNumber
+      : null,
+  };
+}
+
 function readPrivateFile(filePath, label) {
   const absolutePath = assertNoSymlinkedVpsArtifactPath(path.resolve(filePath));
   const stat = fs.lstatSync(absolutePath);
@@ -367,7 +395,8 @@ let browserMutationGuard;
 let testError = null;
 let cleanupError = null;
 const checks = [];
-const responseFailures = [];
+const browserHttpFailures = [];
+const browserRequestFailures = [];
 const consoleFailures = [];
 const artifactFailures = [];
 const securityFailures = [];
@@ -1176,7 +1205,9 @@ function writeReport() {
     cleanup,
     testError: testError ? safeError(testError, token) : null,
     cleanupError: cleanupError ? safeError(cleanupError, token) : null,
-    responseFailures,
+    responseFailures: browserHttpFailures.filter((entry) => entry.status >= 500),
+    browserHttpFailures,
+    browserRequestFailures,
     consoleFailures,
     artifactFailures,
     securityFailures,
@@ -1378,14 +1409,38 @@ try {
   });
   page = await browserContext.newPage();
   page.on('console', (message) => {
-    if (message.type() === 'error') consoleFailures.push({ type: 'console', text: sanitizeText(message.text(), token).slice(0, 500) });
-  });
-  page.on('pageerror', (error) => consoleFailures.push({ type: 'pageerror', text: sanitizeText(error.message, token).slice(0, 500) }));
-  page.on('response', (response) => {
-    if (response.status() >= 500) {
-      const url = new URL(response.url());
-      responseFailures.push({ method: response.request().method(), status: response.status(), path: url.pathname });
+    if (message.type() === 'error') {
+      consoleFailures.push({
+        type: 'console',
+        text: sanitizeText(message.text(), token).slice(0, 500),
+        location: sanitizeBrowserLocation(message.location(), token),
+        at: new Date().toISOString(),
+      });
     }
+  });
+  page.on('pageerror', (error) => consoleFailures.push({
+    type: 'pageerror',
+    text: sanitizeText(error.message, token).slice(0, 500),
+    location: sanitizeBrowserLocation({}, token),
+    at: new Date().toISOString(),
+  }));
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      browserHttpFailures.push({
+        method: response.request().method(),
+        status: response.status(),
+        path: sanitizeBrowserPath(response.url(), token),
+        at: new Date().toISOString(),
+      });
+    }
+  });
+  page.on('requestfailed', (request) => {
+    browserRequestFailures.push({
+      method: request.method(),
+      path: sanitizeBrowserPath(request.url(), token),
+      failure: sanitizeText(request.failure()?.errorText ?? 'unknown browser request failure', token).slice(0, 500),
+      at: new Date().toISOString(),
+    });
   });
 
   await check('create exactly one guarded stopped zero-IP VPS through the real UI', createVpsThroughUi);
@@ -1425,7 +1480,8 @@ try {
   ledger.testStatus = (
     testError ||
     cleanupError ||
-    responseFailures.length > 0 ||
+    browserHttpFailures.length > 0 ||
+    browserRequestFailures.length > 0 ||
     consoleFailures.length > 0 ||
     artifactFailures.length > 0 ||
     securityFailures.length > 0 ||
@@ -1441,7 +1497,8 @@ try {
 const failed = Boolean(
   testError ||
   cleanupError ||
-  responseFailures.length > 0 ||
+  browserHttpFailures.length > 0 ||
+  browserRequestFailures.length > 0 ||
   consoleFailures.length > 0 ||
   artifactFailures.length > 0 ||
   securityFailures.length > 0 ||
@@ -1454,7 +1511,9 @@ console.log(JSON.stringify({
   checks: checks.length,
   failedChecks: checks.filter((entry) => entry.status === 'failed').length,
   cleanup,
-  api5xx: responseFailures.length,
+  api5xx: browserHttpFailures.filter((entry) => entry.status >= 500).length,
+  browserHttpErrors: browserHttpFailures.length,
+  browserRequestErrors: browserRequestFailures.length,
   consoleErrors: consoleFailures.length,
   artifactErrors: artifactFailures.length,
   securityErrors: securityFailures.length,

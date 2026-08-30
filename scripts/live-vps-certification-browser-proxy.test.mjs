@@ -35,6 +35,7 @@ function redirectResponse(status, location) {
 test('real Playwright route blocks API and static redirects before foreign or changed-path targets see a request', async () => {
   const sourceHits = [];
   const foreignHits = [];
+  const sameOriginRedirectTargets = new Set();
   const source = await listen((request, response) => {
     const chunks = [];
     request.on('data', (chunk) => chunks.push(chunk));
@@ -43,7 +44,7 @@ test('real Playwright route blocks API and static redirects before foreign or ch
         sourceHits.push({ url: request.url, headers: request.headers, body: Buffer.concat(chunks).toString('utf8') });
       }
       response.writeHead(200, { 'content-type': 'text/html' });
-      response.end('<!doctype html><title>redirect regression</title>');
+      response.end('<!doctype html><link rel="icon" href="data:,"><title>redirect regression</title>');
     });
   });
   const foreign = await listen((request, response) => {
@@ -73,6 +74,7 @@ test('real Playwright route blocks API and static redirects before foreign or ch
         const location = targetKind === 'same-origin'
           ? `${source.origin}${targetPath}`
           : `${foreign.origin}${targetPath}`;
+        if (targetKind === 'same-origin') sameOriginRedirectTargets.add(targetPath);
         let proxyCalls = 0;
         await page.route(`${source.origin}${originalPath}`, async (route) => {
           await proxyPinnedLiveVpsBrowserRequest({
@@ -144,7 +146,11 @@ test('real Playwright route blocks API and static redirects before foreign or ch
       'blocked'
     );
 
-    assert.deepEqual(sourceHits, [], 'same-origin changed paths must not receive any redirected request');
+    assert.deepEqual(
+      sourceHits.filter((hit) => sameOriginRedirectTargets.has(hit.url)),
+      [],
+      'same-origin changed paths must not receive any redirected request'
+    );
     assert.deepEqual(foreignHits, [], 'foreign origins must not receive any redirected request');
   } finally {
     try {

@@ -135,6 +135,9 @@ describe('VpsCreatePage accepted action binding', () => {
     expect(testState.settleLocalLock).not.toHaveBeenCalled();
     expect(testState.releaseLocalLock).not.toHaveBeenCalled();
     expect(await screen.findByTestId('created-vps')).toBeInTheDocument();
+    expect(router.state.location.state).toEqual({
+      pendingVpsCreate: { vpsId: 123, actionStateId: 456 },
+    });
   });
 
   it('persists an accepted A receipt without projecting a deferred response into user B', async () => {

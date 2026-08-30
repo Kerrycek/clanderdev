@@ -43,6 +43,7 @@ import {
   type HiddenAdminTarget,
   type ResourcePresetId,
 } from './VpsCreateModel';
+import { pendingVpsCreateNavigationState } from './VpsDetailVisibility';
 import {
   CreateAccessHintCard,
   CreateAdvancedHintCard,
@@ -259,7 +260,12 @@ export function VpsCreatePage() {
       chrome.trackActionState(actionStateId, { actionLabelKey: 'action.vps.create.label', objectLabel: variables.objectLabel,
         object: context.acceptedBinding?.object, mutationGeneration: context.acceptedBinding?.mutationGeneration });
       chrome.openTasks();
-      navigate(Number.isFinite(vpsId) ? `${variables.effectiveBasePath}/vps/${vpsId}` : `${variables.effectiveBasePath}/vps`);
+      navigate(
+        Number.isFinite(vpsId) ? `${variables.effectiveBasePath}/vps/${vpsId}` : `${variables.effectiveBasePath}/vps`,
+        Number.isFinite(vpsId)
+          ? { state: pendingVpsCreateNavigationState(vpsId, actionStateId) }
+          : undefined,
+      );
     },
     onError: async (error, variables, context) => {
       const active = context?.active;
