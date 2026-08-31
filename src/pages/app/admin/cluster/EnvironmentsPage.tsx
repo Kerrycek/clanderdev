@@ -9,7 +9,8 @@ import { formatErrorMessage } from '../../../../lib/errors';
 import { formatDurationSeconds } from '../../../../lib/format';
 import { parseBoolParam, parseNonNegativeInt } from '../../../../lib/parse';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
-import { createEnvironment, fetchEnvironments, updateEnvironment, type Environment } from '../../../../lib/api/infra';
+import { createEnvironment, fetchEnvironments, setEnvironmentMaintenance, updateEnvironment, type Environment } from '../../../../lib/api/infra';
+import { MaintenanceControl } from './MaintenanceControl';
 
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
@@ -614,14 +615,19 @@ export function EnvironmentsPage() {
                     </Badge>
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openEdit(env)}
-                      testId={`admin.cluster.environments.row.${env.id}.edit`}
-                    >
-                      {t('common.edit')}
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <MaintenanceControl
+                        value={env.maintenance_lock}
+                        reason={env.maintenance_lock_reason}
+                        label={envLabel(env)}
+                        testId={`admin.cluster.environments.row.${env.id}.maintenance`}
+                        setMaintenance={(opts) => setEnvironmentMaintenance(env.id, opts)}
+                        onChanged={() => qc.invalidateQueries({ queryKey: ['cluster.environments'] })}
+                      />
+                      <Button variant="secondary" size="sm" onClick={() => openEdit(env)} testId={`admin.cluster.environments.row.${env.id}.edit`}>
+                        {t('common.edit')}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               );

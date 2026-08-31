@@ -5,7 +5,6 @@ import { useAppMode } from '../../../app/appMode';
 import { getRuntimeConfig } from '../../../app/config';
 import { useUiSettings } from '../../../app/uiSettings';
 import { useI18n } from '../../../app/i18n';
-import { Alert } from '../../../components/ui/Alert';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { LinkButton } from '../../../components/ui/LinkButton';
 import { DetailShell } from '../../../components/layout/DetailShell';
@@ -44,10 +43,6 @@ export function AdminInfoPage() {
         description={t('admin.info.subtitle')}
         testId="admin.info.header"
       />
-
-      <Alert variant="warn" title={t('admin.info.in_progress.title')}>
-        {t('admin.info.in_progress.body')}
-      </Alert>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card testId="admin.info.session.card">
@@ -128,9 +123,6 @@ export function AdminInfoPage() {
               </div>
               <div className="text-muted">
                 {t('admin.info.runtime.server_sync.field')} <span className="font-mono">{cfg.uiSettings.server.field}</span>
-              </div>
-              <div className="mt-2 text-muted">
-                {t('admin.info.runtime.server_sync.note')}
               </div>
             </div>
           </CardBody>

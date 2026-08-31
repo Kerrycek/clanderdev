@@ -11,6 +11,7 @@ import {
   advisoryCveLabels,
   createSecurityAdvisoryOutageLink,
   createSecurityAdvisoryUpdate,
+  deleteSecurityAdvisoryUpdate,
   deleteSecurityAdvisoryOutageLink,
   fetchSecurityAdvisory,
   fetchAllSecurityAdvisoryUpdates,
@@ -19,6 +20,8 @@ import {
   publishSecurityAdvisory,
   rebuildSecurityAdvisoryAffectedVps,
   updateSecurityAdvisory,
+  updateSecurityAdvisoryUpdate,
+  type SecurityAdvisoryUpdate,
   type SecurityAdvisoryOutageLink,
 } from '../../../../lib/api/securityAdvisories';
 import { fetchLanguages } from '../../../../lib/api/languages';
@@ -44,6 +47,7 @@ import {
 } from './SecurityAdvisoryEditorModal';
 import {
   securityAdvisoryUpdateCreatePayload,
+  securityAdvisoryUpdateTextPayload,
   type SecurityAdvisoryUpdateValues,
 } from './SecurityAdvisoryUpdateModal';
 import { SecurityAdvisoryAffectedPanel } from './SecurityAdvisoryAffectedPanel';
@@ -291,6 +295,37 @@ export function AdminSecurityAdvisoryDetailPage() {
     }
     createUpdateM.mutate(values);
   };
+  const [editingUpdate, setEditingUpdate] = useState<SecurityAdvisoryUpdate | null>(null);
+  const [deleteUpdateTarget, setDeleteUpdateTarget] = useState<SecurityAdvisoryUpdate | null>(null);
+  const editUpdateM = useMutation({
+    mutationFn: (values: SecurityAdvisoryUpdateValues) => {
+      if (!editingUpdate) throw new Error('Missing advisory update');
+      return updateSecurityAdvisoryUpdate(editingUpdate.id, securityAdvisoryUpdateTextPayload(values));
+    },
+    onSuccess: async () => {
+      setEditingUpdate(null);
+      setUpdateError(null);
+      await invalidateDetail();
+      pushToast({ variant: 'ok', title: t('admin.security_advisories.toast.update_saved') });
+    },
+    onError: (error) => {
+      const message = formatErrorMessage(error);
+      setUpdateError(message);
+      pushToast({ variant: 'danger', title: t('admin.security_advisories.toast.update_failed'), body: message });
+    },
+  });
+  const deleteUpdateM = useMutation({
+    mutationFn: () => {
+      if (!deleteUpdateTarget) throw new Error('Missing advisory update');
+      return deleteSecurityAdvisoryUpdate(deleteUpdateTarget.id);
+    },
+    onSuccess: async () => {
+      setDeleteUpdateTarget(null);
+      await invalidateDetail();
+      pushToast({ variant: 'ok', title: t('admin.security_advisories.toast.update_deleted') });
+    },
+    onError: (error) => pushToast({ variant: 'danger', title: t('common.error'), body: formatErrorMessage(error) }),
+  });
 
   const [outageId, setOutageId] = useState('');
   const linkOutageM = useMutation({
@@ -406,6 +441,11 @@ export function AdminSecurityAdvisoryDetailPage() {
           loading={updatesQ.isLoading}
           error={updatesQ.error}
           onCreate={openUpdateCreate}
+          onEdit={(update) => {
+            setUpdateError(null);
+            setEditingUpdate(update);
+          }}
+          onDelete={setDeleteUpdateTarget}
         />
       ) : null}
 
@@ -450,14 +490,26 @@ export function AdminSecurityAdvisoryDetailPage() {
         onRebuildClose={() => setRebuildOpen(false)}
         onRebuildConfirm={() => rebuildM.mutate()}
         updateEditorOpen={updateEditorOpen}
+        editingUpdate={editingUpdate}
+        deleteUpdateTarget={deleteUpdateTarget}
         updateError={updateError}
-        updateSaving={createUpdateM.isPending}
+        updateSaving={createUpdateM.isPending || editUpdateM.isPending}
         onUpdateEditorClose={() => {
           if (createUpdateM.isPending) return;
           setUpdateEditorOpen(false);
           setUpdateError(null);
         }}
         onUpdateSubmit={submitUpdate}
+        onEditUpdateClose={() => {
+          if (!editUpdateM.isPending) {
+            setEditingUpdate(null);
+            setUpdateError(null);
+          }
+        }}
+        onEditUpdateSubmit={(values) => editUpdateM.mutate(values)}
+        onDeleteUpdateClose={() => !deleteUpdateM.isPending && setDeleteUpdateTarget(null)}
+        onDeleteUpdateConfirm={() => deleteUpdateM.mutate()}
+        deleteUpdateSaving={deleteUpdateM.isPending}
         updateConfirmOpen={updateConfirmOpen}
         pendingUpdate={pendingUpdate}
         onUpdateConfirmClose={() => {

@@ -11,6 +11,8 @@ export interface Environment {
   vps_lifetime?: number;
   max_vps_count?: number;
   user_ip_ownership?: boolean;
+  maintenance_lock?: string;
+  maintenance_lock_reason?: string;
 
   [k: string]: unknown;
 }
@@ -25,6 +27,8 @@ export interface Location {
   remote_console_server?: string;
 
   environment?: Environment;
+  maintenance_lock?: string;
+  maintenance_lock_reason?: string;
   [k: string]: unknown;
 }
 
@@ -120,5 +124,23 @@ export async function updateLocation(locationId: number, payload: Record<string,
     path: `/locations/${locationId}`,
     namespace: 'location',
     params: payload,
+  });
+}
+
+export async function setEnvironmentMaintenance(environmentId: number, opts: { lock: boolean; reason?: string }) {
+  return haveApiCall<void>({
+    method: 'POST',
+    path: `/environments/${environmentId}/set_maintenance`,
+    namespace: 'environment',
+    params: { lock: opts.lock, reason: opts.reason },
+  });
+}
+
+export async function setLocationMaintenance(locationId: number, opts: { lock: boolean; reason?: string }) {
+  return haveApiCall<void>({
+    method: 'POST',
+    path: `/locations/${locationId}/set_maintenance`,
+    namespace: 'location',
+    params: { lock: opts.lock, reason: opts.reason },
   });
 }

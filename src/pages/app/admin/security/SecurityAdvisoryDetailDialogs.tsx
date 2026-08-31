@@ -11,6 +11,7 @@ import type { Language } from '../../../../lib/api/languages';
 import type {
   SecurityAdvisory,
   SecurityAdvisoryOutageLink,
+  SecurityAdvisoryUpdate,
 } from '../../../../lib/api/securityAdvisories';
 import { localInputToIso } from '../../../../lib/datetimeLocal';
 import {
@@ -50,10 +51,17 @@ export function SecurityAdvisoryDetailDialogs(props: {
   onRebuildClose: () => void;
   onRebuildConfirm: () => void;
   updateEditorOpen: boolean;
+  editingUpdate: SecurityAdvisoryUpdate | null;
+  deleteUpdateTarget: SecurityAdvisoryUpdate | null;
   updateError: string | null;
   updateSaving: boolean;
   onUpdateEditorClose: () => void;
   onUpdateSubmit: (values: SecurityAdvisoryUpdateValues) => void;
+  onEditUpdateClose: () => void;
+  onEditUpdateSubmit: (values: SecurityAdvisoryUpdateValues) => void;
+  onDeleteUpdateClose: () => void;
+  onDeleteUpdateConfirm: () => void;
+  deleteUpdateSaving: boolean;
   updateConfirmOpen: boolean;
   pendingUpdate: SecurityAdvisoryUpdateValues | null;
   onUpdateConfirmClose: () => void;
@@ -151,6 +159,31 @@ export function SecurityAdvisoryDetailDialogs(props: {
         error={props.updateError}
         onClose={props.onUpdateEditorClose}
         onSubmit={props.onUpdateSubmit}
+      />
+
+      <SecurityAdvisoryUpdateModal
+        open={Boolean(props.editingUpdate)}
+        mode="edit"
+        advisoryId={props.advisoryId}
+        currentState={props.state}
+        update={props.editingUpdate}
+        languages={props.languages}
+        saving={props.updateSaving}
+        error={props.updateError}
+        onClose={props.onEditUpdateClose}
+        onSubmit={props.onEditUpdateSubmit}
+      />
+
+      <ConfirmDialog
+        open={Boolean(props.deleteUpdateTarget)}
+        onCancel={props.onDeleteUpdateClose}
+        onConfirm={props.onDeleteUpdateConfirm}
+        title={t('admin.security_advisories.update.delete_title')}
+        description={t('admin.security_advisories.update.delete_body')}
+        confirmLabel={t('common.delete')}
+        confirmLoading={props.deleteUpdateSaving}
+        danger
+        testId="admin.security_advisory.update.delete_confirm"
       />
 
       <ConfirmDialog

@@ -58,6 +58,7 @@ export function VpsNetworkIpRoutesCard(props: {
   onEditOwner: (ip: IpAddress) => void;
   onFreeRoute: (ip: IpAddress) => void;
   onAssignRoute: (ip: IpAddress) => void;
+  onAddHostAddresses: (ip: IpAddress) => void;
 }) {
   const { t } = useI18n();
   const gate = props.gate;
@@ -160,6 +161,16 @@ export function VpsNetworkIpRoutesCard(props: {
                           </ActionButton> : null}
                         </>
                       ) : null}
+                      {props.canMutate ? <ActionButton
+                        variant="secondary"
+                        size="sm"
+                        testId={`vps.network.ip_addresses.item.${ip.id}.add_hosts`}
+                        disabled={!gate.allowed}
+                        disabledReason={!gate.allowed ? gate.reason : undefined}
+                        onClick={() => props.onAddHostAddresses(ip)}
+                      >
+                        {t('vps.network.host_addresses.create.action')}
+                      </ActionButton> : null}
                       {props.canMutate ? <ActionButton
                         variant="danger"
                         size="sm"

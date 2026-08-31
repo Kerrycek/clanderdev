@@ -14,10 +14,12 @@ import { Spinner } from '../../../components/ui/Spinner';
 import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   assignIpAddressRoute,
+  assignIpAddressRouteWithHostAddress,
   fetchIpAddress,
   fetchIpAddresses,
   type IpAddress,
 } from '../../../lib/api/ipAddresses';
+import { fetchHostIpAddresses } from '../../../lib/api/networking';
 import { fetchNetworkInterfaces } from '../../../lib/api/networkInterfaces';
 import { fetchVpsList, type Vps } from '../../../lib/api/vps';
 import { formatErrorMessage } from '../../../lib/errors';
@@ -43,6 +45,14 @@ import {
   vpsLocationId,
 } from './IpAddressAssignmentModel';
 
+export type IpRouteAssignmentMode = 'route' | 'route_host' | 'route_via';
+
+export function ipRouteAssignmentAction(mode: IpRouteAssignmentMode, routeVia?: number) {
+  return mode === 'route_host'
+    ? { action: 'route_host' as const }
+    : { action: 'route' as const, routeVia: mode === 'route_via' ? routeVia : undefined };
+}
+
 export function AssignIpAddressModal(props: {
   open: boolean;
   onClose: () => void;
@@ -64,6 +74,8 @@ export function AssignIpAddressModal(props: {
   const [kind, setKind] = useState<AssignableIpKind>('ipv4_public');
   const [ipId, setIpId] = useState('');
   const [step, setStep] = useState<1 | 2>(1);
+  const [assignmentMode, setAssignmentMode] = useState<IpRouteAssignmentMode>('route');
+  const [routeViaId, setRouteViaId] = useState('');
 
   useEffect(() => {
     if (!props.open) return;
@@ -72,6 +84,8 @@ export function AssignIpAddressModal(props: {
     setKind(props.initialIp ? assignableIpKind(props.initialIp) : 'ipv4_public');
     setIpId(props.initialIp ? String(props.initialIp.id) : '');
     setStep(1);
+    setAssignmentMode('route');
+    setRouteViaId('');
   }, [props.fixedVps?.id, props.initialIp?.id, props.open]);
 
   const vpsesQ = useQuery({
@@ -140,6 +154,25 @@ export function AssignIpAddressModal(props: {
     });
   }, [availableQ.data, kind, locationId, props.initialIp, props.ownedDetachedIps]);
 
+  const selectedIp = availableIps.find((ip) => String(ip.id) === ipId);
+  const selectedInterface = (interfacesQ.data ?? []).find((item) => String(item.id) === interfaceId);
+  const routeViaQ = useQuery({
+    queryKey: ['host_ip_address', 'route-via', {
+      networkInterface: selectedInterface?.id ?? null,
+      version: selectedIp?.network?.ip_version ?? null,
+    }],
+    queryFn: async () => (await fetchHostIpAddresses({
+      networkInterface: selectedInterface!.id,
+      assigned: true,
+      version: Number(selectedIp!.network?.ip_version),
+      limit: 250,
+      order: 'interface',
+    })).data,
+    enabled: props.open && step === 2 && assignmentMode === 'route_via'
+      && Boolean(selectedInterface && selectedIp?.network?.ip_version),
+    staleTime: 10_000,
+  });
+
   useEffect(() => {
     if (!props.open || ipId || availableIps.length === 0) return;
     setIpId(String(availableIps[0]?.id ?? ''));
@@ -151,8 +184,21 @@ export function AssignIpAddressModal(props: {
   }, [interfaceId, interfacesQ.data, props.open]);
 
   const assignM = useMutation({
-    mutationFn: async (payload: { ip: IpAddress; vps: Vps; networkInterface: number }) =>
-      assignIpAddressRoute(payload.ip.id, { network_interface: payload.networkInterface }),
+    mutationFn: async (payload: {
+      ip: IpAddress;
+      vps: Vps;
+      networkInterface: number;
+      mode: IpRouteAssignmentMode;
+      routeVia?: number;
+    }) => {
+      const assignment = ipRouteAssignmentAction(payload.mode, payload.routeVia);
+      return assignment.action === 'route_host'
+        ? assignIpAddressRouteWithHostAddress(payload.ip.id, { network_interface: payload.networkInterface })
+        : assignIpAddressRoute(payload.ip.id, {
+            network_interface: payload.networkInterface,
+            route_via: assignment.routeVia,
+          });
+    },
     onMutate: async (payload) => {
       // The IP address is the mutated resource. Guarding only the destination
       // VPS would let two tabs assign the same detached address to two
@@ -202,8 +248,6 @@ export function AssignIpAddressModal(props: {
     },
   });
 
-  const selectedIp = availableIps.find((ip) => String(ip.id) === ipId);
-  const selectedInterface = (interfacesQ.data ?? []).find((item) => String(item.id) === interfaceId);
   const selectedIpRef = selectedIp ? objectRef('IpAddress', selectedIp.id) : null;
   const selectedIpLock = selectedIpRef
     ? chrome.localLocks.find((lock) => lock.kind === selectedIpRef.kind && lock.id === selectedIpRef.id)
@@ -214,8 +258,9 @@ export function AssignIpAddressModal(props: {
   const gateReason = props.gate && !props.gate.allowed ? props.gate.reason : undefined;
   const canContinue = !!selectedVps && !!selectedInterface && !!locationId && gateAllowed
     && !(props.initialIp && selectedIpLocked);
-  const canSubmit = canContinue && !!selectedIp && !selectedIpLocked;
-  const error = vpsesQ.error ?? interfacesQ.error ?? availableQ.error ?? assignM.error;
+  const canSubmit = canContinue && !!selectedIp && !selectedIpLocked
+    && (assignmentMode !== 'route_via' || Boolean(routeViaId));
+  const error = vpsesQ.error ?? interfacesQ.error ?? availableQ.error ?? routeViaQ.error ?? assignM.error;
   const errorMessage = error && !selectedIpUncertainLock
     ? isLocalLockPersistenceError(error)
       ? t('vps.mutation.error.guard_storage')
@@ -254,6 +299,8 @@ export function AssignIpAddressModal(props: {
       ip: selectedIp,
       vps: selectedVps,
       networkInterface: selectedInterface.id,
+      mode: assignmentMode,
+      routeVia: assignmentMode === 'route_via' ? Number(routeViaId) : undefined,
     });
   };
 
@@ -460,6 +507,44 @@ export function AssignIpAddressModal(props: {
                 ]}
               />
             )}
+
+            <Select
+              label={t('network.user.assign.mode')}
+              testId="network.user.assign.mode"
+              value={assignmentMode}
+              onChange={(event) => {
+                setAssignmentMode(event.target.value as IpRouteAssignmentMode);
+                setRouteViaId('');
+              }}
+              disabled={assignM.isPending || !selectedIp}
+              options={[
+                { value: 'route', label: t('network.user.assign.mode.route') },
+                { value: 'route_host', label: t('network.user.assign.mode.route_host') },
+                { value: 'route_via', label: t('network.user.assign.mode.route_via') },
+              ]}
+            />
+
+            {assignmentMode === 'route_via' ? (
+              <Select
+                label={t('network.user.assign.route_via')}
+                testId="network.user.assign.route_via"
+                value={routeViaId}
+                onChange={(event) => setRouteViaId(event.target.value)}
+                disabled={routeViaQ.isLoading || assignM.isPending}
+                options={[
+                  {
+                    value: '',
+                    label: routeViaQ.isLoading
+                      ? t('common.loading')
+                      : t('network.user.assign.route_via.placeholder'),
+                  },
+                  ...(routeViaQ.data ?? []).map((host) => ({
+                    value: String(host.id),
+                    label: String(host.addr ?? `#${host.id}`),
+                  })),
+                ]}
+              />
+            ) : null}
           </>
         )}
       </div>

@@ -170,7 +170,7 @@ export const enAdmin_security_advisories = {
   'admin.security_advisories.update.mail_confirm_title': 'Send this update by e-mail?',
   'admin.security_advisories.update.mail_confirm_body': 'The update will be posted and delivered to affected users.',
   'admin.security_advisories.update.delete_title': 'Delete advisory update?',
-  'admin.security_advisories.update.delete_body': 'This removes the update from the advisory history.',
+  'admin.security_advisories.update.delete_body': 'This removes the update from the advisory history. Deleting a retraction update does not restore the parent advisory state.',
   'admin.security_advisories.updates.empty': 'No updates have been posted.',
   'admin.security_advisories.updates.draft_help': 'Publish this draft before posting follow-up updates.',
   'admin.security_advisories.updates.retracted_help': 'This advisory is retracted. Its update history remains available, but no further updates can be posted.',

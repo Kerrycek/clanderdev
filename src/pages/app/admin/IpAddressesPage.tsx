@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
+import { getRuntimeConfig } from '../../../app/config';
 
 import { fetchIpAddresses } from '../../../lib/api/ipAddresses';
 import { fetchLocations, type Location as InfraLocation } from '../../../lib/api/infra';
@@ -40,12 +41,18 @@ import {
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
 import { useProgressiveSuggestedIpQueries } from './ipAddresses/useProgressiveSuggestedIpQueries';
 
+export function legacyIpAddressesUrl(webuiUrl: string | undefined): string | undefined {
+  return webuiUrl ? `${webuiUrl.replace(/\/$/, '')}/?page=networking&action=ip_addresses` : undefined;
+}
+
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
   const toasts = useToasts();
   const navigate = useNavigate();
   const location = useLocation();
+  const webuiUrl = getRuntimeConfig().webuiUrl;
+  const legacyFallbackUrl = legacyIpAddressesUrl(webuiUrl);
   const {
     searchParams: sp,
     setSearchParams: setSp,
@@ -537,10 +544,12 @@ export function IpAddressesPage() {
                 else void listQ.refetch();
               },
             },
-            secondary: {
-              label: t('admin.ip_addresses.open_legacy'),
-              href: `${basePath}/ip-addresses`,
-            },
+            ...(legacyFallbackUrl ? {
+              secondary: {
+                label: t('admin.ip_addresses.open_legacy'),
+                href: legacyFallbackUrl,
+              },
+            } : {}),
           }}
         />
       ) : pageData.length === 0 ? (

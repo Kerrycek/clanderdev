@@ -17,7 +17,6 @@ import { Select } from '../../../components/ui/Select';
 import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import { fetchEnvironments } from '../../../lib/api/infra';
 import {
-  assignIpAddressRoute,
   fetchIpAddress,
   fetchIpAddressesForVps,
   freeIpAddressRoute,
@@ -26,6 +25,7 @@ import {
 } from '../../../lib/api/ipAddresses';
 import {
   assignHostIpAddress,
+  createHostIpAddress,
   deleteHostIpAddress,
   fetchHostIpAddresses,
   freeHostIpAddress,
@@ -36,7 +36,7 @@ import { fetchNetworkInterfaceAccountingForVps, fetchNetworkInterfaces, updateNe
 import { updateVps } from '../../../lib/api/vps';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { gateVpsMutation } from '../../../lib/gates/vps';
-import { ipOwnerUpdateIntent, ipRouteAssignIntent, ipRouteFreeIntent, reconcileIpAddressMutation } from '../../../lib/ipAddressMutationIntent';
+import { ipOwnerUpdateIntent, ipRouteFreeIntent, reconcileIpAddressMutation } from '../../../lib/ipAddressMutationIntent';
 import { objectRef, type ObjectRef } from '../../../lib/objectRef';
 import type { LocalMutationGeneration, LocalMutationIntent } from '../../../lib/localLocks';
 import { preflightVpsNotBusy } from './vpsPreflight';
@@ -44,6 +44,7 @@ import { useVps } from './VpsContext';
 import { VpsNetworkInterfacesCard } from './VpsNetworkInterfacesCard';
 import { VpsNetworkAddressesSection } from './VpsNetworkAddressesSection';
 import { VpsNetworkOverviewCard } from './VpsNetworkOverviewCard';
+import { VpsHostAddressCreateModal } from './VpsHostAddressCreateModal';
 import { AssignIpAddressModal } from '../networking/AssignIpAddressModal';
 import {
   buildNetworkRouteSummary,
@@ -82,8 +83,8 @@ type ToggleMutation = VpsMutationSnapshot & { enable: boolean; reason?: string }
 type PtrMutation = VpsMutationSnapshot & { hostIpId: number; reverseRecordValue: string };
 type HostMutation = VpsMutationSnapshot & { hostIpId: number };
 type AssignHostMutation = HostMutation & { networkInterfaceId: number };
+type CreateHostsMutation = VpsMutationSnapshot & { ipId: number; addresses: string[] };
 type IpMutation = VpsMutationSnapshot & { ipId: number; lockRef: ObjectRef; intent: LocalMutationIntent };
-type AssignRouteMutation = IpMutation & { networkInterfaceId: number };
 type OwnerMutation = IpMutation & { user: number | null; environment: number | null };
 export function VpsNetworkPage() {
   const auth = useAuth();
@@ -146,12 +147,12 @@ export function VpsNetworkPage() {
   const [freeHost, setFreeHost] = useState<HostIpAddress | null>(null);
   const [deleteHost, setDeleteHost] = useState<HostIpAddress | null>(null);
   const [freeRouteIp, setFreeRouteIp] = useState<IpAddress | null>(null);
-  const [assignRouteIp, setAssignRouteIp] = useState<IpAddress | null>(null);
-  const [assignRouteInterface, setAssignRouteInterface] = useState('');
   const [ownerIp, setOwnerIp] = useState<IpAddress | null>(null);
   const [ownerUser, setOwnerUser] = useState('');
   const [ownerEnvironment, setOwnerEnvironment] = useState('');
   const [addIpOpen, setAddIpOpen] = useState(false);
+  const [addIpInitial, setAddIpInitial] = useState<IpAddress | null>(null);
+  const [createHostsRoute, setCreateHostsRoute] = useState<IpAddress | null>(null);
   const snapshotVpsMutation = (): VpsMutationSnapshot => ({
     vpsId,
     vpsLockRef: vpsRef,
@@ -400,6 +401,24 @@ export function VpsNetworkPage() {
     },
     onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
+  const createHostsM = useMutation({
+    mutationFn: async (payload: CreateHostsMutation) => {
+      for (const address of payload.addresses) {
+        await createHostIpAddress({ ip_address: payload.ipId, addr: address });
+      }
+    },
+    onMutate: (payload) => acquireMutationContext(payload),
+    onSuccess: async (_res, variables, context) => {
+      if (variables.vpsId === vpsId) setCreateHostsRoute(null);
+      trackNetworkAction(undefined, 'action.vps.network.host_create.label', context);
+      await refreshNetworkData(variables.vpsId);
+      pushToast({ variant: 'ok', title: t('vps.network.host_addresses.create.toast', { count: variables.addresses.length }) });
+    },
+    onError: (e: any) => {
+      if (e?.code === 'BUSY') chrome.openTasks();
+    },
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
+  });
   const freeRouteRef = freeRouteIp ? objectRef('IpAddress', freeRouteIp.id) : null;
   const freeRouteM = useMutation({
     mutationFn: (payload: IpMutation) => freeIpAddressRoute(payload.ipId),
@@ -417,46 +436,6 @@ export function VpsNetworkPage() {
       if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
   });
-
-  const assignRouteRef = assignRouteIp ? objectRef('IpAddress', assignRouteIp.id) : null;
-  const assignRouteLock = assignRouteRef
-    ? chrome.localLocks.find((lock) => lock.kind === assignRouteRef.kind && lock.id === assignRouteRef.id)
-    : undefined;
-  const assignRouteUncertainLock = assignRouteLock?.uncertain === true ? assignRouteLock : undefined;
-  const assignRouteLocked = Boolean(assignRouteRef && chrome.isLocallyLocked(assignRouteRef));
-
-  const assignRouteM = useMutation({
-    mutationFn: (payload: AssignRouteMutation) => assignIpAddressRoute(payload.ipId, { network_interface: payload.networkInterfaceId }),
-    onMutate: (payload) => acquireMutationContext(payload, payload.lockRef, payload.intent),
-    onSuccess: async (res, variables, context) => {
-      if (variables.vpsId === vpsId) {
-        setAssignRouteIp(null);
-        setAssignRouteInterface('');
-      }
-      trackNetworkAction(res.meta, 'action.vps.network.route_assign.label', context);
-      await refreshNetworkData(variables.vpsId);
-      pushToast({ variant: 'ok', title: t('vps.network.ip_addresses.toast.route_assigned') });
-    },
-    onError: (e: any) => {
-      if (e?.code === 'BUSY') chrome.openTasks();
-    },
-    onSettled: (_data, error, _variables, context) => {
-      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
-    },
-  });
-
-  const reconcileAssignRoute = async (): Promise<MutationReconcileResult> => {
-    if (!assignRouteRef || !assignRouteUncertainLock) return 'error';
-    try {
-      const current = (await fetchIpAddress(assignRouteRef.id, {
-        includes: 'network_interface__vps,user,charged_environment,vps',
-      })).data;
-      await refreshNetworkData(vpsId);
-      return reconcileIpAddressMutation(assignRouteUncertainLock, current);
-    } catch {
-      return 'error';
-    }
-  };
 
   const ownerRef = ownerIp ? objectRef('IpAddress', ownerIp.id) : null;
 
@@ -514,13 +493,6 @@ export function VpsNetworkPage() {
     if (!intent) return;
     freeRouteM.mutate({ ...snapshotVpsMutation(), ipId: freeRouteIp.id, lockRef: freeRouteRef, intent });
   };
-  const submitAssignRoute = () => {
-    const networkInterfaceId = parsePositiveId(assignRouteInterface);
-    if (!assignRouteIp || !assignRouteRef || !networkInterfaceId) return;
-    const intent = ipRouteAssignIntent(assignRouteIp, networkInterfaceId, vpsId);
-    if (!intent) return;
-    assignRouteM.mutate({ ...snapshotVpsMutation(), ipId: assignRouteIp.id, lockRef: assignRouteRef, intent, networkInterfaceId });
-  };
   const submitOwner = () => {
     if (!ownerIp || !ownerRef) return;
     const { user, environment } = ownerMutationTarget();
@@ -539,9 +511,8 @@ export function VpsNetworkPage() {
     assignHostM.isPending ||
     freeHostM.isPending ||
     deleteHostM.isPending ||
+    createHostsM.isPending ||
     freeRouteM.isPending ||
-    assignRouteM.isPending ||
-    assignRouteLocked ||
     updateOwnerM.isPending;
   const gate = gateVpsMutation({ vps, busyLocal, busyTransaction });
 
@@ -570,8 +541,8 @@ export function VpsNetworkPage() {
     assignHostM.error ??
     freeHostM.error ??
     deleteHostM.error ??
+    createHostsM.error ??
     freeRouteM.error ??
-    assignRouteM.error ??
     updateOwnerM.error;
   const networkActionErrorMessage = networkActionError ? errorMessage(networkActionError) : null;
 
@@ -647,7 +618,10 @@ export function VpsNetworkPage() {
         assignHostPending={assignHostM.isPending}
         freeHostPending={freeHostM.isPending}
         deleteHostPending={deleteHostM.isPending}
-        onAddRoute={() => setAddIpOpen(true)}
+        onAddRoute={() => {
+          setAddIpInitial(null);
+          setAddIpOpen(true);
+        }}
         onDisableNetwork={() => {
           setNetToggleError(null);
           setConfirmDisableOpen(true);
@@ -665,9 +639,10 @@ export function VpsNetworkPage() {
         }}
         onFreeRoute={setFreeRouteIp}
         onAssignRoute={(ip) => {
-          setAssignRouteIp(ip);
-          setAssignRouteInterface('');
+          setAddIpInitial(ip);
+          setAddIpOpen(true);
         }}
+        onAddHostAddresses={setCreateHostsRoute}
         onEditPtr={(row) => {
           setPtrEditor(row);
           setPtrValue(String(row.reverse_record_value ?? ''));
@@ -684,11 +659,26 @@ export function VpsNetworkPage() {
       <AssignIpAddressModal
         open={addIpOpen}
         fixedVps={vps}
+        initialIp={addIpInitial}
         gate={gate}
         testId="vps.network.ip_addresses.add_modal"
-        onClose={() => setAddIpOpen(false)}
+        onClose={() => {
+          setAddIpOpen(false);
+          setAddIpInitial(null);
+        }}
         onAssigned={() => {
           void refreshNetworkData(vpsId);
+        }}
+      />
+
+      <VpsHostAddressCreateModal
+        route={createHostsRoute}
+        saving={createHostsM.isPending}
+        errorMessage={createHostsM.error ? errorMessage(createHostsM.error) : null}
+        onClose={() => setCreateHostsRoute(null)}
+        onSubmit={(addresses) => {
+          if (!createHostsRoute) return;
+          createHostsM.mutate({ ...snapshotVpsMutation(), ipId: createHostsRoute.id, addresses });
         }}
       />
 
@@ -1039,74 +1029,6 @@ export function VpsNetworkPage() {
         onCancel={() => setFreeRouteIp(null)}
         onConfirm={submitFreeRoute}
       />
-
-      <Modal
-        open={!!assignRouteIp}
-        testId="vps.network.ip_addresses.assign_route"
-        title={
-          assignRouteIp
-            ? t('vps.network.ip_addresses.assign.title_for_ip', {
-                address: ipAddressLabel(assignRouteIp),
-              })
-            : t('vps.network.ip_addresses.assign.title')
-        }
-        onClose={() => {
-          if (assignRouteM.isPending) return;
-          setAssignRouteIp(null);
-          setAssignRouteInterface('');
-        }}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="secondary"
-              testId="vps.network.ip_addresses.assign_route.cancel"
-              onClick={() => {
-                setAssignRouteIp(null);
-                setAssignRouteInterface('');
-              }}
-              disabled={assignRouteM.isPending}
-            >
-              {t('common.cancel')}
-            </Button>
-            <ActionButton
-              testId="vps.network.ip_addresses.assign_route.submit"
-              loading={assignRouteM.isPending}
-              disabled={!assignRouteInterface || !gate.allowed || assignRouteLocked}
-              disabledReason={!gate.allowed ? gate.reason : undefined}
-              onClick={submitAssignRoute}
-            >
-              {t('vps.network.ip_addresses.action.assign_route')}
-            </ActionButton>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          {assignRouteRef && assignRouteUncertainLock ? (
-            <MutationUncertaintyPanel
-              object={assignRouteRef}
-              lock={assignRouteUncertainLock}
-              reconcile={reconcileAssignRoute}
-              testIdPrefix="vps.network.route_assign.uncertain"
-            />
-          ) : null}
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">{t('vps.network.ip_addresses.assign.interface')}</div>
-            <Select
-              testId="vps.network.ip_addresses.assign_route.interface"
-              value={assignRouteInterface}
-              onChange={(e) => setAssignRouteInterface(e.target.value)}
-              options={[
-                { value: '', label: t('vps.network.ip_addresses.assign.interface.placeholder') },
-                ...netifs.map((ni) => ({
-                  value: String(ni.id),
-                  label: `${ni.name ?? `#${ni.id}`} (#${ni.id})`,
-                })),
-              ]}
-            />
-          </label>
-          <div className="text-xs text-muted">{t('vps.network.ip_addresses.assign.help')}</div>
-        </div>
-      </Modal>
 
       <ConfirmDialog
         testId="vps.network.disable_confirm"

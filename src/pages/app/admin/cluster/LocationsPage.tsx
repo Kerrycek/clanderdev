@@ -12,10 +12,12 @@ import {
   createLocation,
   fetchEnvironments,
   fetchLocations,
+  setLocationMaintenance,
   updateLocation,
   type Environment,
   type Location,
 } from '../../../../lib/api/infra';
+import { MaintenanceControl } from './MaintenanceControl';
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
 import { Alert } from '../../../../components/ui/Alert';
@@ -835,14 +837,22 @@ export function LocationsPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openEdit(loc)}
-                      testId={`admin.cluster.locations.row.${loc.id}.edit`}
-                    >
-                      {t('common.edit')}
-                    </Button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <MaintenanceControl
+                        value={loc.maintenance_lock}
+                        reason={loc.maintenance_lock_reason}
+                        label={locLabel(loc)}
+                        testId={`admin.cluster.locations.row.${loc.id}.maintenance`}
+                        setMaintenance={(opts) => setLocationMaintenance(loc.id, opts)}
+                        onChanged={() => Promise.all([
+                          qc.invalidateQueries({ queryKey: ['cluster.locations'] }),
+                          qc.invalidateQueries({ queryKey: ['cluster.locations.lookup'] }),
+                        ])}
+                      />
+                      <Button variant="secondary" size="sm" onClick={() => openEdit(loc)} testId={`admin.cluster.locations.row.${loc.id}.edit`}>
+                        {t('common.edit')}
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               );

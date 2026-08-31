@@ -1,7 +1,5 @@
 // Admin locale chunk: info
 export const csAdmin_info = {
-  "admin.info.in_progress.body": "Administrace zatím z velké části znovu používá uživatelské stránky. Funkce dostupné jen administrátorům budou přibývat postupně.",
-  "admin.info.in_progress.title": "Administrační rozhraní je stále ve vývoji",
   "admin.info.runtime.auth_kind.none": "Žádná",
   "admin.info.runtime.auth_kind.oauth2": "OAuth2",
   "admin.info.runtime.auth_kind.token": "Token",
@@ -18,7 +16,6 @@ export const csAdmin_info = {
   "admin.info.runtime.field.ui_settings_persistence": "Ukládání nastavení UI",
   "admin.info.runtime.server_sync.field": "pole:",
   "admin.info.runtime.server_sync.namespace": "jmenný prostor:",
-  "admin.info.runtime.server_sync.note": "Poznámka: serverové ukládání vyžaduje podporu API (viz TODO-API-EXTENSION.md).",
   "admin.info.runtime.server_sync.title": "Detaily synchronizace na server",
   "admin.info.runtime.subtitle": "Kam míří API požadavky a jak se ukládají nastavení",
   "admin.info.runtime.title": "Konfigurace běhu",
