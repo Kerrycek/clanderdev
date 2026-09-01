@@ -168,6 +168,7 @@ export const enVps_network = {
   'vps.network.routing.empty': 'This VPS does not have an IP route yet.',
   'vps.network.routing.interface': 'Interface: {interface}',
   'vps.network.routing.location': 'Location: {location}',
+  'vps.network.routing.via': 'Via: {address}',
   'vps.network.ptr.title': 'Interface addresses & PTR',
   'vps.network.ptr.subtitle': 'Addresses used directly by the VPS and their reverse DNS.',
   'vps.network.ptr.explanation': 'After adding a route, choose an available address for the interface. You can add or edit PTR directly on it at any time.',
@@ -289,6 +290,7 @@ export const enVps_network = {
   'vps.network.host_addresses.create.addresses': 'Host addresses',
   'vps.network.host_addresses.create.help': 'Enter one IPv4 or IPv6 address per line, without a prefix.',
   'vps.network.host_addresses.create.invalid': 'Invalid host address: {address}',
+  'vps.network.host_addresses.create.partial_error': 'Created: {count}. Address {address} could not be created: {error}. Only addresses that still need to be retried remain in the field.',
   'vps.network.host_addresses.create.submit': 'Add addresses',
   'vps.network.host_addresses.create.toast': '{count} host address(es) added',
 } as const;

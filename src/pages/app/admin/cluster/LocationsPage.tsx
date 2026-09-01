@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../../../app/auth';
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
 import { formatErrorMessage } from '../../../../lib/errors';
@@ -17,7 +18,7 @@ import {
   type Environment,
   type Location,
 } from '../../../../lib/api/infra';
-import { MaintenanceControl } from './MaintenanceControl';
+import { ClusterResourceActions } from './ClusterResourceActions';
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
 import { Alert } from '../../../../components/ui/Alert';
@@ -107,6 +108,7 @@ function buildPayload(form: FormState): { payload: Record<string, unknown>; erro
 }
 
 export function LocationsPage() {
+  const auth = useAuth();
   const { t } = useI18n();
   const { pushToast } = useToasts();
   const qc = useQueryClient();
@@ -836,24 +838,10 @@ export function LocationsPage() {
                       '—'
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex flex-wrap justify-end gap-2">
-                      <MaintenanceControl
-                        value={loc.maintenance_lock}
-                        reason={loc.maintenance_lock_reason}
-                        label={locLabel(loc)}
-                        testId={`admin.cluster.locations.row.${loc.id}.maintenance`}
-                        setMaintenance={(opts) => setLocationMaintenance(loc.id, opts)}
-                        onChanged={() => Promise.all([
-                          qc.invalidateQueries({ queryKey: ['cluster.locations'] }),
-                          qc.invalidateQueries({ queryKey: ['cluster.locations.lookup'] }),
-                        ])}
-                      />
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(loc)} testId={`admin.cluster.locations.row.${loc.id}.edit`}>
-                        {t('common.edit')}
-                      </Button>
-                    </div>
-                  </td>
+                  <ClusterResourceActions
+                    role={auth.role} maintenance={{ value: loc.maintenance_lock, reason: loc.maintenance_lock_reason, label: locLabel(loc), testId: `admin.cluster.locations.row.${loc.id}.maintenance`, setMaintenance: (opts) => setLocationMaintenance(loc.id, opts), onChanged: () => Promise.all([qc.invalidateQueries({ queryKey: ['cluster.locations'] }), qc.invalidateQueries({ queryKey: ['cluster.locations.lookup'] })]) }}
+                    edit={{ label: t('common.edit'), testId: `admin.cluster.locations.row.${loc.id}.edit`, onClick: () => openEdit(loc) }}
+                  />
                 </tr>
               );
             })}

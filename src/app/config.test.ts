@@ -6,6 +6,7 @@ const ENV_KEYS = [
   'VITE_API_URL',
   'VITE_API_VERSION',
   'VITE_WEBUI_URL',
+  'VITE_LEGACY_WEBUI_URL',
   'VITE_LOGIN_URL',
   'VITE_LOGOUT_URL',
   'VITE_OAUTH2_AUTHORIZE_URL',
@@ -130,6 +131,18 @@ describe('getRuntimeConfig', () => {
     process.env['VITE_WEBUI_URL'] = 'https://vpsadmin.example.test/';
     const cfg = getRuntimeConfig();
     expect(cfg.webuiUrl).toBe('https://vpsadmin.example.test');
+  });
+
+  it('requires an explicit legacy webui URL for fallback links', () => {
+    window.vpsAdmin = {
+      api: { url: 'https://api.example.test', version: '7.0' },
+      webui: { url: 'https://new-ui.example.test' },
+    };
+
+    expect(getRuntimeConfig().legacyWebuiUrl).toBeUndefined();
+
+    window.vpsAdmin.webuiNext = { legacyUrl: 'https://legacy.example.test/' };
+    expect(getRuntimeConfig().legacyWebuiUrl).toBe('https://legacy.example.test');
   });
 
   it('reads integrated BFF session expiry from window.vpsAdmin.webuiNext', () => {

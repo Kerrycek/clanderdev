@@ -11,7 +11,6 @@ import {
   advisoryCveLabels,
   createSecurityAdvisoryOutageLink,
   createSecurityAdvisoryUpdate,
-  deleteSecurityAdvisoryUpdate,
   deleteSecurityAdvisoryOutageLink,
   fetchSecurityAdvisory,
   fetchAllSecurityAdvisoryUpdates,
@@ -20,8 +19,6 @@ import {
   publishSecurityAdvisory,
   rebuildSecurityAdvisoryAffectedVps,
   updateSecurityAdvisory,
-  updateSecurityAdvisoryUpdate,
-  type SecurityAdvisoryUpdate,
   type SecurityAdvisoryOutageLink,
 } from '../../../../lib/api/securityAdvisories';
 import { fetchLanguages } from '../../../../lib/api/languages';
@@ -47,7 +44,6 @@ import {
 } from './SecurityAdvisoryEditorModal';
 import {
   securityAdvisoryUpdateCreatePayload,
-  securityAdvisoryUpdateTextPayload,
   type SecurityAdvisoryUpdateValues,
 } from './SecurityAdvisoryUpdateModal';
 import { SecurityAdvisoryAffectedPanel } from './SecurityAdvisoryAffectedPanel';
@@ -57,7 +53,8 @@ import { SecurityAdvisoryNodesPanel } from './SecurityAdvisoryNodesPanel';
 import { SecurityAdvisoryOutagesPanel } from './SecurityAdvisoryOutagesPanel';
 import { SecurityAdvisoryOverviewPanel } from './SecurityAdvisoryOverviewPanel';
 import { SecurityAdvisoryUpdatesPanel } from './SecurityAdvisoryUpdatesPanel';
-import { DETAIL_TABS, type DetailTab } from './securityAdvisoryDetailViewModel';
+import { DETAIL_TABS, sortSecurityAdvisoryUpdates, type DetailTab } from './securityAdvisoryDetailViewModel';
+import { useSecurityAdvisoryUpdateEditing } from './useSecurityAdvisoryUpdateEditing';
 
 export function AdminSecurityAdvisoryDetailPage() {
   const params = useParams();
@@ -142,14 +139,7 @@ export function AdminSecurityAdvisoryDetailPage() {
     () => securityAdvisoryPublishIssues({ cves: cveLabels, nodes: nodesQ.data ?? [], statuses: statusesQ.data ?? [] }),
     [cveLabels, nodesQ.data, statusesQ.data],
   );
-  const updates = useMemo(
-    () => (updatesQ.data ?? []).slice().sort((a, b) => {
-      const aTime = new Date(a.created_at ?? a.updated_at ?? 0).getTime();
-      const bTime = new Date(b.created_at ?? b.updated_at ?? 0).getTime();
-      return bTime - aTime;
-    }),
-    [updatesQ.data],
-  );
+  const updates = useMemo(() => sortSecurityAdvisoryUpdates(updatesQ.data ?? []), [updatesQ.data]);
 
   const invalidateDetail = async () => {
     await Promise.all([
@@ -295,37 +285,14 @@ export function AdminSecurityAdvisoryDetailPage() {
     }
     createUpdateM.mutate(values);
   };
-  const [editingUpdate, setEditingUpdate] = useState<SecurityAdvisoryUpdate | null>(null);
-  const [deleteUpdateTarget, setDeleteUpdateTarget] = useState<SecurityAdvisoryUpdate | null>(null);
-  const editUpdateM = useMutation({
-    mutationFn: (values: SecurityAdvisoryUpdateValues) => {
-      if (!editingUpdate) throw new Error('Missing advisory update');
-      return updateSecurityAdvisoryUpdate(editingUpdate.id, securityAdvisoryUpdateTextPayload(values));
-    },
-    onSuccess: async () => {
-      setEditingUpdate(null);
-      setUpdateError(null);
-      await invalidateDetail();
-      pushToast({ variant: 'ok', title: t('admin.security_advisories.toast.update_saved') });
-    },
-    onError: (error) => {
-      const message = formatErrorMessage(error);
-      setUpdateError(message);
-      pushToast({ variant: 'danger', title: t('admin.security_advisories.toast.update_failed'), body: message });
-    },
-  });
-  const deleteUpdateM = useMutation({
-    mutationFn: () => {
-      if (!deleteUpdateTarget) throw new Error('Missing advisory update');
-      return deleteSecurityAdvisoryUpdate(deleteUpdateTarget.id);
-    },
-    onSuccess: async () => {
-      setDeleteUpdateTarget(null);
-      await invalidateDetail();
-      pushToast({ variant: 'ok', title: t('admin.security_advisories.toast.update_deleted') });
-    },
-    onError: (error) => pushToast({ variant: 'danger', title: t('common.error'), body: formatErrorMessage(error) }),
-  });
+  const {
+    editingUpdate,
+    setEditingUpdate,
+    deleteUpdateTarget,
+    setDeleteUpdateTarget,
+    editUpdateM,
+    deleteUpdateM,
+  } = useSecurityAdvisoryUpdateEditing({ invalidateDetail, setUpdateError });
 
   const [outageId, setOutageId] = useState('');
   const linkOutageM = useMutation({

@@ -168,6 +168,7 @@ export const csVps_network = {
   'vps.network.routing.empty': 'Tato VPS zatím nemá žádnou IP routu.',
   'vps.network.routing.interface': 'Rozhraní: {interface}',
   'vps.network.routing.location': 'Lokalita: {location}',
+  'vps.network.routing.via': 'Přes: {address}',
   'vps.network.ptr.title': 'Adresy rozhraní a PTR',
   'vps.network.ptr.subtitle': 'Adresy používané přímo ve VPS a jejich reverzní DNS.',
   'vps.network.ptr.explanation': 'Po přidání routy vyber dostupnou adresu pro rozhraní. PTR můžeš kdykoliv přidat nebo upravit přímo u ní.',
@@ -289,6 +290,7 @@ export const csVps_network = {
   'vps.network.host_addresses.create.addresses': 'Host adresy',
   'vps.network.host_addresses.create.help': 'Zadej jednu IPv4 nebo IPv6 adresu na řádek, bez prefixu.',
   'vps.network.host_addresses.create.invalid': 'Neplatná host adresa: {address}',
+  'vps.network.host_addresses.create.partial_error': 'Vytvořeno: {count}. Adresu {address} se vytvořit nepodařilo: {error}. V poli zůstaly jen adresy, které je potřeba zkusit znovu.',
   'vps.network.host_addresses.create.submit': 'Přidat adresy',
   'vps.network.host_addresses.create.toast': 'Přidáno host adres: {count}',
 } as const;

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MaintenanceControl, parseMaintenanceState } from './MaintenanceControl';
+import { canManageClusterMaintenance, MaintenanceControl, parseMaintenanceState } from './MaintenanceControl';
 
 vi.mock('../../../../app/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('../../../../app/toasts', () => ({ useToasts: () => ({ pushToast: vi.fn() }) }));
@@ -13,6 +13,12 @@ describe('maintenance state', () => {
     expect(parseMaintenanceState('no')).toBe('no');
     expect(parseMaintenanceState('lock')).toBe('lock');
     expect(parseMaintenanceState('master_lock')).toBe('master_lock');
+  });
+
+  it('exposes maintenance state and mutations only to API admins', () => {
+    expect(canManageClusterMaintenance('admin')).toBe(true);
+    expect(canManageClusterMaintenance('support')).toBe(false);
+    expect(canManageClusterMaintenance('user')).toBe(false);
   });
 
   it('shows an inherited lock without an unlock action', () => {

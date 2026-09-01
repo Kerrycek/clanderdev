@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { useI18n } from '../../../app/i18n';
 import { Alert } from '../../../components/ui/Alert';
@@ -9,24 +9,76 @@ import type { IpAddress } from '../../../lib/api/ipAddresses';
 import { ipAddressLabel, validateHostAddressInput } from './VpsNetworkModel';
 
 export function parseHostAddressLines(raw: string): string[] {
-  return raw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  return [...new Set(raw.split(/\r?\n/).map((value) => value.trim()).filter(Boolean))];
+}
+
+export class HostAddressBatchCreateError extends Error {
+  readonly createdAddresses: string[];
+  readonly failedAddress: string;
+  readonly retryAddresses: string[];
+  override readonly cause: unknown;
+
+  constructor(args: {
+    createdAddresses: string[];
+    failedAddress: string;
+    retryAddresses: string[];
+    cause: unknown;
+  }) {
+    const causeMessage = args.cause instanceof Error ? args.cause.message : String(args.cause);
+    super(causeMessage, { cause: args.cause });
+    this.name = 'HostAddressBatchCreateError';
+    this.createdAddresses = args.createdAddresses;
+    this.failedAddress = args.failedAddress;
+    this.retryAddresses = args.retryAddresses;
+    this.cause = args.cause;
+
+    const code = (args.cause as { code?: unknown } | null)?.code;
+    if (code !== undefined) (this as Error & { code?: unknown }).code = code;
+  }
+}
+
+export async function createHostAddressesSequentially(
+  addresses: string[],
+  createOne: (address: string) => Promise<unknown>,
+): Promise<string[]> {
+  const createdAddresses: string[] = [];
+
+  for (const [index, address] of addresses.entries()) {
+    try {
+      await createOne(address);
+      createdAddresses.push(address);
+    } catch (cause) {
+      throw new HostAddressBatchCreateError({
+        createdAddresses: [...createdAddresses],
+        failedAddress: address,
+        retryAddresses: addresses.slice(index),
+        cause,
+      });
+    }
+  }
+
+  return createdAddresses;
+}
+
+export function hostAddressBatchSettlementError(error: unknown): unknown {
+  return error instanceof HostAddressBatchCreateError ? error.cause : error;
 }
 
 export function VpsHostAddressCreateModal(props: {
   route: IpAddress | null;
   saving: boolean;
+  value: string;
   errorMessage?: string | null;
   onClose: () => void;
+  onValueChange: (value: string) => void;
   onSubmit: (addresses: string[]) => void;
 }) {
   const { t } = useI18n();
-  const [raw, setRaw] = useState('');
-  const validation = useMemo(() => validateHostAddressInput(raw), [raw]);
-  const addresses = useMemo(() => parseHostAddressLines(raw), [raw]);
+  const validation = useMemo(() => validateHostAddressInput(props.value), [props.value]);
+  const addresses = useMemo(() => parseHostAddressLines(props.value), [props.value]);
 
   const close = () => {
     if (props.saving) return;
-    setRaw('');
     props.onClose();
   };
 
@@ -60,8 +112,8 @@ export function VpsHostAddressCreateModal(props: {
         ) : null}
         <Textarea
           rows={7}
-          value={raw}
-          onChange={(event) => setRaw(event.target.value)}
+          value={props.value}
+          onChange={(event) => props.onValueChange(event.target.value)}
           label={t('vps.network.host_addresses.create.addresses')}
           testId="vps.network.host_addresses.create.addresses"
           disabled={props.saving}

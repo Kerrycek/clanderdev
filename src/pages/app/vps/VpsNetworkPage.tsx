@@ -44,7 +44,12 @@ import { useVps } from './VpsContext';
 import { VpsNetworkInterfacesCard } from './VpsNetworkInterfacesCard';
 import { VpsNetworkAddressesSection } from './VpsNetworkAddressesSection';
 import { VpsNetworkOverviewCard } from './VpsNetworkOverviewCard';
-import { VpsHostAddressCreateModal } from './VpsHostAddressCreateModal';
+import {
+  createHostAddressesSequentially,
+  HostAddressBatchCreateError,
+  hostAddressBatchSettlementError,
+  VpsHostAddressCreateModal,
+} from './VpsHostAddressCreateModal';
 import { AssignIpAddressModal } from '../networking/AssignIpAddressModal';
 import {
   buildNetworkRouteSummary,
@@ -109,7 +114,7 @@ export function VpsNetworkPage() {
     queryFn: async () => (
       await fetchIpAddressesForVps(vpsId, {
         limit: 250,
-        includes: 'network,user,network_interface__vps,charged_environment',
+        includes: 'network,user,network_interface__vps,charged_environment,route_via',
       })
     ).data,
     staleTime: 30_000,
@@ -153,6 +158,7 @@ export function VpsNetworkPage() {
   const [addIpOpen, setAddIpOpen] = useState(false);
   const [addIpInitial, setAddIpInitial] = useState<IpAddress | null>(null);
   const [createHostsRoute, setCreateHostsRoute] = useState<IpAddress | null>(null);
+  const [createHostsValue, setCreateHostsValue] = useState('');
   const snapshotVpsMutation = (): VpsMutationSnapshot => ({
     vpsId,
     vpsLockRef: vpsRef,
@@ -402,22 +408,35 @@ export function VpsNetworkPage() {
     onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
   const createHostsM = useMutation({
-    mutationFn: async (payload: CreateHostsMutation) => {
-      for (const address of payload.addresses) {
-        await createHostIpAddress({ ip_address: payload.ipId, addr: address });
-      }
-    },
+    mutationFn: (payload: CreateHostsMutation) => createHostAddressesSequentially(
+      payload.addresses,
+      (address) => createHostIpAddress({ ip_address: payload.ipId, addr: address }),
+    ),
     onMutate: (payload) => acquireMutationContext(payload),
-    onSuccess: async (_res, variables, context) => {
-      if (variables.vpsId === vpsId) setCreateHostsRoute(null);
+    onSuccess: async (createdAddresses, variables, context) => {
+      if (variables.vpsId === vpsId) {
+        setCreateHostsRoute(null);
+        setCreateHostsValue('');
+      }
       trackNetworkAction(undefined, 'action.vps.network.host_create.label', context);
       await refreshNetworkData(variables.vpsId);
-      pushToast({ variant: 'ok', title: t('vps.network.host_addresses.create.toast', { count: variables.addresses.length }) });
+      pushToast({ variant: 'ok', title: t('vps.network.host_addresses.create.toast', { count: createdAddresses.length }) });
     },
-    onError: (e: any) => {
+    onError: (e: any, variables) => {
       if (e?.code === 'BUSY') chrome.openTasks();
+      if (variables.vpsId === vpsId && e instanceof HostAddressBatchCreateError) {
+        // Successful prefix writes are real API mutations. Keep only the
+        // failed/unattempted suffix in the editor so retry cannot duplicate
+        // addresses, and immediately reconcile the list behind the modal.
+        setCreateHostsValue(e.retryAddresses.join('\n'));
+        void refreshNetworkData(variables.vpsId);
+      }
     },
-    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(
+      context.lockRef,
+      hostAddressBatchSettlementError(error),
+      context.mutationGeneration,
+    ),
   });
   const freeRouteRef = freeRouteIp ? objectRef('IpAddress', freeRouteIp.id) : null;
   const freeRouteM = useMutation({
@@ -544,7 +563,20 @@ export function VpsNetworkPage() {
     createHostsM.error ??
     freeRouteM.error ??
     updateOwnerM.error;
-  const networkActionErrorMessage = networkActionError ? errorMessage(networkActionError) : null;
+  const createHostsErrorMessage = createHostsM.error instanceof HostAddressBatchCreateError
+    ? t('vps.network.host_addresses.create.partial_error', {
+        count: createHostsM.error.createdAddresses.length,
+        address: createHostsM.error.failedAddress,
+        error: errorMessage(createHostsM.error.cause),
+      })
+    : createHostsM.error
+      ? errorMessage(createHostsM.error)
+      : null;
+  const networkActionErrorMessage = networkActionError
+    ? networkActionError === createHostsM.error
+      ? createHostsErrorMessage
+      : errorMessage(networkActionError)
+    : null;
 
   return (
     <div data-testid="vps.network.page" className="space-y-4">
@@ -642,7 +674,11 @@ export function VpsNetworkPage() {
           setAddIpInitial(ip);
           setAddIpOpen(true);
         }}
-        onAddHostAddresses={setCreateHostsRoute}
+        onAddHostAddresses={(ip) => {
+          createHostsM.reset();
+          setCreateHostsValue('');
+          setCreateHostsRoute(ip);
+        }}
         onEditPtr={(row) => {
           setPtrEditor(row);
           setPtrValue(String(row.reverse_record_value ?? ''));
@@ -674,8 +710,14 @@ export function VpsNetworkPage() {
       <VpsHostAddressCreateModal
         route={createHostsRoute}
         saving={createHostsM.isPending}
-        errorMessage={createHostsM.error ? errorMessage(createHostsM.error) : null}
-        onClose={() => setCreateHostsRoute(null)}
+        value={createHostsValue}
+        errorMessage={createHostsErrorMessage}
+        onValueChange={setCreateHostsValue}
+        onClose={() => {
+          setCreateHostsRoute(null);
+          setCreateHostsValue('');
+          createHostsM.reset();
+        }}
         onSubmit={(addresses) => {
           if (!createHostsRoute) return;
           createHostsM.mutate({ ...snapshotVpsMutation(), ipId: createHostsRoute.id, addresses });

@@ -5,7 +5,6 @@ import { useQuery } from '@tanstack/react-query';
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
-import { getRuntimeConfig } from '../../../app/config';
 
 import { fetchIpAddresses } from '../../../lib/api/ipAddresses';
 import { fetchLocations, type Location as InfraLocation } from '../../../lib/api/infra';
@@ -35,15 +34,10 @@ import {
   resolveOrderValue,
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
-import {
-  selectSuggestedIpLocations,
-} from './ipAddresses/suggestedFreeIps';
+import { selectSuggestedIpLocations } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
 import { useProgressiveSuggestedIpQueries } from './ipAddresses/useProgressiveSuggestedIpQueries';
-
-export function legacyIpAddressesUrl(webuiUrl: string | undefined): string | undefined {
-  return webuiUrl ? `${webuiUrl.replace(/\/$/, '')}/?page=networking&action=ip_addresses` : undefined;
-}
+import { configuredLegacyIpAddressesUrl } from './ipAddresses/legacyIpAddressesUrl';
 
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
@@ -51,8 +45,7 @@ export function IpAddressesPage() {
   const toasts = useToasts();
   const navigate = useNavigate();
   const location = useLocation();
-  const webuiUrl = getRuntimeConfig().webuiUrl;
-  const legacyFallbackUrl = legacyIpAddressesUrl(webuiUrl);
+  const legacyFallbackUrl = configuredLegacyIpAddressesUrl();
   const {
     searchParams: sp,
     setSearchParams: setSp,
@@ -544,12 +537,10 @@ export function IpAddressesPage() {
                 else void listQ.refetch();
               },
             },
-            ...(legacyFallbackUrl ? {
-              secondary: {
-                label: t('admin.ip_addresses.open_legacy'),
-                href: legacyFallbackUrl,
-              },
-            } : {}),
+            secondary: legacyFallbackUrl ? {
+              label: t('admin.ip_addresses.open_legacy'),
+              href: legacyFallbackUrl,
+            } : undefined,
           }}
         />
       ) : pageData.length === 0 ? (

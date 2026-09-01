@@ -11,6 +11,10 @@ import { formatErrorMessage } from '../../../../lib/errors';
 
 export type MaintenanceState = 'no' | 'lock' | 'master_lock';
 
+export function canManageClusterMaintenance(role: string): boolean {
+  return role === 'admin';
+}
+
 export function parseMaintenanceState(value: unknown): MaintenanceState {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (normalized === 'lock') return 'lock';

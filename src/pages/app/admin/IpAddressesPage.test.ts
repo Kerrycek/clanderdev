@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { legacyIpAddressesUrl } from './IpAddressesPage';
+import { legacyIpAddressesUrl } from './ipAddresses/legacyIpAddressesUrl';
 
 describe('legacyIpAddressesUrl', () => {
   it('uses the configured legacy networking query and omits an unavailable fallback', () => {

@@ -92,7 +92,7 @@ export function AdminInfoPage() {
               <dd className="font-medium break-all">{cfg.apiBaseUrl}</dd>
 
               <dt className="text-muted">{t('admin.info.runtime.field.legacy_webui_url')}</dt>
-              <dd className="font-medium break-all">{cfg.webuiUrl ?? t('common.na')}</dd>
+              <dd className="font-medium break-all">{cfg.legacyWebuiUrl ?? t('common.na')}</dd>
 
               <dt className="text-muted">{t('admin.info.runtime.field.router_basename')}</dt>
               <dd className="font-medium break-all">{cfg.routerBasename || t('common.na')}</dd>

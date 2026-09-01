@@ -39,6 +39,8 @@ export interface RuntimeConfig {
   apiVersion: string;
   apiBaseUrl: string;
   webuiUrl?: string;
+  /** Explicit origin of the retired PHP UI, used only for legacy fallbacks. */
+  legacyWebuiUrl?: string;
   /** Optional absolute/relative URL for the login endpoint (overrides legacy /?page=login). */
   loginUrl?: string;
   /** Optional absolute/relative URL for the logout endpoint (overrides legacy /?page=logout). */
@@ -265,6 +267,11 @@ export function getRuntimeConfig(): RuntimeConfig {
 
   const webuiUrlCandidate = win?.vpsAdmin?.webui?.url ?? env('VITE_WEBUI_URL');
   const webuiUrl = webuiUrlCandidate ? trimTrailingSlash(webuiUrlCandidate) : undefined;
+  const legacyWebuiUrlCandidate =
+    win?.vpsAdmin?.webuiNext?.legacyUrl ?? env('VITE_LEGACY_WEBUI_URL');
+  const legacyWebuiUrl = legacyWebuiUrlCandidate
+    ? trimTrailingSlash(legacyWebuiUrlCandidate)
+    : undefined;
 
   // Optional explicit auth endpoints.
   const loginUrlCandidate = win?.vpsAdmin?.webuiNext?.loginUrl ?? env('VITE_LOGIN_URL');
@@ -312,6 +319,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     apiVersion,
     apiBaseUrl,
     webuiUrl,
+    legacyWebuiUrl,
     loginUrl,
     logoutUrl,
     sessionExpiresAt,
