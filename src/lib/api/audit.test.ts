@@ -43,6 +43,7 @@ describe('fetchObjectHistoryEvents', () => {
     expect(url.searchParams.get('object_history[limit]')).toBe('25');
     expect(url.searchParams.get('object_history[from_id]')).toBe('101');
     expect(url.searchParams.get('object_history[event_type]')).toBe('update');
+    expect(url.searchParams.get('_meta[includes]')).toBe('user,user_session');
     expect(url.searchParams.get('_meta[count]')).toBe('true');
   });
 

@@ -536,6 +536,21 @@ Maintenance tab:
 - `vps.maintenance.day.<wday>.opens`
 - `vps.maintenance.day.<wday>.closes`
 
+History tab:
+- `vps.history.page`
+- `vps.history.card`
+- `vps.history.refresh`
+- `vps.history.filter.event_type`
+- `vps.history.filter.clear`
+- `vps.history.loading`
+- `vps.history.error`
+- `vps.history.empty`
+- `vps.history.table` (desktop)
+- `vps.history.row.<id>` (desktop)
+- `vps.history.mobile`
+- `vps.history.card.<id>` (mobile)
+- `vps.history.pagination`
+
 Console tab:
 - `vps.console.page`
 - `vps.console.new_session`

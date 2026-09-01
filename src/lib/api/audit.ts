@@ -51,7 +51,7 @@ export async function fetchObjectHistoryEvents(opts?: {
     path: '/object_histories',
     namespace: 'object_history',
     params,
-    meta: opts?.count ? { count: true } : undefined,
+    meta: { includes: 'user,user_session', ...(opts?.count ? { count: true } : {}) },
   });
 
   return { ...res, data: expectArray<ObjectHistoryEvent>(res.data, 'object_histories#index') };
