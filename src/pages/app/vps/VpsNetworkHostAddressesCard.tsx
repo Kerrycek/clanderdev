@@ -136,6 +136,7 @@ export function VpsNetworkHostAddressesCard(props: {
                   {availableRows.map((row) => {
                     const id = Number(row.id);
                     const canDelete = row.user_created === true;
+                    const ptrState = hostPtrState(row);
 
                     return (
                       <div key={id} data-testid={`vps.network.host_addresses.row.${id}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface p-2">
@@ -144,8 +145,22 @@ export function VpsNetworkHostAddressesCard(props: {
                           <div className="mt-0.5 text-xs text-muted">
                             {t('vps.network.host_addresses.field.route')}: <span className="font-mono">{hostRouteLabel(row)}</span>
                           </div>
+                          <div className="mt-0.5 text-xs text-muted">
+                            {t('vps.network.host_addresses.field.ptr')}: <span className={ptrState === 'set' ? 'text-fg' : 'text-faint'}>{hostPtrValue(row)}</span>
+                          </div>
                         </div>
                         {props.canMutate ? <div className="flex flex-wrap gap-2">
+                          <ActionButton
+                            variant="secondary"
+                            size="sm"
+                            testId={`vps.network.host_addresses.row.${id}.ptr`}
+                            disabled={!gate.allowed}
+                            disabledReason={!gate.allowed ? gate.reason : undefined}
+                            loading={props.updatePtrPending}
+                            onClick={() => props.onEditPtr(row)}
+                          >
+                            {ptrState === 'set' ? t('vps.network.host_addresses.action.ptr_edit') : t('vps.network.host_addresses.action.ptr_add')}
+                          </ActionButton>
                           <ActionButton
                             variant="primary"
                             size="sm"

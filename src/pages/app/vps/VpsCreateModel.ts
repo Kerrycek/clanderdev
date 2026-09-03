@@ -97,6 +97,15 @@ export function osFamilyLabel(family: OsTemplate['os_family'], fallback: string)
   return full?.label || full?.description || (full?.id ? `#${full.id}` : fallback);
 }
 
+export function groupOsTemplatesByFamily(templates: OsTemplate[], fallback: string) {
+  const groups = new Map<string, OsTemplate[]>();
+  for (const template of templates) {
+    const family = osFamilyLabel(template.os_family, fallback);
+    groups.set(family, [...(groups.get(family) ?? []), template]);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
 export function locationEnvironmentId(loc: Location | undefined): number | undefined {
   const nested = loc?.environment?.id;
   if (typeof nested === 'number') return nested;

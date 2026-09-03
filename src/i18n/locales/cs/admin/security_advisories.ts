@@ -170,7 +170,7 @@ export const csAdmin_security_advisories = {
   'admin.security_advisories.update.mail_confirm_title': 'Odeslat tuto aktualizaci e-mailem?',
   'admin.security_advisories.update.mail_confirm_body': 'Aktualizace se zveřejní a odešle dotčeným uživatelům.',
   'admin.security_advisories.update.delete_title': 'Smazat aktualizaci upozornění?',
-  'admin.security_advisories.update.delete_body': 'Aktualizace bude odebrána z historie upozornění.',
+  'admin.security_advisories.update.delete_body': 'Aktualizace bude odebrána z historie upozornění. Smazání aktualizace se stažením neobnoví stav nadřazeného upozornění.',
   'admin.security_advisories.updates.empty': 'Zatím nebyly přidány žádné aktualizace.',
   'admin.security_advisories.updates.draft_help': 'Před přidáním navazujících aktualizací tento návrh zveřejni.',
   'admin.security_advisories.updates.retracted_help': 'Upozornění je stažené. Historie aktualizací zůstává dostupná, ale další aktualizace už přidat nelze.',

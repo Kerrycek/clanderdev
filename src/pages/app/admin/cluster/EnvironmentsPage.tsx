@@ -3,13 +3,15 @@ import { useSearchParams } from 'react-router-dom';
 import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+import { useAuth } from '../../../../app/auth';
 import { useI18n } from '../../../../app/i18n';
 import { useToasts } from '../../../../app/toasts';
 import { formatErrorMessage } from '../../../../lib/errors';
 import { formatDurationSeconds } from '../../../../lib/format';
 import { parseBoolParam, parseNonNegativeInt } from '../../../../lib/parse';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
-import { createEnvironment, fetchEnvironments, updateEnvironment, type Environment } from '../../../../lib/api/infra';
+import { createEnvironment, fetchEnvironments, setEnvironmentMaintenance, updateEnvironment, type Environment } from '../../../../lib/api/infra';
+import { ClusterResourceActions } from './ClusterResourceActions';
 
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
@@ -113,6 +115,7 @@ function buildPayload(form: FormState): { payload: Record<string, unknown>; erro
 }
 
 export function EnvironmentsPage() {
+  const auth = useAuth();
   const { t } = useI18n();
   const { pushToast } = useToasts();
   const qc = useQueryClient();
@@ -613,16 +616,10 @@ export function EnvironmentsPage() {
                       {ipOwner === false ? t('common.no') : t('common.yes')}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openEdit(env)}
-                      testId={`admin.cluster.environments.row.${env.id}.edit`}
-                    >
-                      {t('common.edit')}
-                    </Button>
-                  </td>
+                  <ClusterResourceActions
+                    role={auth.role} maintenance={{ value: env.maintenance_lock, reason: env.maintenance_lock_reason, label: envLabel(env), testId: `admin.cluster.environments.row.${env.id}.maintenance`, setMaintenance: (opts) => setEnvironmentMaintenance(env.id, opts), onChanged: () => qc.invalidateQueries({ queryKey: ['cluster.environments'] }) }}
+                    edit={{ label: t('common.edit'), testId: `admin.cluster.environments.row.${env.id}.edit`, onClick: () => openEdit(env) }}
+                  />
                 </tr>
               );
             })}

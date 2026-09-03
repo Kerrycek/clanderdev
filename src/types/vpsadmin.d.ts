@@ -43,6 +43,9 @@ declare global {
          */
         basePath?: string;
 
+        /** Explicit origin of the retired PHP UI for opt-in fallback links. */
+        legacyUrl?: string;
+
         /** Optional override for the login endpoint URL (e.g. '/login'). */
         loginUrl?: string;
         /** Optional override for the logout endpoint URL (e.g. '/logout'). */

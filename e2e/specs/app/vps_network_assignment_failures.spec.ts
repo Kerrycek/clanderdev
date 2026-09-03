@@ -252,22 +252,24 @@ test.describe('@workflow-matrix VPS network assignment failure regressions', () 
 
     for (const [targetPage, interfaceId] of [[page, '623'], [secondPage, '624']] as const) {
       await targetPage.getByTestId('vps.network.ip_addresses.unassigned.302.assign').click();
-      await targetPage.getByTestId('vps.network.ip_addresses.assign_route.interface').selectOption(interfaceId);
-      await expect(targetPage.getByTestId('vps.network.ip_addresses.assign_route.submit')).toBeEnabled();
+      await expect(targetPage.getByTestId('network.user.assign.interface')).toHaveValue(interfaceId);
+      await targetPage.getByTestId('network.user.assign.continue').click();
+      await expect(targetPage.getByTestId('network.user.assign.address')).toHaveValue('302');
+      await expect(targetPage.getByTestId('network.user.assign.submit')).toBeEnabled();
     }
 
     await Promise.all([
-      page.getByTestId('vps.network.ip_addresses.assign_route.submit').evaluate((button) => {
+      page.getByTestId('network.user.assign.submit').evaluate((button) => {
         (button as HTMLButtonElement).click();
       }),
-      secondPage.getByTestId('vps.network.ip_addresses.assign_route.submit').evaluate((button) => {
+      secondPage.getByTestId('network.user.assign.submit').evaluate((button) => {
         (button as HTMLButtonElement).click();
       }),
     ]);
 
     await expect.poll(() => postCount).toBe(1);
-    await expect(page.getByTestId('vps.network.ip_addresses.assign_route.submit')).toBeDisabled();
-    await expect(secondPage.getByTestId('vps.network.ip_addresses.assign_route.submit')).toBeDisabled();
+    await expect(page.getByTestId('network.user.assign.submit')).toBeDisabled();
+    await expect(secondPage.getByTestId('network.user.assign.submit')).toBeDisabled();
     await page.reload();
     await expect(page.getByTestId('vps.network.route_assign.uncertain.302')).toBeVisible();
     await secondPage.close();

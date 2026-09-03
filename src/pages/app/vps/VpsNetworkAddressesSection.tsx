@@ -39,6 +39,7 @@ export function VpsNetworkAddressesSection(props: {
   onEditOwner: (ip: IpAddress) => void;
   onFreeRoute: (ip: IpAddress) => void;
   onAssignRoute: (ip: IpAddress) => void;
+  onAddHostAddresses: (ip: IpAddress) => void;
   onEditPtr: (row: HostIpAddress) => void;
   onAssignHost: (row: HostIpAddress) => void;
   onFreeHost: (row: HostIpAddress) => void;
@@ -80,6 +81,7 @@ export function VpsNetworkAddressesSection(props: {
         onEditOwner={props.onEditOwner}
         onFreeRoute={props.onFreeRoute}
         onAssignRoute={props.onAssignRoute}
+        onAddHostAddresses={props.onAddHostAddresses}
       />
 
       <VpsNetworkHostAddressesCard

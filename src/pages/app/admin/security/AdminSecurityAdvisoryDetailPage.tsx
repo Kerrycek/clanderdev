@@ -53,7 +53,8 @@ import { SecurityAdvisoryNodesPanel } from './SecurityAdvisoryNodesPanel';
 import { SecurityAdvisoryOutagesPanel } from './SecurityAdvisoryOutagesPanel';
 import { SecurityAdvisoryOverviewPanel } from './SecurityAdvisoryOverviewPanel';
 import { SecurityAdvisoryUpdatesPanel } from './SecurityAdvisoryUpdatesPanel';
-import { DETAIL_TABS, type DetailTab } from './securityAdvisoryDetailViewModel';
+import { DETAIL_TABS, sortSecurityAdvisoryUpdates, type DetailTab } from './securityAdvisoryDetailViewModel';
+import { useSecurityAdvisoryUpdateEditing } from './useSecurityAdvisoryUpdateEditing';
 
 export function AdminSecurityAdvisoryDetailPage() {
   const params = useParams();
@@ -138,14 +139,7 @@ export function AdminSecurityAdvisoryDetailPage() {
     () => securityAdvisoryPublishIssues({ cves: cveLabels, nodes: nodesQ.data ?? [], statuses: statusesQ.data ?? [] }),
     [cveLabels, nodesQ.data, statusesQ.data],
   );
-  const updates = useMemo(
-    () => (updatesQ.data ?? []).slice().sort((a, b) => {
-      const aTime = new Date(a.created_at ?? a.updated_at ?? 0).getTime();
-      const bTime = new Date(b.created_at ?? b.updated_at ?? 0).getTime();
-      return bTime - aTime;
-    }),
-    [updatesQ.data],
-  );
+  const updates = useMemo(() => sortSecurityAdvisoryUpdates(updatesQ.data ?? []), [updatesQ.data]);
 
   const invalidateDetail = async () => {
     await Promise.all([
@@ -291,6 +285,14 @@ export function AdminSecurityAdvisoryDetailPage() {
     }
     createUpdateM.mutate(values);
   };
+  const {
+    editingUpdate,
+    setEditingUpdate,
+    deleteUpdateTarget,
+    setDeleteUpdateTarget,
+    editUpdateM,
+    deleteUpdateM,
+  } = useSecurityAdvisoryUpdateEditing({ invalidateDetail, setUpdateError });
 
   const [outageId, setOutageId] = useState('');
   const linkOutageM = useMutation({
@@ -406,6 +408,11 @@ export function AdminSecurityAdvisoryDetailPage() {
           loading={updatesQ.isLoading}
           error={updatesQ.error}
           onCreate={openUpdateCreate}
+          onEdit={(update) => {
+            setUpdateError(null);
+            setEditingUpdate(update);
+          }}
+          onDelete={setDeleteUpdateTarget}
         />
       ) : null}
 
@@ -450,14 +457,26 @@ export function AdminSecurityAdvisoryDetailPage() {
         onRebuildClose={() => setRebuildOpen(false)}
         onRebuildConfirm={() => rebuildM.mutate()}
         updateEditorOpen={updateEditorOpen}
+        editingUpdate={editingUpdate}
+        deleteUpdateTarget={deleteUpdateTarget}
         updateError={updateError}
-        updateSaving={createUpdateM.isPending}
+        updateSaving={createUpdateM.isPending || editUpdateM.isPending}
         onUpdateEditorClose={() => {
           if (createUpdateM.isPending) return;
           setUpdateEditorOpen(false);
           setUpdateError(null);
         }}
         onUpdateSubmit={submitUpdate}
+        onEditUpdateClose={() => {
+          if (!editUpdateM.isPending) {
+            setEditingUpdate(null);
+            setUpdateError(null);
+          }
+        }}
+        onEditUpdateSubmit={(values) => editUpdateM.mutate(values)}
+        onDeleteUpdateClose={() => !deleteUpdateM.isPending && setDeleteUpdateTarget(null)}
+        onDeleteUpdateConfirm={() => deleteUpdateM.mutate()}
+        deleteUpdateSaving={deleteUpdateM.isPending}
         updateConfirmOpen={updateConfirmOpen}
         pendingUpdate={pendingUpdate}
         onUpdateConfirmClose={() => {
