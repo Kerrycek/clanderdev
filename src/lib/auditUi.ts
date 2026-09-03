@@ -32,8 +32,9 @@ export function eventDataSummary(ev: ObjectHistoryEvent): string {
 }
 
 export function userLabel(ev: ObjectHistoryEvent, na: string): string {
-  const user = ev.user;
+  const user = ev.user as ObjectHistoryEvent['user'] | number | undefined;
   if (!user) return na;
+  if (typeof user === 'number') return `#${user}`;
   const login = typeof user.login === 'string' && user.login ? user.login : undefined;
   const id = typeof user.id === 'number' ? user.id : undefined;
   if (login && id) return `${login} (#${id})`;
@@ -43,8 +44,9 @@ export function userLabel(ev: ObjectHistoryEvent, na: string): string {
 }
 
 export function sessionLabel(ev: ObjectHistoryEvent, na: string): string {
-  const session = ev.user_session;
+  const session = ev.user_session as ObjectHistoryEvent['user_session'] | number | undefined;
   if (!session) return na;
+  if (typeof session === 'number') return `#${session}`;
   const ip = typeof session.api_ip_addr === 'string' && session.api_ip_addr ? session.api_ip_addr : undefined;
   const id = typeof session.id === 'number' ? session.id : undefined;
   if (ip && id) return `${ip} (#${id})`;

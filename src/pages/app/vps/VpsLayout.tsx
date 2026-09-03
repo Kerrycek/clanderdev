@@ -18,7 +18,6 @@ import { objectRef } from '../../../lib/objectRef';
 import { Badge } from '../../../components/ui/Badge';
 import { LockBadge } from '../../../components/ui/LockBadge';
 import { ObjectHeader } from '../../../components/ui/ObjectHeader';
-import { TabsNav } from '../../../components/ui/TabsNav';
 import { ActionButton } from '../../../components/ui/ActionButton';
 import { Button } from '../../../components/ui/Button';
 import { LinkButton } from '../../../components/ui/LinkButton';
@@ -30,7 +29,6 @@ import { Modal } from '../../../components/ui/Modal';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { CopyButton } from '../../../components/ui/CopyButton';
 import { LockStateStaleAlert } from '../../../components/ui/LockStateStaleAlert';
-import { Select } from '../../../components/ui/Select';
 import { gateVpsAction } from '../../../lib/gates/vps';
 import {
   actionStateProgressLabel,
@@ -50,6 +48,7 @@ import {
   resolvePendingVpsCreateActionStateId,
   shouldDeferVpsDetailQuery,
 } from './VpsDetailVisibility';
+import { VpsActionsMenu, VpsTabsNav } from './VpsNavigation';
 export function VpsLayout() {
   const { basePath, mode } = useAppMode();
   const auth = useAuth();
@@ -286,18 +285,6 @@ export function VpsLayout() {
     void vpsQ.refetch();
     void chainsQ.refetch();
   }, [currentPasswdFlow, passwdStateQ.data]);
-
-  const nav = useMemo(
-    () => [
-      { label: t('vps.tabs.overview'), to: `${basePath}/vps/${vpsId}`, end: true },
-      { label: t('vps.tabs.access'), to: `${basePath}/vps/${vpsId}/access`, end: true },
-      { label: t('vps.tabs.network'), to: `${basePath}/vps/${vpsId}/network`, end: true },
-      { label: t('vps.tabs.storage'), to: `${basePath}/vps/${vpsId}/storage`, end: true },
-      { label: t('vps.tabs.maintenance'), to: `${basePath}/vps/${vpsId}/maintenance`, end: true },
-      { label: t('vps.tabs.console'), to: `${basePath}/vps/${vpsId}/console`, end: true },
-    ],
-    [basePath, t, vpsId]
-  );
 
   if (deferVpsDetailQuery) return <LoadingState testId="vps.detail.creating" />;
   if (vpsQ.isLoading) return <LoadingState testId="vps.detail.loading" />;
@@ -569,59 +556,22 @@ export function VpsLayout() {
                 </ActionButton>
               ) : null}
 
-              <Select
-                value=""
-                ariaLabel={t('vps.actions.menu.label')}
-                testId="vps.actions.menu"
-                className="w-full sm:!w-48"
-                onChange={(e) => handleHeaderMoreAction(e.target.value)}
-              >
-                <option value="">{t('vps.actions.more.placeholder')}</option>
-                {canMutateVps ? <optgroup label={t('vps.actions.more.group.daily')}>
-                  {primaryHeaderAction !== 'start' ? (
-                    <option value="action:start" disabled={!startGate.allowed}>
-                      {t('action.vps.start.label')}
-                    </option>
-                  ) : null}
-                  <option value="action:restart" disabled={!restartGate.allowed}>
-                    {t('action.vps.restart.label')}
-                  </option>
-                  <option value="action:stop" disabled={!stopGate.allowed}>
-                    {t('action.vps.stop.label')}
-                  </option>
-                  <option value="action:root_password" disabled={!passwdGate.allowed}>
-                    {t('vps.power.root_password.button')}
-                  </option>
-                  {busyTransaction || busyLocal ? <option value="tasks">{t('common.open_tasks')}</option> : null}
-                </optgroup> : null}
-                <optgroup label={t('vps.actions.more.group.sections')}>
-                  <option value={`${basePath}/vps/${vps.id}/access`}>{t('vps.tabs.access')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/config`}>{t('vps.tabs.config')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/network`}>{t('vps.tabs.network')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/storage`}>{t('vps.tabs.storage')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/features`}>{t('vps.tabs.features')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/maintenance`}>{t('vps.tabs.maintenance')}</option>
-                  <option value={`${basePath}/transactions/items?vps=${vps.id}`}>{t('vps.overview.admin_actions.transaction_log')}</option>
-                </optgroup>
-                {canMutateVps ? <optgroup label={t('vps.actions.more.group.lifecycle')}>
-                  <option value={`${basePath}/vps/${vps.id}/lifecycle/reinstall`}>{t('action.vps.reinstall.label')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/lifecycle/clone`}>{t('action.vps.clone.label')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/lifecycle/swap`}>{t('action.vps.swap.label')}</option>
-                  <option value={`${basePath}/vps/${vps.id}/lifecycle/delete`}>{t('action.vps.delete.label')}</option>
-                </optgroup> : null}
-                {mode === 'admin' && auth.role === 'admin' ? (
-                  <optgroup label={t('vps.actions.more.group.admin')}>
-                    <option value={`${basePath}/vps/${vps.id}/lifecycle/lifetime`}>{t('action.vps.lifecycle.label')}</option>
-                    <option value={`${basePath}/vps/${vps.id}/lifecycle/template`}>{t('action.vps.template.label')}</option>
-                    <option value={`${basePath}/vps/${vps.id}/lifecycle/boot`}>{t('action.vps.boot.label')}</option>
-                    <option value={`${basePath}/vps/${vps.id}/lifecycle/replace`}>{t('action.vps.replace.label')}</option>
-                    <option value={`${basePath}/vps/${vps.id}/lifecycle/migrate`}>{t('action.vps.migrate.label')}</option>
-                  </optgroup>
-                ) : null}
-              </Select>
+              <VpsActionsMenu
+                basePath={basePath}
+                vpsId={vps.id}
+                canMutateVps={canMutateVps}
+                primaryHeaderAction={primaryHeaderAction}
+                startAllowed={startGate.allowed}
+                restartAllowed={restartGate.allowed}
+                stopAllowed={stopGate.allowed}
+                passwordAllowed={passwdGate.allowed}
+                showTasks={busyTransaction || busyLocal}
+                showAdminActions={mode === 'admin' && auth.role === 'admin'}
+                onSelect={handleHeaderMoreAction}
+              />
             </>
           }
-          tabs={<TabsNav items={nav} />}
+          tabs={<VpsTabsNav basePath={basePath} vpsId={vps.id} />}
         />
 
         {chainsStale ? (
