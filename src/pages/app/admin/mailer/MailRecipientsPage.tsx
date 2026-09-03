@@ -4,72 +4,85 @@ import { CircleHelp, SlidersHorizontal } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useI18n } from '../../../../app/i18n';
-
+import { useToasts } from '../../../../app/toasts';
+import { useAuth } from '../../../../app/auth';
 import {
   createMailRecipient,
-  deleteMailRecipient,
   fetchMailRecipients,
-  updateMailRecipient,
   type MailRecipient,
 } from '../../../../lib/api/mailer';
-import { formatDateTime } from '../../../../lib/format';
-import { useKeysetPagination } from '../../../../lib/hooks/useKeysetPagination';
-import { cursorFromDescendingPage } from '../../../../lib/lockIndex';
+import { isAmbiguousMutationError } from '../../../../lib/api/haveapi';
 
 import { ListShell } from '../../../../components/layout/ListShell';
 import { PageHeader } from '../../../../components/layout/PageHeader';
 import { FilterBar } from '../../../../components/layout/FilterBar';
 
-import { Alert } from '../../../../components/ui/Alert';
 import { Button } from '../../../../components/ui/Button';
-import { Card } from '../../../../components/ui/Card';
-import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { CopyButton } from '../../../../components/ui/CopyButton';
-import { Drawer } from '../../../../components/ui/Drawer';
 import { FilterChip } from '../../../../components/ui/FilterChip';
 import { EmptyState } from '../../../../components/ui/EmptyState';
 import { ErrorState } from '../../../../components/ui/ErrorState';
-import { Input } from '../../../../components/ui/Input';
 import { KeysetPagination } from '../../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../../components/ui/LoadingState';
-import { Modal } from '../../../../components/ui/Modal';
 import { SmartFilterInput, type SmartFilterSuggestion } from '../../../../components/ui/SmartFilterInput';
 import { SmartInputHelp } from '../../../../components/ui/SmartInputHelp';
-import { TableCard } from '../../../../components/ui/TableCard';
 
 import { MailerTabs } from './MailerTabs';
+import { MailRecipientEditorModal } from './MailRecipientEditorModal';
+import { MailRecipientResults } from './MailRecipientResults';
+import { MailRecipientSafetyBanners } from './MailRecipientSafetyBanners';
+import { MailRecipientsAdvancedFilters } from './MailRecipientsAdvancedFilters';
+import {
+  filterMailRecipients,
+  MAIL_RECIPIENT_FETCH_LIMIT,
+  MAIL_RECIPIENT_PAGE_LIMITS,
+  parseMailRecipientPage,
+  parseMailRecipientPageLimit,
+} from './MailRecipientsModel';
+import {
+  clearMailRecipientCreateGuard,
+  persistMailRecipientCreateGuard,
+  readMailRecipientCreateGuard,
+  type MailRecipientCreateGuardAttempt,
+} from './mailRecipientMutationGuardStorage';
+import {
+  mailRecipientEditFingerprint,
+  mailRecipientEditorForm,
+  updateMailRecipientWithPreflight,
+} from './mailRecipientEditSafety';
 import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../../lib/smartFilter';
+import { strictPositiveIntegerId } from './mailerMutationSafety';
+
+interface RecipientCreatePayload {
+  label: string;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+}
+
+function createGuardAttempt(payload: RecipientCreatePayload): MailRecipientCreateGuardAttempt {
+  return { label: payload.label, to: payload.to ?? '', cc: payload.cc ?? '', bcc: payload.bcc ?? '' };
+}
 
 export function MailRecipientsPage() {
   const { t } = useI18n();
   const qc = useQueryClient();
+  const { pushToast } = useToasts();
+  const auth = useAuth();
+  const guardScope = String(auth.user?.id ?? 'unknown');
 
   const [searchParams, setSearchParams] = useSearchParams();
   const smartInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [q, setQ] = useState(() => searchParams.get('q') ?? '');
-  const [labelFilter, setLabelFilter] = useState(() => searchParams.get('label') ?? '');
-  const [toFilter, setToFilter] = useState(() => searchParams.get('to') ?? '');
-  const [ccFilter, setCcFilter] = useState(() => searchParams.get('cc') ?? '');
-  const [bccFilter, setBccFilter] = useState(() => searchParams.get('bcc') ?? '');
+  const q = searchParams.get('q') ?? '';
+  const labelFilter = searchParams.get('label') ?? '';
+  const toFilter = searchParams.get('to') ?? '';
+  const ccFilter = searchParams.get('cc') ?? '';
+  const bccFilter = searchParams.get('bcc') ?? '';
   const [smart, setSmart] = useState('');
   const [smartErrors, setSmartErrors] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  useEffect(() => {
-    const urlQ = searchParams.get('q') ?? '';
-    const urlLabel = searchParams.get('label') ?? '';
-    const urlTo = searchParams.get('to') ?? '';
-    const urlCc = searchParams.get('cc') ?? '';
-    const urlBcc = searchParams.get('bcc') ?? '';
-    if (urlQ !== q) setQ(urlQ);
-    if (urlLabel !== labelFilter) setLabelFilter(urlLabel);
-    if (urlTo !== toFilter) setToFilter(urlTo);
-    if (urlCc !== ccFilter) setCcFilter(urlCc);
-    if (urlBcc !== bccFilter) setBccFilter(urlBcc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
 
   const qTrim = useMemo(() => q.trim(), [q]);
   const labelTrim = useMemo(() => labelFilter.trim(), [labelFilter]);
@@ -78,45 +91,53 @@ export function MailRecipientsPage() {
   const bccTrim = useMemo(() => bccFilter.trim(), [bccFilter]);
   const smartNeedle = useMemo(() => smart.trim(), [smart]);
 
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    if (qTrim) next.set('q', qTrim); else next.delete('q');
-    if (labelTrim) next.set('label', labelTrim); else next.delete('label');
-    if (toTrim) next.set('to', toTrim); else next.delete('to');
-    if (ccTrim) next.set('cc', ccTrim); else next.delete('cc');
-    if (bccTrim) next.set('bcc', bccTrim); else next.delete('bcc');
-    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
-  }, [bccTrim, ccTrim, labelTrim, qTrim, searchParams, setSearchParams, toTrim]);
+  const setFilter = (name: 'q' | 'label' | 'to' | 'cc' | 'bcc', value: string) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (value.trim()) next.set(name, value); else next.delete(name);
+      next.delete('page');
+      next.delete('from_id');
+      return next;
+    }, { replace: true });
+  };
 
-  const pagination = useKeysetPagination({
-    id: 'admin.mailer.recipients.list',
-    filterKey: JSON.stringify({ q: qTrim, label: labelTrim, to: toTrim, cc: ccTrim, bcc: bccTrim }),
-    searchParams,
-    setSearchParams,
-    defaultLimit: 50,
-    allowedLimits: [25, 50, 100],
-  });
+  const setFilters = (values: { q: string; label: string; to: string; cc: string; bcc: string }) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      for (const [name, value] of Object.entries(values)) {
+        if (value.trim()) next.set(name, value); else next.delete(name);
+      }
+      next.delete('page');
+      next.delete('from_id');
+      return next;
+    }, { replace: true });
+  };
 
   const listQ = useQuery({
-    queryKey: ['mailer', 'mail_recipients', 'index', { limit: pagination.limit, fromId: pagination.fromId, q: qTrim, label: labelTrim, to: toTrim, cc: ccTrim, bcc: bccTrim }],
-    queryFn: async () => (await fetchMailRecipients({ limit: pagination.limit, fromId: pagination.fromId, q: qTrim, label: labelTrim, to: toTrim, cc: ccTrim, bcc: bccTrim })).data,
-    staleTime: 10_000,
+    queryKey: ['mailer', 'mail_recipients', 'index', { limit: MAIL_RECIPIENT_FETCH_LIMIT }],
+    queryFn: async () => (await fetchMailRecipients({ limit: MAIL_RECIPIENT_FETCH_LIMIT })).data,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
-  const rows: MailRecipient[] = listQ.data ?? [];
-  const pageCursor = useMemo(() => cursorFromDescendingPage(rows as any), [rows]);
-  const hasMore = rows.length >= pagination.limit;
-  const canNext = pagination.hasForward || (hasMore && pageCursor !== null);
-  const canPaginate = pagination.stack.length > 1 || rows.length > 0;
+  const filteredRows = useMemo(() => filterMailRecipients(listQ.data ?? [], {
+    q,
+    label: labelFilter,
+    to: toFilter,
+    cc: ccFilter,
+    bcc: bccFilter,
+  }), [bccFilter, ccFilter, labelFilter, listQ.data, q, toFilter]);
+  const limit = parseMailRecipientPageLimit(searchParams.get('limit'));
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / limit));
+  const page = parseMailRecipientPage(searchParams.get('page'), pageCount);
+  const rows = filteredRows.slice((page - 1) * limit, page * limit);
+  const canPaginate = filteredRows.length > 0;
+  const fetchLimitReached = (listQ.data?.length ?? 0) >= MAIL_RECIPIENT_FETCH_LIMIT;
 
   const filtersActive = Boolean(qTrim || labelTrim || toTrim || ccTrim || bccTrim || smartErrors.length);
 
   function clearFilters() {
-    setQ('');
-    setLabelFilter('');
-    setToFilter('');
-    setCcFilter('');
-    setBccFilter('');
+    setFilters({ q: '', label: '', to: '', cc: '', bcc: '' });
     setSmart('');
     setSmartErrors([]);
   }
@@ -146,7 +167,7 @@ export function MailRecipientsPage() {
       const firstToken = tokens[0];
       const id = firstToken ? parseNumericToken(firstToken) : null;
       if (id !== null) {
-        const exact = rows.find((r) => Number((r as any).id) === id);
+        const exact = filteredRows.find((r) => Number((r as any).id) === id);
         if (exact) {
           openEdit(exact);
           setSmart('');
@@ -154,7 +175,7 @@ export function MailRecipientsPage() {
           return;
         }
         nextQ = String(id);
-        setQ(nextQ);
+        setFilter('q', nextQ);
         setSmart('');
         setSmartErrors([]);
         return;
@@ -182,7 +203,7 @@ export function MailRecipientsPage() {
         const id = parseNumericToken(value);
         if (id === null) nextErrors.push(t('mailer.recipients.smart.error.id_numeric_only', { value }));
         else {
-          const exact = rows.find((r) => Number((r as any).id) === id);
+          const exact = filteredRows.find((r) => Number((r as any).id) === id);
           if (exact) {
             openEdit(exact);
             setSmart('');
@@ -199,11 +220,7 @@ export function MailRecipientsPage() {
     const free = freeText.join(' ').trim();
     if (free) nextQ = free;
 
-    setQ(nextQ);
-    setLabelFilter(nextLabel);
-    setToFilter(nextTo);
-    setCcFilter(nextCc);
-    setBccFilter(nextBcc);
+    setFilters({ q: nextQ, label: nextLabel, to: nextTo, cc: nextCc, bcc: nextBcc });
     setSmart('');
     setSmartErrors(nextErrors);
   }
@@ -223,7 +240,7 @@ export function MailRecipientsPage() {
     }
     const numeric = parseNumericToken(smartNeedle);
     if (numeric !== null) {
-      const exact = rows.find((r) => Number((r as any).id) === numeric);
+      const exact = filteredRows.find((r) => Number((r as any).id) === numeric);
       if (exact) {
         s.push({
           id: 'edit',
@@ -261,15 +278,15 @@ export function MailRecipientsPage() {
       testId: 'admin.mailer.recipients.smart_filter.suggest.search',
     });
     return s;
-  }, [rows, smartNeedle, t]);
+  }, [filteredRows, smartNeedle, t]);
 
   const activeFilterChips = useMemo(() => {
     const chips: React.ReactNode[] = [];
-    if (qTrim) chips.push(<FilterChip key='q' label={`q:${qTrim}`} onRemove={() => setQ('')} testId='admin.mailer.recipients.chip.q' />);
-    if (labelTrim) chips.push(<FilterChip key='label' label={`label:${labelTrim}`} onRemove={() => setLabelFilter('')} testId='admin.mailer.recipients.chip.label' />);
-    if (toTrim) chips.push(<FilterChip key='to' label={`to:${toTrim}`} onRemove={() => setToFilter('')} testId='admin.mailer.recipients.chip.to' />);
-    if (ccTrim) chips.push(<FilterChip key='cc' label={`cc:${ccTrim}`} onRemove={() => setCcFilter('')} testId='admin.mailer.recipients.chip.cc' />);
-    if (bccTrim) chips.push(<FilterChip key='bcc' label={`bcc:${bccTrim}`} onRemove={() => setBccFilter('')} testId='admin.mailer.recipients.chip.bcc' />);
+    if (qTrim) chips.push(<FilterChip key='q' label={`q:${qTrim}`} onRemove={() => setFilter('q', '')} testId='admin.mailer.recipients.chip.q' />);
+    if (labelTrim) chips.push(<FilterChip key='label' label={`label:${labelTrim}`} onRemove={() => setFilter('label', '')} testId='admin.mailer.recipients.chip.label' />);
+    if (toTrim) chips.push(<FilterChip key='to' label={`to:${toTrim}`} onRemove={() => setFilter('to', '')} testId='admin.mailer.recipients.chip.to' />);
+    if (ccTrim) chips.push(<FilterChip key='cc' label={`cc:${ccTrim}`} onRemove={() => setFilter('cc', '')} testId='admin.mailer.recipients.chip.cc' />);
+    if (bccTrim) chips.push(<FilterChip key='bcc' label={`bcc:${bccTrim}`} onRemove={() => setFilter('bcc', '')} testId='admin.mailer.recipients.chip.bcc' />);
     smartErrors.forEach((e, idx) => chips.push(<FilterChip key={`err.${idx}`} label={e} tone='danger' onRemove={() => setSmartErrors([])} testId={`admin.mailer.recipients.chip.error.${idx}`} />));
     return chips;
   }, [bccTrim, ccTrim, labelTrim, qTrim, smartErrors, toTrim]);
@@ -278,77 +295,198 @@ export function MailRecipientsPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<MailRecipient | null>(null);
   const [form, setForm] = useState({ label: '', to: '', cc: '', bcc: '' });
+  const [editBaselineFingerprint, setEditBaselineFingerprint] = useState<string | null>(null);
+  const [staleServerVersion, setStaleServerVersion] = useState<MailRecipient | null>(null);
+  const [indeterminateCreate, setIndeterminateCreate] = useState<MailRecipientCreateGuardAttempt | null>(
+    () => readMailRecipientCreateGuard(guardScope),
+  );
+  const editorSubmitRef = useRef(false);
+
+  useEffect(() => {
+    setIndeterminateCreate(readMailRecipientCreateGuard(guardScope));
+  }, [guardScope]);
 
   const openCreate = () => {
+    if (indeterminateCreate) return;
+    createM.reset();
+    updateM.reset();
     setEditing(null);
+    setEditBaselineFingerprint(null);
+    setStaleServerVersion(null);
     setForm({ label: '', to: '', cc: '', bcc: '' });
     setEditorOpen(true);
   };
 
   const openEdit = (r: MailRecipient) => {
+    createM.reset();
+    updateM.reset();
     setEditing(r);
-    setForm({
-      label: String((r as any).label ?? ''),
-      to: String((r as any).to ?? ''),
-      cc: String((r as any).cc ?? ''),
-      bcc: String((r as any).bcc ?? ''),
-    });
+    setEditBaselineFingerprint(mailRecipientEditFingerprint(r));
+    setStaleServerVersion(null);
+    setForm(mailRecipientEditorForm(r));
     setEditorOpen(true);
   };
 
   const createM = useMutation({
-    mutationFn: async () =>
-      (await createMailRecipient({
-        label: form.label.trim() || undefined,
-        to: form.to.trim() || undefined,
-        cc: form.cc.trim() || undefined,
-        bcc: form.bcc.trim() || undefined,
-      })).data,
-    onSuccess: async () => {
+    mutationFn: async (payload: RecipientCreatePayload) => {
+      const persisted = persistMailRecipientCreateGuard(guardScope, createGuardAttempt(payload));
+      if (!persisted) throw new Error(t('mailer.recipients.create.guard_storage_error'));
+      const created = (await createMailRecipient(payload)).data;
+      const createdId = strictPositiveIntegerId(created?.id);
+      if (createdId === null) {
+        throw new TypeError('Malformed mail recipient create response: missing id');
+      }
+      return { ...created, id: createdId };
+    },
+    onSuccess: async (created) => {
+      clearMailRecipientCreateGuard(guardScope);
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_recipients', 'index'] });
+      setIndeterminateCreate(null);
       setEditorOpen(false);
+      pushToast({
+        variant: 'ok',
+        title: t('mailer.recipients.create.success'),
+        body: t('mailer.recipients.create.success_body', { id: Number(created.id) }),
+      });
+    },
+    onError: (error, payload) => {
+      if (!isAmbiguousMutationError(error)) {
+        clearMailRecipientCreateGuard(guardScope);
+        return;
+      }
+      const attempt = createGuardAttempt(payload);
+      persistMailRecipientCreateGuard(guardScope, attempt);
+      setIndeterminateCreate(attempt);
+      setEditorOpen(false);
+    },
+    onSettled: () => {
+      editorSubmitRef.current = false;
     },
   });
 
   const updateM = useMutation({
-    mutationFn: async () => {
-      if (!editing) throw new Error('no recipient');
-      const id = Number((editing as any).id);
-      return (
-        await updateMailRecipient(id, {
-          label: form.label.trim() || undefined,
-          to: form.to.trim() || undefined,
-          cc: form.cc.trim() || undefined,
-          bcc: form.bcc.trim() || undefined,
-        })
-      ).data;
+    mutationFn: async (attempt: {
+      id: number;
+      baselineFingerprint: string;
+      payload: { label: string; to: string | null; cc: string | null; bcc: string | null };
+    }) => {
+      return updateMailRecipientWithPreflight(attempt);
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      if (result.status === 'stale') {
+        setStaleServerVersion(result.latest);
+        return;
+      }
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_recipients', 'index'] });
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'recipients'] });
+      setEditBaselineFingerprint(null);
+      setStaleServerVersion(null);
       setEditorOpen(false);
+      pushToast({ variant: 'ok', title: t('mailer.recipients.update.success') });
+    },
+    onSettled: () => {
+      editorSubmitRef.current = false;
     },
   });
 
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const editingStale = editing !== null && staleServerVersion !== null;
+  const saveDisabled = !form.label.trim()
+    || (!form.to.trim() && !form.cc.trim() && !form.bcc.trim())
+    || editingStale
+    || (editing !== null && editBaselineFingerprint === null);
+  const editorPending = createM.isPending || updateM.isPending;
 
-  const deleteM = useMutation({
-    mutationFn: async () => {
-      if (!deleteId) throw new Error('no id');
-      return await deleteMailRecipient(deleteId);
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_recipients', 'index'] });
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'recipients'] });
-      setDeleteId(null);
-    },
-  });
+  const closeEditor = () => {
+    if (!editorPending) setEditorOpen(false);
+  };
 
-  const saveDisabled = !form.to.trim() && !form.cc.trim() && !form.bcc.trim();
+  const submitEditor = () => {
+    if (editorSubmitRef.current || editorPending || saveDisabled) return;
+    editorSubmitRef.current = true;
+    if (editing) {
+      const recipientId = strictPositiveIntegerId(editing.id);
+      if (recipientId === null || editBaselineFingerprint === null) {
+        editorSubmitRef.current = false;
+        return;
+      }
+      updateM.mutate({
+        id: recipientId,
+        baselineFingerprint: editBaselineFingerprint,
+        payload: {
+          label: form.label.trim(),
+          to: form.to.trim() || null,
+          cc: form.cc.trim() || null,
+          bcc: form.bcc.trim() || null,
+        },
+      });
+      return;
+    }
+    createM.mutate({
+      label: form.label.trim(),
+      to: form.to.trim() || undefined,
+      cc: form.cc.trim() || undefined,
+      bcc: form.bcc.trim() || undefined,
+    });
+  };
+
+  const loadServerVersion = () => {
+    if (editorPending || !editing || !staleServerVersion) return;
+    const editingId = strictPositiveIntegerId(editing.id);
+    const latestId = strictPositiveIntegerId(staleServerVersion.id);
+    if (editingId === null || latestId !== editingId) return;
+
+    updateM.reset();
+    setEditing(staleServerVersion);
+    setForm(mailRecipientEditorForm(staleServerVersion));
+    setEditBaselineFingerprint(mailRecipientEditFingerprint(staleServerVersion));
+    setStaleServerVersion(null);
+  };
+
+  const setPageParam = (name: 'page' | 'limit', value: number) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if ((name === 'page' && value <= 1) || (name === 'limit' && value === 50)) next.delete(name);
+      else next.set(name, String(value));
+      if (name === 'limit') next.delete('page');
+      next.delete('from_id');
+      return next;
+    }, { replace: true });
+  };
+
+  const renderPagination = (testId: string) => canPaginate ? (
+    <KeysetPagination
+      page={page}
+      pageCount={pageCount}
+      totalPagesKnown
+      canPrev={page > 1}
+      canNext={page < pageCount}
+      onPrev={() => setPageParam('page', page - 1)}
+      onNext={() => setPageParam('page', page + 1)}
+      onGoToPage={(target) => setPageParam('page', target)}
+      limit={limit}
+      allowedLimits={MAIL_RECIPIENT_PAGE_LIMITS}
+      onLimitChange={(nextLimit) => setPageParam('limit', nextLimit)}
+      testId={testId}
+    />
+  ) : null;
 
   return (
     <ListShell
       testId="admin.mailer.recipients.page"
+      banner={(
+        <MailRecipientSafetyBanners
+          fetchLimitReached={fetchLimitReached}
+          fetchLimit={MAIL_RECIPIENT_FETCH_LIMIT}
+          indeterminateCreate={indeterminateCreate}
+          refreshing={listQ.isFetching}
+          onRefresh={() => void listQ.refetch()}
+          onUnlock={() => {
+            clearMailRecipientCreateGuard(guardScope);
+            setIndeterminateCreate(null);
+            createM.reset();
+          }}
+        />
+      )}
       header={
         <div className="space-y-3">
           <PageHeader
@@ -356,7 +494,13 @@ export function MailRecipientsPage() {
             description={t('mailer.recipients.list.description')}
             meta={filtersActive ? <span className="text-xs text-faint">{t('list.meta.filters_active')}</span> : null}
             actions={
-              <Button variant="primary" onClick={openCreate} testId="admin.mailer.recipients.create">
+              <Button
+                variant="primary"
+                onClick={openCreate}
+                disabled={indeterminateCreate !== null}
+                disabledReason={indeterminateCreate ? t('mailer.recipients.create.indeterminate.body') : undefined}
+                testId="admin.mailer.recipients.create"
+              >
                 {t('mailer.recipients.create')}
               </Button>
             }
@@ -469,58 +613,14 @@ export function MailRecipientsPage() {
             keyRowTestIdPrefix="admin.mailer.recipients.smart_help.key"
           />
 
-          <Drawer
+          <MailRecipientsAdvancedFilters
             open={advancedOpen}
+            filtersActive={filtersActive}
+            values={{ q, label: labelFilter, to: toFilter, cc: ccFilter, bcc: bccFilter }}
             onClose={() => setAdvancedOpen(false)}
-            title={t('filters.advanced.title')}
-            width="lg"
-            testId="admin.mailer.recipients.advanced"
-            footer={
-              <div className="flex items-center justify-end gap-2">
-                {filtersActive ? (
-                  <Button variant="secondary" size="sm" onClick={clearFilters}>
-                    {t('common.clear_filters')}
-                  </Button>
-                ) : null}
-                <Button variant="primary" size="sm" onClick={() => setAdvancedOpen(false)}>
-                  {t('common.close')}
-                </Button>
-              </div>
-            }
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <div>
-                <div className="text-sm font-medium">{t('common.search')}</div>
-                <div className="mt-1">
-                  <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('mailer.recipients.filters.search.placeholder')} autoComplete="off" testId="admin.mailer.recipients.advanced.q" />
-                </div>
-              </div>
-              <div>
-                <div className="text-sm font-medium">{t('mailer.recipients.fields.label')}</div>
-                <div className="mt-1">
-                  <Input value={labelFilter} onChange={(e) => setLabelFilter(e.target.value)} placeholder={t('mailer.recipients.fields.label')} autoComplete="off" testId="admin.mailer.recipients.advanced.label" />
-                </div>
-              </div>
-              <div>
-                <div className="text-sm font-medium">{t('mailer.recipients.fields.to')}</div>
-                <div className="mt-1">
-                  <Input value={toFilter} onChange={(e) => setToFilter(e.target.value)} placeholder={t('mailer.recipients.fields.to')} autoComplete="off" testId="admin.mailer.recipients.advanced.to" />
-                </div>
-              </div>
-              <div>
-                <div className="text-sm font-medium">{t('mailer.recipients.fields.cc')}</div>
-                <div className="mt-1">
-                  <Input value={ccFilter} onChange={(e) => setCcFilter(e.target.value)} placeholder={t('mailer.recipients.fields.cc')} autoComplete="off" testId="admin.mailer.recipients.advanced.cc" />
-                </div>
-              </div>
-              <div>
-                <div className="text-sm font-medium">{t('mailer.recipients.fields.bcc')}</div>
-                <div className="mt-1">
-                  <Input value={bccFilter} onChange={(e) => setBccFilter(e.target.value)} placeholder={t('mailer.recipients.fields.bcc')} autoComplete="off" testId="admin.mailer.recipients.advanced.bcc" />
-                </div>
-              </div>
-            </div>
-          </Drawer>
+            onClear={clearFilters}
+            onChange={setFilter}
+          />
         </>
       }
     >
@@ -534,208 +634,35 @@ export function MailRecipientsPage() {
           onRetry={() => void listQ.refetch()}
           detailsExtra={{ page: 'admin.mailer.recipients.list' }}
         />
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <EmptyState
           testId="admin.mailer.recipients.empty"
           title={filtersActive ? t('empty.list.no_matches.title') : t('empty.list.empty.title')}
           body={filtersActive ? t('empty.list.no_matches.body') : t('empty.list.empty.body')}
         />
       ) : (
-        <>
-          {/* Mobile */}
-          <div className="grid gap-3 md:hidden">
-            {rows.map((r) => {
-              const id = Number((r as any).id);
-              const label = String((r as any).label ?? `#${id}`);
-              const to = String((r as any).to ?? '');
-              const cc = String((r as any).cc ?? '');
-              const bcc = String((r as any).bcc ?? '');
-
-              return (
-                <Card key={id} className="p-4" testId={`admin.mailer.recipients.card.${id}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold">{label}</div>
-                      <div className="mt-2 grid gap-1 text-xs text-muted">
-                        <div className="truncate" title={to}>
-                          <span className="font-medium">{t('mailer.recipients.fields.to')}:</span> {to || t('common.na')}
-                        </div>
-                        <div className="truncate" title={cc}>
-                          <span className="font-medium">{t('mailer.recipients.fields.cc')}:</span> {cc || t('common.na')}
-                        </div>
-                        <div className="truncate" title={bcc}>
-                          <span className="font-medium">{t('mailer.recipients.fields.bcc')}:</span> {bcc || t('common.na')}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 flex-col gap-2">
-                      <Button variant="secondary" size="sm" onClick={() => openEdit(r)} testId={`admin.mailer.recipients.edit.${id}`}>
-                        {t('common.edit')}
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={() => setDeleteId(id)} testId={`admin.mailer.recipients.delete.${id}`}>
-                        {t('common.delete')}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-3 text-xs text-faint">{formatDateTime((r as any).updated_at)}</div>
-                </Card>
-              );
-            })}
-
-            {canPaginate ? (
-              <Card className="md:hidden">
-                <KeysetPagination
-                  page={pagination.page}
-                  pageCount={pagination.stack.length}
-                  canPrev={pagination.canPrev}
-                  canNext={canNext}
-                  onPrev={pagination.goPrev}
-                  onNext={() => pagination.goNext(pageCursor)}
-                  onGoToPage={pagination.goToPage}
-                  limit={pagination.limit}
-                  allowedLimits={pagination.allowedLimits}
-                  onLimitChange={pagination.setLimit}
-                  testId="admin.mailer.recipients.pagination.mobile"
-                />
-              </Card>
-            ) : null}
-          </div>
-
-          {/* Desktop */}
-          <TableCard
-            className="hidden md:block"
-            minWidth="xl"
-            tableTestId="admin.mailer.recipients.table"
-            footer={
-              canPaginate ? (
-                <KeysetPagination
-                  page={pagination.page}
-                  pageCount={pagination.stack.length}
-                  canPrev={pagination.canPrev}
-                  canNext={canNext}
-                  onPrev={pagination.goPrev}
-                  onNext={() => pagination.goNext(pageCursor)}
-                  onGoToPage={pagination.goToPage}
-                  limit={pagination.limit}
-                  allowedLimits={pagination.allowedLimits}
-                  onLimitChange={pagination.setLimit}
-                  testId="admin.mailer.recipients.pagination.desktop"
-                />
-              ) : null
-            }
-          >
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted">
-                <th className="px-4 py-2">{t('common.label')}</th>
-                <th className="px-4 py-2">{t('mailer.recipients.fields.to')}</th>
-                <th className="px-4 py-2">{t('mailer.recipients.fields.cc')}</th>
-                <th className="px-4 py-2">{t('mailer.recipients.fields.bcc')}</th>
-                <th className="px-4 py-2">{t('common.updated')}</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const id = Number((r as any).id);
-                const label = String((r as any).label ?? `#${id}`);
-                const to = String((r as any).to ?? '');
-                const cc = String((r as any).cc ?? '');
-                const bcc = String((r as any).bcc ?? '');
-
-                return (
-                  <tr key={id} className="border-b border-border" data-testid={`admin.mailer.recipients.row.${id}`}>
-                    <td className="px-4 py-2 text-sm font-medium">{label}</td>
-                    <td className="max-w-sm truncate px-4 py-2 text-sm font-mono" title={to}>
-                      {to || <span className="text-muted">{t('common.na')}</span>}
-                    </td>
-                    <td className="max-w-sm truncate px-4 py-2 text-sm font-mono" title={cc}>
-                      {cc || <span className="text-muted">{t('common.na')}</span>}
-                    </td>
-                    <td className="max-w-sm truncate px-4 py-2 text-sm font-mono" title={bcc}>
-                      {bcc || <span className="text-muted">{t('common.na')}</span>}
-                    </td>
-                    <td className="px-4 py-2 text-sm">{formatDateTime((r as any).updated_at)}</td>
-                    <td className="px-4 py-2 text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => openEdit(r)} testId={`admin.mailer.recipients.edit.${id}`}>
-                          {t('common.edit')}
-                        </Button>
-                        <Button variant="danger" size="sm" onClick={() => setDeleteId(id)} testId={`admin.mailer.recipients.delete.${id}`}>
-                          {t('common.delete')}
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </TableCard>
-        </>
+        <MailRecipientResults
+          rows={rows}
+          canPaginate={canPaginate}
+          onEdit={openEdit}
+          renderPagination={renderPagination}
+        />
       )}
 
-      <Modal
+      <MailRecipientEditorModal
         open={editorOpen}
-        onClose={() => setEditorOpen(false)}
-        title={editing ? t('mailer.recipients.edit.title') : t('mailer.recipients.create.title')}
-        size="lg"
-        testId="admin.mailer.recipients.editor"
-        footer={
-          <div className="flex items-center justify-between gap-2">
-            <div />
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" onClick={() => setEditorOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button
-                variant="primary"
-                loading={createM.isPending || updateM.isPending}
-                disabled={saveDisabled}
-                onClick={() => (editing ? updateM.mutate() : createM.mutate())}
-                testId="admin.mailer.recipients.editor.save"
-              >
-                {t('common.save')}
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        <div className="grid gap-3">
-          <div>
-            <div className="text-xs font-medium text-muted">{t('common.label')}</div>
-            <Input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder={t('mailer.recipients.create.label_placeholder')} />
-          </div>
-          <div>
-            <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.to')}</div>
-            <Input value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-          </div>
-          <div>
-            <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.cc')}</div>
-            <Input value={form.cc} onChange={(e) => setForm({ ...form, cc: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-          </div>
-          <div>
-            <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.bcc')}</div>
-            <Input value={form.bcc} onChange={(e) => setForm({ ...form, bcc: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-          </div>
-
-          {(createM.isError || updateM.isError) ? (
-            <Alert variant="danger" title={t('mailer.recipients.editor.save_error')}>
-              {String(((createM.error || updateM.error) as any)?.message ?? createM.error ?? updateM.error)}
-            </Alert>
-          ) : null}
-        </div>
-      </Modal>
-
-      <ConfirmDialog
-        open={deleteId !== null}
-        title={t('mailer.recipients.delete_confirm.title')}
-        description={t('mailer.recipients.delete_confirm.description')}
-        danger
-        confirmLabel={t('common.delete')}
-        confirmLoading={deleteM.isPending}
-        onCancel={() => setDeleteId(null)}
-        onConfirm={() => deleteM.mutate()}
-        testId="admin.mailer.recipients.delete_confirm"
+        editing={editing !== null}
+        form={form}
+        pending={editorPending}
+        saveDisabled={saveDisabled}
+        stale={editingStale}
+        error={createM.error ?? updateM.error}
+        onChange={setForm}
+        onClose={closeEditor}
+        onLoadServerVersion={loadServerVersion}
+        onSubmit={submitEditor}
       />
+
     </ListShell>
   );
 }

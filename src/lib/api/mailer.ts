@@ -15,29 +15,33 @@ export interface MailTemplate {
   label?: string;
   template_id?: string;
   user_visibility?: string;
-
-  // Admin list derived fields (see api/resources/mail_template.rb)
-  translations_count?: number;
-  recipients_count?: number;
-  registry_roles?: string;
-  registry_public?: boolean;
-  registry_description?: string;
-  registry_vars?: string;
-  registry_params?: string;
-
   created_at?: string;
   updated_at?: string;
   [k: string]: unknown;
 }
 
+export interface MailTemplateCreateInput extends Record<string, unknown> {
+  name: string;
+  label: string;
+  template_id: string;
+  user_visibility: string;
+}
+
+/**
+ * Operational identifiers are deliberately excluded from ordinary UI updates.
+ * Renaming them requires a coordinated registry/template-source migration.
+ */
+export interface MailTemplateUpdateInput {
+  label?: string;
+  user_visibility?: string;
+}
+
 export interface MailRecipient {
   id: number;
   label?: string;
-  to?: string;
-  cc?: string;
-  bcc?: string;
-  created_at?: string;
-  updated_at?: string;
+  to?: string | null;
+  cc?: string | null;
+  bcc?: string | null;
   [k: string]: unknown;
 }
 
@@ -51,11 +55,11 @@ export interface MailTemplateTranslation {
   id: number;
   language?: ResourceRef;
   from?: string;
-  reply_to?: string;
-  return_path?: string;
+  reply_to?: string | null;
+  return_path?: string | null;
   subject?: string;
-  text_plain?: string;
-  text_html?: string;
+  text_plain?: string | null;
+  text_html?: string | null;
   created_at?: string;
   updated_at?: string;
   [k: string]: unknown;
@@ -130,31 +134,10 @@ export async function fetchMailLog(mailLogId: number) {
 export async function fetchMailTemplates(opts?: {
   limit?: number;
   fromId?: number;
-  q?: string;
-  templateId?: string;
-  userVisibility?: string;
-  role?: string;
-  public?: boolean;
-  languageId?: number;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-  const q = opts?.q ? String(opts.q).trim() : '';
-  if (q) params['q'] = q;
-
-  const tpl = opts?.templateId ? String(opts.templateId).trim() : '';
-  if (tpl) params['template_id'] = tpl;
-
-  const uv = opts?.userVisibility ? String(opts.userVisibility).trim() : '';
-  if (uv) params['user_visibility'] = uv;
-
-  const role = opts?.role ? String(opts.role).trim() : '';
-  if (role) params['role'] = role;
-
-  if (opts?.public !== undefined) params['public'] = opts.public;
-
-  if (opts?.languageId !== undefined) params['language'] = opts.languageId;
 
   const res = await haveApiCall<MailTemplate[]>({
     method: 'GET',
@@ -173,12 +156,25 @@ export async function fetchMailTemplate(mailTemplateId: number) {
   });
 }
 
-export async function updateMailTemplate(mailTemplateId: number, payload: { user_visibility?: string }) {
+export async function createMailTemplate(payload: MailTemplateCreateInput) {
+  return haveApiCall<MailTemplate>({
+    method: 'POST',
+    path: '/mail_templates',
+    namespace: 'mail_template',
+    params: payload,
+  });
+}
+
+export async function updateMailTemplate(mailTemplateId: number, payload: MailTemplateUpdateInput) {
+  const mutableFields: Record<string, unknown> = {};
+  if (payload.label !== undefined) mutableFields['label'] = payload.label;
+  if (payload.user_visibility !== undefined) mutableFields['user_visibility'] = payload.user_visibility;
+
   return haveApiCall<MailTemplate>({
     method: 'PUT',
     path: `/mail_templates/${mailTemplateId}`,
     namespace: 'mail_template',
-    params: payload,
+    params: mutableFields,
   });
 }
 
@@ -192,6 +188,7 @@ export async function fetchMailTemplateRecipients(mailTemplateId: number, opts?:
     path: `/mail_templates/${mailTemplateId}/recipients`,
     namespace: 'recipient',
     params,
+    meta: { includes: 'mail_recipient' },
   });
 
   return { ...res, data: expectArray<MailTemplateRecipient>(res.data, `mail_templates/${mailTemplateId}/recipients#index`) };
@@ -223,6 +220,7 @@ export async function fetchMailTemplateTranslations(mailTemplateId: number, opts
     path: `/mail_templates/${mailTemplateId}/translations`,
     namespace: 'translation',
     params,
+    meta: { includes: 'language' },
   });
 
   return {
@@ -235,6 +233,7 @@ export async function fetchMailTemplateTranslation(mailTemplateId: number, trans
   return haveApiCall<MailTemplateTranslation>({
     method: 'GET',
     path: `/mail_templates/${mailTemplateId}/translations/${translationId}`,
+    meta: { includes: 'language' },
   });
 }
 
@@ -242,12 +241,12 @@ export async function createMailTemplateTranslation(
   mailTemplateId: number,
   payload: {
     language: number;
-    from?: string;
-    reply_to?: string;
-    return_path?: string;
+    from: string;
+    reply_to?: string | null;
+    return_path?: string | null;
     subject: string;
-    text_plain?: string;
-    text_html?: string;
+    text_plain?: string | null;
+    text_html?: string | null;
   }
 ) {
   return haveApiCall<MailTemplateTranslation>({
@@ -263,11 +262,11 @@ export async function updateMailTemplateTranslation(
   translationId: number,
   payload: {
     from?: string;
-    reply_to?: string;
-    return_path?: string;
+    reply_to?: string | null;
+    return_path?: string | null;
     subject?: string;
-    text_plain?: string;
-    text_html?: string;
+    text_plain?: string | null;
+    text_html?: string | null;
   }
 ) {
   return haveApiCall<MailTemplateTranslation>({
@@ -288,26 +287,10 @@ export async function deleteMailTemplateTranslation(mailTemplateId: number, tran
 export async function fetchMailRecipients(opts?: {
   limit?: number;
   fromId?: number;
-  q?: string;
-  label?: string;
-  to?: string;
-  cc?: string;
-  bcc?: string;
 }) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-
-  const q = opts?.q ? String(opts.q).trim() : '';
-  if (q) params['q'] = q;
-  const label = opts?.label ? String(opts.label).trim() : '';
-  if (label) params['label'] = label;
-  const to = opts?.to ? String(opts.to).trim() : '';
-  if (to) params['to'] = to;
-  const cc = opts?.cc ? String(opts.cc).trim() : '';
-  if (cc) params['cc'] = cc;
-  const bcc = opts?.bcc ? String(opts.bcc).trim() : '';
-  if (bcc) params['bcc'] = bcc;
 
   const res = await haveApiCall<MailRecipient[]>({
     method: 'GET',
@@ -319,7 +302,14 @@ export async function fetchMailRecipients(opts?: {
   return { ...res, data: expectArray<MailRecipient>(res.data, 'mail_recipients#index') };
 }
 
-export async function createMailRecipient(payload: { label?: string; to?: string; cc?: string; bcc?: string }) {
+export async function fetchMailRecipient(mailRecipientId: number) {
+  return haveApiCall<MailRecipient>({
+    method: 'GET',
+    path: `/mail_recipients/${mailRecipientId}`,
+  });
+}
+
+export async function createMailRecipient(payload: { label: string; to?: string | null; cc?: string | null; bcc?: string | null }) {
   return haveApiCall<MailRecipient>({
     method: 'POST',
     path: '/mail_recipients',
@@ -328,19 +318,12 @@ export async function createMailRecipient(payload: { label?: string; to?: string
   });
 }
 
-export async function updateMailRecipient(mailRecipientId: number, payload: { label?: string; to?: string; cc?: string; bcc?: string }) {
+export async function updateMailRecipient(mailRecipientId: number, payload: { label?: string; to?: string | null; cc?: string | null; bcc?: string | null }) {
   return haveApiCall<MailRecipient>({
     method: 'PUT',
     path: `/mail_recipients/${mailRecipientId}`,
     namespace: 'mail_recipient',
     params: payload,
-  });
-}
-
-export async function deleteMailRecipient(mailRecipientId: number) {
-  return haveApiCall<void>({
-    method: 'DELETE',
-    path: `/mail_recipients/${mailRecipientId}`,
   });
 }
 

@@ -1,8 +1,13 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
-test.describe('@smoke Admin mailer templates', () => {
+function visibleTemplateEntry(page: Page, id: number) {
+  const mobile = (page.viewportSize()?.width ?? 1280) < 768;
+  return page.getByTestId(mobile ? `admin.mailer.templates.card.${id}` : `admin.mailer.templates.row.${id}`);
+}
+
+test.describe('@smoke @smoke-mobile Admin mailer templates', () => {
   test.beforeEach(async ({ page }) => {
     await bootstrapVpsAdminWindow(page, {
       sessionToken: 'TEST',
@@ -20,13 +25,6 @@ test.describe('@smoke Admin mailer templates', () => {
         label: 'Welcome mail',
         template_id: 'welcome',
         user_visibility: 'visible',
-        translations_count: 2,
-        recipients_count: 1,
-        registry_roles: 'account',
-        registry_public: true,
-        registry_description: 'Welcome email sent after signup.',
-        registry_vars: 'user: User\nlogin: String',
-        registry_params: 'locale: String',
         updated_at: '2025-01-01T12:00:00Z',
       },
       {
@@ -35,15 +33,19 @@ test.describe('@smoke Admin mailer templates', () => {
         label: 'Invoice',
         template_id: 'invoice',
         user_visibility: 'default',
-        translations_count: 1,
-        recipients_count: 0,
-        registry_roles: 'account,admin',
-        registry_public: false,
-        registry_description: 'Invoice notification.',
-        registry_vars: 'invoice: Invoice',
-        registry_params: '',
         updated_at: '2025-01-02T12:00:00Z',
       },
+      ...Array.from({ length: 58 }, (_, index) => {
+        const id = index + 3;
+        return {
+          id,
+          name: `template_${id}`,
+          label: `Template ${id}`,
+          template_id: `template.${id}`,
+          user_visibility: 'default',
+          updated_at: '2025-01-03T12:00:00Z',
+        };
+      }),
     ];
 
     const recipients = [{ id: 10, label: 'Support', to: 'support@example.test', cc: '', bcc: '' }];
@@ -77,16 +79,7 @@ test.describe('@smoke Admin mailer templates', () => {
       user: { id: 1, login: 'admin', level: 90 },
       handlers: {
         'GET languages': () => ({ languages, _meta: { total_count: languages.length } }),
-        'GET mail_templates': ({ searchParams }) => {
-          const q = searchParams.get('mail_template[q]') || '';
-          const uv = searchParams.get('mail_template[user_visibility]') || '';
-
-          let data = templates;
-          if (uv) data = data.filter((t) => t.user_visibility === uv);
-          if (q) data = data.filter((t) => t.label.toLowerCase().includes(q.toLowerCase()) || t.name.toLowerCase().includes(q.toLowerCase()));
-
-          return { mail_templates: data, _meta: { total_count: data.length } };
-        },
+        'GET mail_templates': () => ({ mail_templates: templates, _meta: { total_count: templates.length } }),
         'GET mail_templates/1': () => ({ mail_template: templates[0] }),
         'GET mail_templates/2': () => ({ mail_template: templates[1] }),
         'GET mail_templates/1/recipients': () => ({ recipients: templateRecipients, _meta: { total_count: templateRecipients.length } }),
@@ -100,9 +93,10 @@ test.describe('@smoke Admin mailer templates', () => {
     await page.goto('/admin/mailer/templates');
 
     await expect(page.getByTestId('admin.mailer.templates.page')).toBeVisible();
-    await expect(page.getByTestId('admin.mailer.templates.row.1')).toBeVisible();
-
-    await page.getByTestId('admin.mailer.templates.row.1').click();
+    const entry = visibleTemplateEntry(page, 1);
+    await expect(entry).toBeVisible();
+    if ((page.viewportSize()?.width ?? 1280) < 768) await entry.getByRole('link').click();
+    else await entry.click();
 
     await expect(page).toHaveURL(/\/admin\/mailer\/templates\/1/);
     await expect(page.getByTestId('admin.mailer.templates.detail')).toBeVisible();
@@ -117,7 +111,7 @@ test.describe('@smoke Admin mailer templates', () => {
     await expect(page.getByTestId('admin.mailer.templates.translation.detail.fields')).toContainText('Welcome');
   });
 
-  test('filters list and uses namespaced query params', async ({ page }) => {
+  test('paginates and filters the bounded list locally without unsupported API parameters', async ({ page }) => {
     const reqs: URL[] = [];
     page.on('request', (req) => {
       if (req.method() !== 'GET') return;
@@ -128,14 +122,53 @@ test.describe('@smoke Admin mailer templates', () => {
 
     await page.goto('/admin/mailer/templates');
 
-    await page.getByTestId('admin.mailer.templates.search.input').fill('visibility:visible welcome');
-    await page.getByTestId('admin.mailer.templates.search.input').press('Enter');
+    await expect(page.getByTestId('admin.mailer.templates.pagination.mobile')).toHaveCount(1);
+    await expect(page.getByTestId('admin.mailer.templates.pagination.desktop')).toHaveCount(1);
 
-    await expect(page.getByTestId('admin.mailer.templates.row.1')).toBeVisible();
+    const paginationPrefix = (page.viewportSize()?.width ?? 1280) < 768
+      ? 'admin.mailer.templates.pagination.mobile'
+      : 'admin.mailer.templates.pagination.desktop';
+    await expect(visibleTemplateEntry(page, 1)).toBeVisible();
+    await expect(visibleTemplateEntry(page, 60)).toHaveCount(0);
+
+    await page.getByTestId(`${paginationPrefix}.next`).click();
+    await expect(visibleTemplateEntry(page, 60)).toBeVisible();
+    await expect(visibleTemplateEntry(page, 1)).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('2');
+
+    await page.getByTestId(`${paginationPrefix}.prev`).click();
+    await expect(visibleTemplateEntry(page, 1)).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBeNull();
+
+    await page.getByTestId(`${paginationPrefix}.limit`).selectOption('25');
+    await expect.poll(() => new URL(page.url()).searchParams.get('limit')).toBe('25');
+    await expect(visibleTemplateEntry(page, 30)).toHaveCount(0);
+
+    await page.getByTestId(`${paginationPrefix}.next`).click();
+    await expect(visibleTemplateEntry(page, 30)).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('2');
+
+    const search = page.getByTestId('admin.mailer.templates.search.input');
+    await search.pressSequentially('Welcome mail');
+    await expect(search).toHaveValue('Welcome mail');
+
+    await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('Welcome mail');
+    await expect(visibleTemplateEntry(page, 1)).toBeVisible();
+    await expect(visibleTemplateEntry(page, 2)).toHaveCount(0);
+
+    await page.getByTestId('admin.mailer.templates.filter.clear').click();
+    await expect(search).toHaveValue('');
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBeNull();
+    await expect(visibleTemplateEntry(page, 1)).toBeVisible();
+    await expect(visibleTemplateEntry(page, 30)).toHaveCount(0);
 
     expect(reqs.length).toBeGreaterThan(0);
-    const last = reqs[reqs.length - 1];
-    expect(last.searchParams.get('mail_template[user_visibility]')).toBe('visible');
-    expect(last.searchParams.get('mail_template[q]')).toBe('welcome');
+    for (const request of reqs) {
+      expect(request.searchParams.get('mail_template[limit]')).toBe('500');
+      expect(request.searchParams.get('mail_template[q]')).toBeNull();
+      expect(request.searchParams.get('mail_template[user_visibility]')).toBeNull();
+    }
   });
 });

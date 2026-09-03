@@ -1,6 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+
+function visibleMailLogEntry(page: Page, id: number) {
+  const mobile = (page.viewportSize()?.width ?? 1280) < 768;
+  return page.getByTestId(mobile ? `admin.mailer.log.card.${id}` : `admin.mailer.log.row.${id}`);
+}
+
+async function openMailLogEntry(page: Page, id: number) {
+  const entry = visibleMailLogEntry(page, id);
+  if ((page.viewportSize()?.width ?? 1280) < 768) {
+    await entry.locator(`a[href$="/mailer/log/${id}"]`).click();
+    return;
+  }
+  await entry.click();
+}
 
 test.describe('@smoke Admin mailer log', () => {
   test.beforeEach(async ({ page }) => {
@@ -57,9 +71,9 @@ test.describe('@smoke Admin mailer log', () => {
     await page.goto('/admin/mailer/log');
 
     await expect(page.getByTestId('admin.mailer.log.page')).toBeVisible();
-    await expect(page.getByTestId('admin.mailer.log.row.101')).toBeVisible();
+    await expect(visibleMailLogEntry(page, 101)).toBeVisible();
 
-    await page.getByTestId('admin.mailer.log.row.101').click();
+    await openMailLogEntry(page, 101);
 
     await expect(page).toHaveURL(/\/admin\/mailer\/log\/101/);
     await expect(page.getByTestId('admin.mailer.log.detail')).toBeVisible();
@@ -87,20 +101,20 @@ test.describe('@smoke Admin mailer log', () => {
 
     await page.goto('/admin/mailer/log');
 
-    await expect(page.getByTestId('admin.mailer.log.row.101')).toBeVisible();
+    await expect(visibleMailLogEntry(page, 101)).toBeVisible();
 
     // Filter by template (Smart Filter Input).
     await page.getByTestId('admin.mailer.log.smart_filter.input').fill('template:10');
     await page.getByTestId('admin.mailer.log.smart_filter.input').press('Escape');
     await page.getByTestId('admin.mailer.log.smart_filter.input').press('Enter');
-    await expect(page.getByTestId('admin.mailer.log.row.101')).toBeVisible();
-    await expect(page.getByTestId('admin.mailer.log.row.100')).toHaveCount(0);
+    await expect(visibleMailLogEntry(page, 101)).toBeVisible();
+    await expect(visibleMailLogEntry(page, 100)).toHaveCount(0);
 
     // Search within results.
     await page.getByTestId('admin.mailer.log.smart_filter.input').fill('q:welcome');
     await page.getByTestId('admin.mailer.log.smart_filter.input').press('Escape');
     await page.getByTestId('admin.mailer.log.smart_filter.input').press('Enter');
-    await expect(page.getByTestId('admin.mailer.log.row.101')).toBeVisible();
+    await expect(visibleMailLogEntry(page, 101)).toBeVisible();
 
     // Ensure at least one request used the namespaced query params.
     expect(mailLogReqs.length).toBeGreaterThan(0);

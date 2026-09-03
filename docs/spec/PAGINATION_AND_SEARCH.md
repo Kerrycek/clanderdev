@@ -219,21 +219,19 @@ Admin pages follow the same keyset pagination rules (`from_id`, `limit`, numeric
 
 - **Mailer templates** (`/admin/mailer/templates`)
   - Index: `MailTemplate.Index` (`GET /api/v7.0/mail_templates`) with `mail_template[from_id]`, `mail_template[limit]`.
-  - Search + filters: **server-side**.
-    - `q` (`mail_template[q]`) – name / label / template_id / `#id`
-    - `template_id` (`mail_template[template_id]`)
-    - `user_visibility` (`mail_template[user_visibility]`)
-    - `role` (`mail_template[role]`)
-    - `public` (`mail_template[public]`)
-    - `language` (`mail_template[language]`)
-  - UI uses Smart Filter Input (SFI) + an advanced drawer; shareable links preserve filter state.
+  - The current API exposes only keyset pagination for this index. The UI loads a bounded first 500 templates and applies search, exact `template_id`, and exact `user_visibility` filters locally; a visible warning explains when that bound is reached.
+  - `q` searches id / `#id` / name / label / `template_id` in the loaded set.
+  - Role, public and language filters are not sent because they are not part of the current API action contract.
+  - Filter and numbered client-page state remains shareable in the URL.
+  - Create supports all four API fields. On edit, `name` and `template_id` are intentionally read-only because they are operational identifiers used by the mailer and template registry; only `label` and `user_visibility` are submitted.
+  - An ambiguous create response (transport loss, malformed response, or retryable/server HTTP status) blocks another create and offers a bounded, read-only keyset reconciliation instead of blindly repeating the POST. Translation creation follows the same rule per language.
+  - Template deletion is intentionally disabled: the current API model does not cascade or restrict every user-template preference relation, so a direct delete could leave orphaned records. Translation and template-recipient relation deletes remain available.
 
 - **Mailer recipients** (`/admin/mailer/recipients`)
   - Index: `MailRecipient.Index` (`GET /api/v7.0/mail_recipients`) with `mail_recipient[from_id]`, `mail_recipient[limit]`.
-  - Search + filters: **server-side**.
-    - `q` (`mail_recipient[q]`) – label / to / cc / bcc / `#id`
-    - `label`, `to`, `cc`, `bcc`
-  - UI uses Smart Filter Input (SFI) + an advanced drawer; shareable links preserve filter state.
+  - The current API has no search inputs. The UI loads a bounded first 500 recipients and applies `q`, `label`, `to`, `cc`, and `bcc` locally; a visible warning explains when that bound is reached.
+  - UI uses Smart Filter Input (SFI) + an advanced drawer; shareable filter and numbered client-page state remains in the URL.
+  - Recipient deletion is intentionally disabled because the current API model does not cascade or restrict its mail-template relations.
 
 - **Mailer mailboxes** (`/admin/mailer/mailboxes`)
   - Index: `Mailbox.Index` (`GET /api/v7.0/mailboxes`) with `mailbox[from_id]`, `mailbox[limit]`.
