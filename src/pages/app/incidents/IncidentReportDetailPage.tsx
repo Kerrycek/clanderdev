@@ -32,6 +32,10 @@ function vpsActionLabelKey(action?: string): string {
   return 'incidents.action.unknown';
 }
 
+export function incidentFiledByPath(mode: string, basePath: string, userId: number): string | undefined {
+  return mode === 'admin' ? `${basePath}/users/${userId}` : undefined;
+}
+
 export function IncidentReportDetailPage() {
   const { incidentId } = useParams();
   const id = Number(incidentId);
@@ -63,6 +67,7 @@ export function IncidentReportDetailPage() {
 
     const filedId = (r.filed_by as any)?.id ? Number((r.filed_by as any).id) : undefined;
     const filedLogin = (r.filed_by as any)?.login ? String((r.filed_by as any).login) : undefined;
+    const filedPath = filedId ? incidentFiledByPath(mode, basePath, filedId) : undefined;
 
     const ip = (r.ip_address_assignment as any)?.ip_addr ? String((r.ip_address_assignment as any).ip_addr) : undefined;
 
@@ -96,7 +101,11 @@ export function IncidentReportDetailPage() {
         {filedId ? (
           <span className="text-xs text-faint">
             {t('incidents.field.filed_by')}:{' '}
-            <ChipLink to={`${basePath}/users/${filedId}`}>{filedLogin || `#${filedId}`}</ChipLink>
+            {filedPath ? (
+              <ChipLink to={filedPath}>{filedLogin || `#${filedId}`}</ChipLink>
+            ) : (
+              <span>{filedLogin || `#${filedId}`}</span>
+            )}
           </span>
         ) : null}
       </div>

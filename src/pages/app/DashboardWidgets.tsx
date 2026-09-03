@@ -62,8 +62,8 @@ export function DashboardWidgetGrid(props: {
     isLoading: boolean;
     isError: boolean;
     advisories: SecurityAdvisory[];
-    legacyListUrl?: string;
-    legacyBaseUrl?: string;
+    listPath: string;
+    detailBasePath: string;
   };
   cluster: {
     isLoading: boolean;
@@ -148,8 +148,8 @@ export function DashboardWidgetGrid(props: {
           isLoading={props.security.isLoading}
           isError={props.security.isError}
           advisories={props.security.advisories}
-          legacyListUrl={props.security.legacyListUrl}
-          legacyBaseUrl={props.security.legacyBaseUrl}
+          listPath={props.security.listPath}
+          detailBasePath={props.security.detailBasePath}
           collapsed={collapsed}
           density={props.density}
           itemLimit={itemLimit}

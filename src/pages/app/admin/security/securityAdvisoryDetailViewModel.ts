@@ -2,11 +2,20 @@ import type { TranslationKey } from '../../../../app/i18n';
 import type {
   SecurityAdvisory,
   SecurityAdvisoryOutageLink,
+  SecurityAdvisoryUpdate,
 } from '../../../../lib/api/securityAdvisories';
 import type { PublishReadinessIssue } from './securityAdvisoryAdminModel';
 
 export type DetailTab = 'overview' | 'nodes' | 'affected' | 'updates' | 'outages';
 export const DETAIL_TABS: DetailTab[] = ['overview', 'nodes', 'affected', 'updates', 'outages'];
+
+export function sortSecurityAdvisoryUpdates(updates: SecurityAdvisoryUpdate[]): SecurityAdvisoryUpdate[] {
+  return updates.slice().sort((a, b) => {
+    const aTime = new Date(a.created_at ?? a.updated_at ?? 0).getTime();
+    const bTime = new Date(b.created_at ?? b.updated_at ?? 0).getTime();
+    return bTime - aTime;
+  });
+}
 
 export function detailTabTranslationKey(tab: DetailTab): TranslationKey {
   return `admin.security_advisories.tab.${tab}` as TranslationKey;

@@ -58,6 +58,7 @@ export function VpsNetworkIpRoutesCard(props: {
   onEditOwner: (ip: IpAddress) => void;
   onFreeRoute: (ip: IpAddress) => void;
   onAssignRoute: (ip: IpAddress) => void;
+  onAddHostAddresses: (ip: IpAddress) => void;
 }) {
   const { t } = useI18n();
   const gate = props.gate;
@@ -116,6 +117,9 @@ export function VpsNetworkIpRoutesCard(props: {
             {assignedRoutes.map(({ ip, networkInterface }) => {
               const state = routeStateForIp(ip, !gate.allowed);
               const location = ipLocationLabel(ip);
+              const routeVia = ip.route_via
+                ? labelFromResourceRef(ip.route_via, ['addr', 'ip_addr', 'label', 'name'])
+                : null;
 
               return (
                 <div
@@ -133,6 +137,7 @@ export function VpsNetworkIpRoutesCard(props: {
                       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
                         <span>{t('vps.network.routing.interface', { interface: networkInterface.name ?? `#${networkInterface.id}` })}</span>
                         {location !== '—' ? <span>{t('vps.network.routing.location', { location })}</span> : null}
+                        {routeVia && routeVia !== '—' ? <span>{t('vps.network.routing.via', { address: routeVia })}</span> : null}
                         {props.canAdmin ? <span>{t('vps.network.ip_addresses.field.owner', { owner: labelFromResourceRef(ip.user) })}</span> : null}
                       </div>
                     </div>
@@ -160,6 +165,16 @@ export function VpsNetworkIpRoutesCard(props: {
                           </ActionButton> : null}
                         </>
                       ) : null}
+                      {props.canMutate ? <ActionButton
+                        variant="secondary"
+                        size="sm"
+                        testId={`vps.network.ip_addresses.item.${ip.id}.add_hosts`}
+                        disabled={!gate.allowed}
+                        disabledReason={!gate.allowed ? gate.reason : undefined}
+                        onClick={() => props.onAddHostAddresses(ip)}
+                      >
+                        {t('vps.network.host_addresses.create.action')}
+                      </ActionButton> : null}
                       {props.canMutate ? <ActionButton
                         variant="danger"
                         size="sm"

@@ -1,5 +1,17 @@
 // Admin cluster locale chunk: environments
 export const csAdminCluster_environments = {
+  "admin.cluster.maintenance.action.lock": "Zapnout údržbu",
+  "admin.cluster.maintenance.action.unlock": "Vypnout údržbu",
+  "admin.cluster.maintenance.state.no": "Odemčeno",
+  "admin.cluster.maintenance.state.lock": "Zamčeno zde",
+  "admin.cluster.maintenance.state.master_lock": "Zděděný zámek",
+  "admin.cluster.maintenance.reason": "Důvod (volitelné)",
+  "admin.cluster.maintenance.dialog.lock.title": "Zapnout údržbu pro {resource}?",
+  "admin.cluster.maintenance.dialog.lock.body": "Rizikové operace nad tímto zdrojem a jeho potomky budou zablokovány.",
+  "admin.cluster.maintenance.dialog.unlock.title": "Vypnout údržbu pro {resource}?",
+  "admin.cluster.maintenance.dialog.unlock.body": "Odstraní se pouze zámek vlastněný tímto zdrojem.",
+  "admin.cluster.maintenance.toast.locked": "Údržba pro {resource} zapnuta",
+  "admin.cluster.maintenance.toast.unlocked": "Údržba pro {resource} vypnuta",
   "admin.cluster.environments.col.create_vps": "Vytvoření VPS",
   "admin.cluster.environments.col.destroy_vps": "Smazání VPS",
   "admin.cluster.environments.col.ip_ownership": "Uživatel vlastní IP",

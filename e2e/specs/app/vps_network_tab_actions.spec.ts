@@ -38,7 +38,13 @@ const ips = [
     id: 1,
     addr: '198.51.100.10',
     network_interface: { id: 1 },
-    network: { role: 'public', purpose: 'public', ip_version: 4, location: { id: 10, label: 'Prague' } },
+    network: {
+      role: 'public_access',
+      purpose: 'vps',
+      ip_version: 4,
+      location: { id: 10, label: 'Prague' },
+      primary_location: { id: 10, label: 'Prague' },
+    },
     user: { id: 20, login: 'old-owner' },
     routed: true,
   },
@@ -46,7 +52,13 @@ const ips = [
     id: 2,
     addr: '198.51.100.20',
     network_interface: null,
-    network: { role: 'public', purpose: 'public', ip_version: 4, location: { id: 10, label: 'Prague' } },
+    network: {
+      role: 'public_access',
+      purpose: 'vps',
+      ip_version: 4,
+      location: { id: 10, label: 'Prague' },
+      primary_location: { id: 10, label: 'Prague' },
+    },
     user: { id: 20, login: 'old-owner' },
   },
 ];
@@ -297,19 +309,23 @@ test.describe('@pr-smoke VPS network tab', () => {
     await page.goto('/admin/vps/123/network');
     await expect(page.getByTestId('vps.network.page')).toBeVisible();
     await page.getByTestId('vps.network.ip_addresses.unassigned.2.assign').click();
-    await expect(page.getByTestId('vps.network.ip_addresses.assign_route')).toBeVisible();
-    await page.getByTestId('vps.network.ip_addresses.assign_route.interface').selectOption('1');
+    await expect(page.getByTestId('vps.network.ip_addresses.add_modal')).toBeVisible();
+    await expect(page.getByTestId('network.user.assign.interface')).toHaveValue('1');
+    await expect(page.getByTestId('network.user.assign.kind')).toHaveValue('ipv4_public');
+    await page.getByTestId('network.user.assign.continue').click();
+    await expect(page.getByTestId('network.user.assign.address')).toHaveValue('2');
+    await expect(page.getByTestId('network.user.assign.mode')).toHaveValue('route');
 
     const assignReq = page.waitForRequest(
       (r) => r.method() === 'POST' && r.url().includes('/api/v7.0/ip_addresses/2/assign')
     );
-    await page.getByTestId('vps.network.ip_addresses.assign_route.submit').click();
+    await page.getByTestId('network.user.assign.submit').click();
     expect((await assignReq).postDataJSON()).toEqual({
       ip_address: {
         network_interface: 1,
       },
     });
-    await expect(page.getByTestId('vps.network.ip_addresses.assign_route')).toBeHidden();
+    await expect(page.getByTestId('vps.network.ip_addresses.add_modal')).toBeHidden();
 
     await page.getByTestId('vps.network.host_addresses.row.51.assign').click();
     await expect(page.getByTestId('vps.network.host_addresses.assign.interface')).toHaveValue('1');

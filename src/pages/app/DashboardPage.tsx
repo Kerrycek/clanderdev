@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 
 import { useAppMode } from "../../app/appMode";
 import { useAuth } from "../../app/auth";
-import { getRuntimeConfig } from "../../app/config";
 import { useI18n } from "../../app/i18n";
 import { useObjectScope } from "../../app/objectScope";
 import { PageContainer } from "../../components/layout/PageContainer";
@@ -33,17 +32,11 @@ function thirtyDaysAgoIso(): string {
   return d.toISOString();
 }
 
-function legacyWebuiUrl(baseUrl: string | undefined, query: string): string | undefined {
-  if (!baseUrl) return undefined;
-  return `${baseUrl}/?${query}`;
-}
-
 export function DashboardPage() {
   const auth = useAuth();
   const { basePath, mode } = useAppMode();
   const scope = useObjectScope();
   const { t } = useI18n();
-  const cfg = useMemo(() => getRuntimeConfig(), []);
   const recentSince = useMemo(() => thirtyDaysAgoIso(), []);
   const tierBRefetchMs = useTierBIntervalMs();
   const tierSlowRefetchMs = useTierSlowIntervalMs();
@@ -166,8 +159,7 @@ export function DashboardPage() {
   const outagesListPath = mode === "admin" ? `${basePath}/outages` : "/outages";
   const outageDetailPath = (id: number) => (mode === "admin" ? `${basePath}/outages/${id}` : `/outages/${id}`);
   const newsPath = mode === "admin" ? `${basePath}/content/news` : "/news";
-  const legacySecurityBase = cfg.webuiUrl;
-  const legacySecurityListUrl = legacyWebuiUrl(legacySecurityBase, "page=security_advisory&action=list");
+  const securityBasePath = mode === "admin" ? `${basePath}/security-advisories` : "/security-advisories";
 
   const statusAlert = DashboardOperationalSummary({
     t,
@@ -243,8 +235,8 @@ export function DashboardPage() {
             isLoading: securityQ.isLoading,
             isError: securityQ.isError,
             advisories: securityQ.data ?? [],
-            legacyListUrl: legacySecurityListUrl,
-            legacyBaseUrl: legacySecurityBase,
+            listPath: securityBasePath,
+            detailBasePath: securityBasePath,
           }}
           cluster={{
             isLoading: nodesQ.isLoading,

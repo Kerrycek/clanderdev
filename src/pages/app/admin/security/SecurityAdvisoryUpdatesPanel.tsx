@@ -22,6 +22,8 @@ export function SecurityAdvisoryUpdatesPanel(props: {
   loading: boolean;
   error?: unknown;
   onCreate: () => void;
+  onEdit: (update: SecurityAdvisoryUpdate) => void;
+  onDelete: (update: SecurityAdvisoryUpdate) => void;
 }) {
   const i18n = useI18n();
   const { t } = i18n;
@@ -63,11 +65,21 @@ export function SecurityAdvisoryUpdatesPanel(props: {
             <CardHeader
               title={summary}
               subtitle={`${formatDateTime(update.created_at)} · ${update.reporter_name || resourceLabel(update.reported_by)}`}
-              actions={update.state ? (
-                <Badge variant={securityAdvisoryStateVariant(String(update.state))}>
-                  {securityAdvisoryStateLabel(t, String(update.state))}
-                </Badge>
-              ) : null}
+              actions={(
+                <div className="flex flex-wrap items-center gap-2">
+                  {update.state ? (
+                    <Badge variant={securityAdvisoryStateVariant(String(update.state))}>
+                      {securityAdvisoryStateLabel(t, String(update.state))}
+                    </Badge>
+                  ) : null}
+                  <Button variant="secondary" size="sm" onClick={() => props.onEdit(update)} testId={`admin.security_advisory.update.${update.id}.edit`}>
+                    {t('common.edit')}
+                  </Button>
+                  <Button variant="danger" size="sm" onClick={() => props.onDelete(update)} testId={`admin.security_advisory.update.${update.id}.delete`}>
+                    {t('common.delete')}
+                  </Button>
+                </div>
+              )}
             />
             {message ? <CardBody><p className="whitespace-pre-wrap text-sm text-muted">{message}</p></CardBody> : null}
           </Card>

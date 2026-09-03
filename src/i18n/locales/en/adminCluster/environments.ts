@@ -1,5 +1,17 @@
 // Admin cluster locale chunk: environments
 export const enAdminCluster_environments = {
+  "admin.cluster.maintenance.action.lock": "Enable maintenance",
+  "admin.cluster.maintenance.action.unlock": "Disable maintenance",
+  "admin.cluster.maintenance.state.no": "Unlocked",
+  "admin.cluster.maintenance.state.lock": "Locked here",
+  "admin.cluster.maintenance.state.master_lock": "Inherited lock",
+  "admin.cluster.maintenance.reason": "Reason (optional)",
+  "admin.cluster.maintenance.dialog.lock.title": "Enable maintenance for {resource}?",
+  "admin.cluster.maintenance.dialog.lock.body": "Risky operations on this resource and its children will be blocked.",
+  "admin.cluster.maintenance.dialog.unlock.title": "Disable maintenance for {resource}?",
+  "admin.cluster.maintenance.dialog.unlock.body": "Only the lock owned by this resource will be removed.",
+  "admin.cluster.maintenance.toast.locked": "Maintenance enabled for {resource}",
+  "admin.cluster.maintenance.toast.unlocked": "Maintenance disabled for {resource}",
   "admin.cluster.environments.col.create_vps": "Create VPS",
   "admin.cluster.environments.col.destroy_vps": "Destroy VPS",
   "admin.cluster.environments.col.ip_ownership": "User owns IP",
