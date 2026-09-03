@@ -1,7 +1,5 @@
 // Admin locale chunk: info
 export const enAdmin_info = {
-  "admin.info.in_progress.body": "The admin workspace currently reuses most user pages. Admin-only features will be added gradually.",
-  "admin.info.in_progress.title": "Admin UI is still in progress",
   "admin.info.runtime.auth_kind.none": "None",
   "admin.info.runtime.auth_kind.oauth2": "OAuth2",
   "admin.info.runtime.auth_kind.token": "Token",
@@ -18,7 +16,6 @@ export const enAdmin_info = {
   "admin.info.runtime.field.ui_settings_persistence": "UI settings persistence",
   "admin.info.runtime.server_sync.field": "field:",
   "admin.info.runtime.server_sync.namespace": "namespace:",
-  "admin.info.runtime.server_sync.note": "Note: server persistence requires API support (see TODO-API-EXTENSION.md).",
   "admin.info.runtime.server_sync.title": "Server sync details",
   "admin.info.runtime.subtitle": "Where API requests go, and how settings are persisted",
   "admin.info.runtime.title": "Runtime configuration",

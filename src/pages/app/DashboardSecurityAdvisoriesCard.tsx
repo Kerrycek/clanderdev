@@ -1,4 +1,5 @@
 import { useI18n } from '../../app/i18n';
+import { Link } from 'react-router-dom';
 import type { DashboardDensity } from '../../app/dashboardSettingsModel';
 import { Alert } from '../../components/ui/Alert';
 import { Badge } from '../../components/ui/Badge';
@@ -10,11 +11,6 @@ import { securityAdvisoryStateLabel } from '../../lib/apiValues';
 import type { BadgeVariant } from '../../lib/taskStatus';
 import { formatDateTime } from '../../lib/time';
 import { pickTranslation } from '../../lib/translations';
-
-function legacyWebuiUrl(baseUrl: string | undefined, query: string): string | undefined {
-  if (!baseUrl) return undefined;
-  return `${baseUrl}/?${query}`;
-}
 
 function advisoryStateBadge(
   state: unknown,
@@ -30,29 +26,21 @@ function advisoryStateBadge(
   };
 }
 
-function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; legacyHref?: string }) {
+function SecurityAdvisoryItem(props: { advisory: SecurityAdvisory; detailBasePath: string }) {
   const i18n = useI18n();
   const advisory = props.advisory;
   const cves = advisoryCveLabels(advisory);
   const summary = pickTranslation(advisory, 'summary', i18n.preferredLanguageCodes);
   const stateBadge = advisoryStateBadge(advisory.state, i18n.t);
   const title = advisory.name || i18n.t('dashboard.section.security.fallback_title', { id: advisory.id });
-  const detailHref = props.legacyHref
-    ? legacyWebuiUrl(props.legacyHref, `page=security_advisory&action=show&id=${advisory.id}`)
-    : undefined;
+  const detailHref = `${props.detailBasePath}/${advisory.id}`;
   const affectedUserCount = typeof advisory.affected_user_count === 'number' ? advisory.affected_user_count : null;
   const affectedVpsCount = typeof advisory.affected_vps_count === 'number' ? advisory.affected_vps_count : null;
   const affectedNodeCount = typeof advisory.affected_node_count === 'number' ? advisory.affected_node_count : null;
   return (
     <div className="space-y-1.5 bg-surface-2 px-3 py-2.5" data-testid="app.dashboard.security.item">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {detailHref ? (
-          <a href={detailHref} target="_blank" rel="noreferrer" className="font-medium hover:underline">
-            {title}
-          </a>
-        ) : (
-          <span className="font-medium">{title}</span>
-        )}
+        <Link to={detailHref} className="font-medium hover:underline">{title}</Link>
         <Badge variant={stateBadge.variant}>{stateBadge.label}</Badge>
         {advisory.affected === true ? (
           <Badge variant="danger">{i18n.t('dashboard.section.security.affects_me')}</Badge>
@@ -95,8 +83,8 @@ export function SecurityAdvisoriesCard(props: {
   isLoading: boolean;
   isError: boolean;
   advisories: SecurityAdvisory[];
-  legacyListUrl?: string;
-  legacyBaseUrl?: string;
+  listPath: string;
+  detailBasePath: string;
   collapsed?: boolean;
   density?: DashboardDensity;
   itemLimit?: number;
@@ -119,11 +107,9 @@ export function SecurityAdvisoriesCard(props: {
                 {collapsed ? t('dashboard.preferences.widget.expand') : t('dashboard.preferences.widget.collapse')}
               </Button>
             ) : null}
-            {props.legacyListUrl ? (
-              <Button as="a" href={props.legacyListUrl} target="_blank" rel="noreferrer" variant="secondary" size="sm">
-                {t('dashboard.section.security.open_legacy')}
-              </Button>
-            ) : null}
+            <Button to={props.listPath} variant="secondary" size="sm">
+              {t('dashboard.section.security.open')}
+            </Button>
           </>
         }
       />
@@ -141,7 +127,7 @@ export function SecurityAdvisoriesCard(props: {
         ) : (
           <div className="divide-y divide-border overflow-hidden rounded-md border border-border">
             {props.advisories.slice(0, itemLimit).map((advisory) => (
-              <SecurityAdvisoryItem key={advisory.id} advisory={advisory} legacyHref={props.legacyBaseUrl} />
+              <SecurityAdvisoryItem key={advisory.id} advisory={advisory} detailBasePath={props.detailBasePath} />
             ))}
           </div>
         )}

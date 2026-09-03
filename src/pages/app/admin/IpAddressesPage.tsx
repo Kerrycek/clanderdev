@@ -34,11 +34,10 @@ import {
   resolveOrderValue,
   resolveVersionValue,
 } from './ipAddresses/ipAddressListSemantics';
-import {
-  selectSuggestedIpLocations,
-} from './ipAddresses/suggestedFreeIps';
+import { selectSuggestedIpLocations } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
 import { useProgressiveSuggestedIpQueries } from './ipAddresses/useProgressiveSuggestedIpQueries';
+import { configuredLegacyIpAddressesUrl } from './ipAddresses/legacyIpAddressesUrl';
 
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
@@ -46,6 +45,7 @@ export function IpAddressesPage() {
   const toasts = useToasts();
   const navigate = useNavigate();
   const location = useLocation();
+  const legacyFallbackUrl = configuredLegacyIpAddressesUrl();
   const {
     searchParams: sp,
     setSearchParams: setSp,
@@ -537,10 +537,10 @@ export function IpAddressesPage() {
                 else void listQ.refetch();
               },
             },
-            secondary: {
+            secondary: legacyFallbackUrl ? {
               label: t('admin.ip_addresses.open_legacy'),
-              href: `${basePath}/ip-addresses`,
-            },
+              href: legacyFallbackUrl,
+            } : undefined,
           }}
         />
       ) : pageData.length === 0 ? (
