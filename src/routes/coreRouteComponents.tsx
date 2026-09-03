@@ -95,4 +95,8 @@ export const VpsMaintenancePage = lazyRoute(
   () => import('../pages/app/vps/VpsMaintenancePage'),
   'VpsMaintenancePage',
 );
+export const VpsHistoryPage = lazyRoute(
+  () => import('../pages/app/vps/VpsHistoryPage'),
+  'VpsHistoryPage',
+);
 export const VpsLifecyclePage = lazyRoute(() => import('../pages/app/vps/VpsLifecyclePage'), 'VpsLifecyclePage');

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import { bootstrapVpsAdminWindow, failEnvelope, installHaveApiMock } from '../../fixtures';
 
 const vps = {
   id: 123,
@@ -547,6 +547,194 @@ test.describe('@pr-smoke VPS network tab', () => {
     expect((await request).postDataJSON()).toEqual({
       ip_address: { network_interface: 1 },
     });
+  });
+
+  test('@pr-smoke-mobile creates a route and its default host address in one workflow', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const freeIp = {
+      id: 201,
+      addr: '198.51.100.201',
+      prefix: 32,
+      network_interface: null,
+      user: { id: 2, login: 'user' },
+      network: {
+        id: 21,
+        role: 'public_access',
+        purpose: 'vps',
+        ip_version: 4,
+        primary_location: { id: 10, label: 'Prague' },
+      },
+    };
+    let currentIps = [freeIp];
+    let hostAddresses: Array<Record<string, unknown>> = [];
+    let assignPayload: unknown;
+
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'user', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps: { ...vps, user: { id: 2, login: 'user' } } }),
+        'GET ip_addresses': () => ({ ip_addresses: currentIps }),
+        'GET host_ip_addresses': () => ({ host_ip_addresses: hostAddresses }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'GET network_interfaces': () => ({ network_interfaces: netifs }),
+        'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
+        'POST ip_addresses/201/assign_with_host_address': (ctx) => {
+          assignPayload = ctx.request.postDataJSON?.();
+          currentIps = [{ ...freeIp, network_interface: { id: 1, name: 'eth0' }, routed: true }];
+          hostAddresses = [{
+            id: 301,
+            addr: '198.51.100.201',
+            assigned: true,
+            user_created: false,
+            ip_address: { id: 201, addr: '198.51.100.201', network_interface: { id: 1 } },
+          }];
+          return { ip_address: currentIps[0], _meta: { action_state_id: 2201 } };
+        },
+        'GET action_states/2201': () => ({
+          action_state: { id: 2201, finished: true, status: true, current: 1, total: 1 },
+        }),
+      },
+    });
+
+    await page.goto('/app/vps/123/network');
+    await page.getByTestId('vps.network.ip_addresses.unassigned.201.assign').click();
+    await page.getByTestId('network.user.assign.continue').click();
+    await page.getByTestId('network.user.assign.mode').selectOption('route_host');
+    await page.getByTestId('network.user.assign.submit').click();
+
+    await expect(page.getByTestId('vps.network.ip_addresses.add_modal')).toBeHidden();
+    await expect.poll(() => assignPayload).toEqual({
+      ip_address: { network_interface: 1 },
+    });
+    await expect(page.getByTestId('vps.network.ip_addresses.item.201')).toBeVisible();
+    await expect(page.getByTestId('vps.network.host_addresses.row.301')).toContainText('198.51.100.201');
+  });
+
+  test('routes through an eligible host address and reads the selected hop back', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const freeIp = {
+      id: 202,
+      addr: '198.51.100.202',
+      prefix: 32,
+      network_interface: null,
+      user: { id: 2, login: 'user' },
+      network: {
+        id: 22,
+        role: 'public_access',
+        purpose: 'vps',
+        ip_version: 4,
+        primary_location: { id: 10, label: 'Prague' },
+      },
+    };
+    const routeVia = {
+      id: 350,
+      addr: '198.51.100.10',
+      assigned: true,
+      user_created: true,
+      ip_address: { id: 1, addr: '198.51.100.10', network_interface: { id: 1, name: 'eth0' } },
+    };
+    let currentIps: Array<Record<string, unknown>> = [freeIp];
+    let assignPayload: unknown;
+
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'user', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps: { ...vps, user: { id: 2, login: 'user' } } }),
+        'GET ip_addresses': () => ({ ip_addresses: currentIps }),
+        'GET host_ip_addresses': () => ({ host_ip_addresses: [routeVia] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'GET network_interfaces': () => ({ network_interfaces: netifs }),
+        'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
+        'POST ip_addresses/202/assign': (ctx) => {
+          assignPayload = ctx.request.postDataJSON?.();
+          currentIps = [{
+            ...freeIp,
+            network_interface: { id: 1, name: 'eth0' },
+            routed: true,
+            route_via: { id: 350, addr: '198.51.100.10' },
+          }];
+          return { ip_address: currentIps[0], _meta: { action_state_id: 2202 } };
+        },
+        'GET action_states/2202': () => ({
+          action_state: { id: 2202, finished: true, status: true, current: 1, total: 1 },
+        }),
+      },
+    });
+
+    await page.goto('/app/vps/123/network');
+    await page.getByTestId('vps.network.ip_addresses.unassigned.202.assign').click();
+    await page.getByTestId('network.user.assign.continue').click();
+    await page.getByTestId('network.user.assign.mode').selectOption('route_via');
+    await expect(page.getByTestId('network.user.assign.route_via')).toContainText('198.51.100.10');
+    await page.getByTestId('network.user.assign.route_via').selectOption('350');
+    await page.getByTestId('network.user.assign.submit').click();
+
+    await expect.poll(() => assignPayload).toEqual({
+      ip_address: { network_interface: 1, route_via: 350 },
+    });
+    await expect(page.getByTestId('vps.network.ip_addresses.item.202')).toContainText('198.51.100.10');
+  });
+
+  test('retries only the unfinished suffix after a partial host-address batch failure', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    const calls: unknown[] = [];
+    const created: Array<Record<string, unknown>> = [];
+    let failSecondOnce = true;
+
+    await installHaveApiMock(page, {
+      user: { id: 2, login: 'user', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps: { ...vps, user: { id: 2, login: 'user' } } }),
+        'GET ip_addresses': () => ({ ip_addresses: [ips[0]] }),
+        'GET host_ip_addresses': () => ({ host_ip_addresses: created }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'GET network_interfaces': () => ({ network_interfaces: netifs }),
+        'GET network_interface_accountings': () => ({ network_interface_accountings: acct }),
+        'POST host_ip_addresses': (ctx) => {
+          const payload = ctx.request.postDataJSON?.();
+          calls.push(payload);
+          const address = String((payload as any)?.host_ip_address?.addr ?? '');
+          if (address === '198.51.100.12' && failSecondOnce) {
+            failSecondOnce = false;
+            return failEnvelope('Address is temporarily busy');
+          }
+          const row = {
+            id: 400 + created.length,
+            addr: address,
+            assigned: false,
+            user_created: true,
+            ip_address: { id: 1, addr: '198.51.100.10', network_interface: { id: 1 } },
+          };
+          created.push(row);
+          return { host_ip_address: row };
+        },
+      },
+    });
+
+    await page.goto('/app/vps/123/network');
+    await page.getByTestId('vps.network.ip_addresses.item.1.add_hosts').click();
+    const editor = page.getByTestId('vps.network.host_addresses.create.addresses');
+    await editor.fill('198.51.100.11\n198.51.100.12\n198.51.100.13');
+    await page.getByTestId('vps.network.host_addresses.create.submit').click();
+
+    await expect(page.getByTestId('vps.network.host_addresses.create')).toBeVisible();
+    await expect(editor).toHaveValue('198.51.100.12\n198.51.100.13');
+    expect(calls).toEqual([
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.11' } },
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.12' } },
+    ]);
+
+    await page.getByTestId('vps.network.host_addresses.create.submit').click();
+    await expect(page.getByTestId('vps.network.host_addresses.create')).toBeHidden();
+    expect(calls).toEqual([
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.11' } },
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.12' } },
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.12' } },
+      { host_ip_address: { ip_address: 1, addr: '198.51.100.13' } },
+    ]);
   });
 
   test('keeps interface limits out of an admin account user view', async ({ page }) => {

@@ -33,10 +33,10 @@ import { reconcileVpsCreateOutcome } from '../../../lib/vpsCreateOutcomeReconcil
 import {
   buildVpsCreatePayload,
   defaultForm,
+  groupOsTemplatesByFamily,
   isVpsHypervisorNode,
   locationEnvironmentId,
   optionalResource,
-  osFamilyLabel,
   RESOURCE_PRESETS,
   validateForm,
   type FormState,
@@ -168,17 +168,10 @@ export function VpsCreatePage() {
     () => nodes.find((node) => Number(node.id) === selectedNodeId),
     [nodes, selectedNodeId]
   );
-  const templatesByFamily = useMemo(() => {
-    const groups = new Map<string, typeof templates>();
-    for (const tpl of templates) {
-      const family = osFamilyLabel(tpl.os_family, t('vps.create.option.other_templates'));
-      const list = groups.get(family) ?? [];
-      list.push(tpl);
-      groups.set(family, list);
-    }
-
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [t, templates]);
+  const templatesByFamily = useMemo(
+    () => groupOsTemplatesByFamily(templates, t('vps.create.option.other_templates')),
+    [t, templates]
+  );
 
   useEffect(() => {
     const defaults = defaultResourcesQ.data;

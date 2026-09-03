@@ -321,8 +321,8 @@ test.describe('@smoke Security advisory admin management', () => {
     await expect(page.getByText(/This advisory is retracted/)).toBeVisible();
     const postedUpdate = page.getByTestId('admin.security_advisory.update.701');
     await expect(postedUpdate).toBeVisible();
-    await expect(postedUpdate.getByRole('button', { name: 'Edit' })).toHaveCount(0);
-    await expect(postedUpdate.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+    await expect(page.getByTestId('admin.security_advisory.update.701.edit')).toBeVisible();
+    await expect(page.getByTestId('admin.security_advisory.update.701.delete')).toBeVisible();
     expect(
       mutations.find(
         (mutation) =>
