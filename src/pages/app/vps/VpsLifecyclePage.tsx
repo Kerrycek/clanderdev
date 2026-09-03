@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-
 import { useAuth } from '../../../app/auth';
 import { useAppMode } from '../../../app/appMode';
 import { useI18n, type TranslationKey } from '../../../app/i18n';
@@ -10,7 +9,7 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../../components/ui/Card';
 import { LifecyclePanel } from '../../../components/lifetimes/LifecyclePanel';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { fetchLocations } from '../../../lib/api/infra';
 import { fetchIpAddressesForVps } from '../../../lib/api/ipAddresses';
 import { fetchNodes } from '../../../lib/api/nodes';
@@ -34,7 +33,8 @@ import {
 import { formatDateTime } from '../../../lib/format';
 import { gateVpsAction, gateVpsMutation } from '../../../lib/gates/vps';
 import { parseLookupIdLike } from '../../../lib/lookupInput';
-import { preflightVpsNotBusy } from './vpsPreflight';
+import type { LocalMutationGeneration } from '../../../lib/localLocks';
+import type { ObjectRef } from '../../../lib/objectRef';
 import { useVps } from './VpsContext';
 import { VpsCloneCard } from './VpsCloneCard';
 import { VpsDeleteCard, type DeleteForm } from './VpsDeleteCard';
@@ -67,6 +67,11 @@ import {
   type ReplaceForm,
   type TemplateForm,
 } from './VpsAdminLifecycleModel';
+import {
+  executeLifecycleMutation,
+  prepareLifecycleMutationVariables,
+  type LifecycleMutationVariables,
+} from './VpsLifecycleMutationSnapshot';
 
 type PowerForm = {
   startConfirm: boolean;
@@ -105,7 +110,8 @@ const lifecycleActionKinds = new Set<LifecycleActionKind>([
   'delete',
 ]);
 
-function mutationErrorMessage(error: unknown, fallback: string) {
+function mutationErrorMessage(error: unknown, fallback: string, missingActionState?: string) {
+  if (isMissingActionStateError(error)) return missingActionState ?? fallback;
   if (error instanceof Error && error.message && error.message !== 'invalid-id' && error.message !== 'required-id' && error.message !== 'invalid-date') {
     return error.message;
   }
@@ -239,198 +245,174 @@ export function VpsLifecyclePage() {
     ? locationsQ.data?.find((location) => Number(location.id) === cloneLocationId)
     : undefined;
 
-  const preflight = async () => {
-    if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-    await preflightVpsNotBusy({ vpsId, t, knownBusy: busyLocalLock || busyTransaction });
-  };
-
-  const track = (meta: unknown, labelKey: string, opts?: { blockUi?: boolean; progressTitleKey?: TranslationKey }) => {
+  const prepareMutation = <TPayload,>(buildPayload: () => TPayload) => prepareLifecycleMutationVariables({
+    vpsId,
+    lockRef: vpsRef,
+    basePath,
+    objectLabel,
+    canMutateVps,
+    knownBusy: busyLocalLock || busyTransaction,
+    permissionError: t('gate.blocked.permission.body'),
+    busyError: t('toast.action_blocked.body'),
+    refreshVps: refetch,
+    refreshChains: refetchChains,
+  }, buildPayload);
+  const acquireMutationContext = async (variables: LifecycleMutationVariables<unknown>) => ({
+    lockRef: variables.lockRef,
+    mutationGeneration: await chrome.acquireLocalLock(variables.lockRef, { durable: true }),
+  });
+  const track = (meta: unknown, labelKey: string, variables: LifecycleMutationVariables<unknown>, context: { lockRef: ObjectRef; mutationGeneration: LocalMutationGeneration } | undefined, opts?: { blockUi?: boolean; progressTitleKey?: TranslationKey }) => {
     const asId = getMetaActionStateId(meta);
     if (asId !== undefined) {
-      chrome.trackActionState(asId, { actionLabelKey: labelKey, objectLabel, object: vpsRef, ...opts });
+      chrome.trackActionState(asId, { actionLabelKey: labelKey, objectLabel: variables.objectLabel, object: context?.lockRef, mutationGeneration: context?.mutationGeneration, ...opts });
     }
-    refetchChains();
-    refetch();
+    variables.refreshChains();
+    variables.refreshVps();
   };
-
   const startM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsStart(vpsId);
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.start.label', { blockUi: true, progressTitleKey: 'modal.vps.start.title' });
+    mutationFn: (variables: LifecycleMutationVariables<undefined>) => executeLifecycleMutation(variables, (id) => vpsStart(id)),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.start.label', variables, context, { blockUi: true, progressTitleKey: 'modal.vps.start.title' });
       setPowerForm((p) => ({ ...p, startConfirm: false }));
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const stopM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsStop(vpsId, { force: powerForm.stopForce });
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.stop.label', { blockUi: true, progressTitleKey: 'modal.vps.stop.title' });
+    mutationFn: (variables: LifecycleMutationVariables<{ force: boolean }>) => executeLifecycleMutation(variables, vpsStop),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.stop.label', variables, context, { blockUi: true, progressTitleKey: 'modal.vps.stop.title' });
       setPowerForm((p) => ({ ...p, stopConfirm: false }));
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const restartM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsRestart(vpsId, { force: powerForm.restartForce });
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.restart.label', { blockUi: true, progressTitleKey: 'modal.vps.restart.title' });
+    mutationFn: (variables: LifecycleMutationVariables<{ force: boolean }>) => executeLifecycleMutation(variables, vpsRestart),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.restart.label', variables, context, { blockUi: true, progressTitleKey: 'modal.vps.restart.title' });
       setPowerForm((p) => ({ ...p, restartConfirm: false }));
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const cloneM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsClone(vpsId, buildVpsClonePayload(clone, { isAdminMode: canAdministerVps, location: cloneLocation }));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.clone.label');
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsClonePayload>>) => executeLifecycleMutation(variables, vpsClone),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.clone.label', variables, context);
       const newId = Number((res.data as any)?.id);
-      if (Number.isInteger(newId) && newId > 0) navigate(`${basePath}/vps/${newId}`);
+      if (Number.isInteger(newId) && newId > 0) navigate(`${variables.basePath}/vps/${newId}`);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const swapM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsSwapWith(vpsId, buildVpsSwapPayload(swap, canAdministerVps));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.swap.label');
-      void qc.invalidateQueries({ queryKey: ['vps', vpsId] });
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsSwapPayload>>) => executeLifecycleMutation(variables, vpsSwapWith),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.swap.label', variables, context);
+      void qc.invalidateQueries({ queryKey: ['vps', variables.vpsId] });
       setSwap((p) => ({ ...p, confirm: false }));
       chrome.openTasks();
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const replaceM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsReplace(vpsId, buildVpsReplacePayload(replace));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.replace.label');
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsReplacePayload>>) => executeLifecycleMutation(variables, vpsReplace),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.replace.label', variables, context);
       const newId = Number((res.data as any)?.id);
-      if (Number.isInteger(newId) && newId > 0 && newId !== vpsId) navigate(`${basePath}/vps/${newId}`);
+      if (Number.isInteger(newId) && newId > 0 && newId !== variables.vpsId) navigate(`${variables.basePath}/vps/${newId}`);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const templateM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return updateVps(vpsId, buildVpsTemplatePayload(templateForm));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.template.label');
-      void qc.invalidateQueries({ queryKey: ['vps', vpsId] });
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsTemplatePayload>>) => executeLifecycleMutation(variables, updateVps),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.template.label', variables, context);
+      void qc.invalidateQueries({ queryKey: ['vps', variables.vpsId] });
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const bootM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsBoot(vpsId, buildVpsBootPayload(boot));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.boot.label');
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsBootPayload>>) => executeLifecycleMutation(variables, vpsBoot),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.boot.label', variables, context);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const reinstallM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsReinstall(vpsId, buildVpsReinstallPayload(reinstall));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.reinstall.label');
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsReinstallPayload>>) => executeLifecycleMutation(variables, vpsReinstall),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.reinstall.label', variables, context);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const migrateM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsMigrate(vpsId, buildVpsMigratePayload(migrate, migrateTargetContext));
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.migrate.label');
+    mutationFn: (variables: LifecycleMutationVariables<ReturnType<typeof buildVpsMigratePayload>>) => executeLifecycleMutation(variables, vpsMigrate),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.migrate.label', variables, context);
       setMigrate((p) => ({ ...p, confirm: false }));
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const deleteM = useMutation({
-    mutationFn: async () => {
-      await preflight();
-      return vpsDelete(vpsId, canAdministerVps ? { lazy: deleteForm.lazy } : undefined);
-    },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (res) => {
-      track(res.meta, 'action.vps.delete.label');
-      navigate(`${basePath}/vps`);
+    mutationFn: (variables: LifecycleMutationVariables<{ lazy: boolean } | undefined>) => executeLifecycleMutation(variables, vpsDelete),
+    onMutate: acquireMutationContext,
+    onSuccess: (res, variables, context) => {
+      track(res.meta, 'action.vps.delete.label', variables, context);
+      navigate(`${variables.basePath}/vps`);
     },
     onError: (e: any) => {
       if (e?.code === 'BUSY') chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
-
   const busyLocal =
     busyLocalLock ||
     startM.isPending ||
@@ -485,9 +467,9 @@ export function VpsLifecyclePage() {
   };
 
   const submitPower = (kind: PowerActionKind) => {
-    if (kind === 'start') startM.mutate();
-    else if (kind === 'stop') stopM.mutate();
-    else restartM.mutate();
+    if (kind === 'start') startM.mutate(prepareMutation(() => undefined));
+    else if (kind === 'stop') stopM.mutate(prepareMutation(() => ({ force: powerForm.stopForce })));
+    else restartM.mutate(prepareMutation(() => ({ force: powerForm.restartForce })));
   };
 
   const renderPowerCard = (kind: PowerActionKind) => {
@@ -504,7 +486,7 @@ export function VpsLifecyclePage() {
         force={powerForce(kind)}
         onForceChange={(checked) => setPowerForce(kind, checked)}
         pending={mutation.isPending}
-        errorMessage={mutation.isError ? mutationErrorMessage(mutation.error, t(`vps.lifecycle.power.${kind}.fallback_error`)) : undefined}
+        errorMessage={mutation.isError ? mutationErrorMessage(mutation.error, t(`vps.lifecycle.power.${kind}.fallback_error`), t('vps.mutation.error.missing_action_state')) : undefined}
         onSubmit={() => submitPower(kind)}
         onOpenTasks={() => chrome.openTasks()}
       />
@@ -523,8 +505,8 @@ export function VpsLifecyclePage() {
       gate={gate}
       pending={reinstallM.isPending}
       succeeded={reinstallM.isSuccess}
-      errorMessage={reinstallM.isError ? mutationErrorMessage(reinstallM.error, t('vps.lifecycle.validation.reinstall')) : undefined}
-      onSubmit={() => reinstallM.mutate()}
+      errorMessage={reinstallM.isError ? mutationErrorMessage(reinstallM.error, t('vps.lifecycle.validation.reinstall'), t('vps.mutation.error.missing_action_state')) : undefined}
+      onSubmit={() => reinstallM.mutate(prepareMutation(() => buildVpsReinstallPayload(reinstall)))}
     />
   );
 
@@ -540,9 +522,9 @@ export function VpsLifecyclePage() {
       targetReady={cloneTargetReady}
       gate={gate}
       pending={cloneM.isPending}
-      errorMessage={cloneM.isError ? mutationErrorMessage(cloneM.error, t('vps.lifecycle.validation.clone')) : undefined}
+      errorMessage={cloneM.isError ? mutationErrorMessage(cloneM.error, t('vps.lifecycle.validation.clone'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => cloneM.mutate()}
+      onSubmit={() => cloneM.mutate(prepareMutation(() => buildVpsClonePayload(clone, { isAdminMode: canAdministerVps, location: cloneLocation })))}
     />
   );
 
@@ -569,9 +551,9 @@ export function VpsLifecyclePage() {
       targetIpsError={targetIpsQ.isError}
       gate={gate}
       pending={swapM.isPending}
-      errorMessage={swapM.isError ? mutationErrorMessage(swapM.error, t('vps.lifecycle.validation.swap')) : undefined}
+      errorMessage={swapM.isError ? mutationErrorMessage(swapM.error, t('vps.lifecycle.validation.swap'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => swapM.mutate()}
+      onSubmit={() => swapM.mutate(prepareMutation(() => buildVpsSwapPayload(swap, canAdministerVps)))}
     />
   );
 
@@ -583,9 +565,9 @@ export function VpsLifecyclePage() {
       onChange={setDeleteForm}
       gate={gate}
       pending={deleteM.isPending}
-      errorMessage={deleteM.isError ? mutationErrorMessage(deleteM.error, t('vps.lifecycle.validation.delete')) : undefined}
+      errorMessage={deleteM.isError ? mutationErrorMessage(deleteM.error, t('vps.lifecycle.validation.delete'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => deleteM.mutate()}
+      onSubmit={() => deleteM.mutate(prepareMutation(() => canAdministerVps ? { lazy: deleteForm.lazy } : undefined))}
     />
   );
 
@@ -599,9 +581,9 @@ export function VpsLifecyclePage() {
       gate={gate}
       pending={templateM.isPending}
       succeeded={templateM.isSuccess}
-      errorMessage={templateM.isError ? mutationErrorMessage(templateM.error, t('vps.lifecycle.validation.template')) : undefined}
+      errorMessage={templateM.isError ? mutationErrorMessage(templateM.error, t('vps.lifecycle.validation.template'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => templateM.mutate()}
+      onSubmit={() => templateM.mutate(prepareMutation(() => buildVpsTemplatePayload(templateForm)))}
     />
   );
 
@@ -615,9 +597,9 @@ export function VpsLifecyclePage() {
       gate={gate}
       pending={bootM.isPending}
       succeeded={bootM.isSuccess}
-      errorMessage={bootM.isError ? mutationErrorMessage(bootM.error, t('vps.lifecycle.validation.boot')) : undefined}
+      errorMessage={bootM.isError ? mutationErrorMessage(bootM.error, t('vps.lifecycle.validation.boot'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => bootM.mutate()}
+      onSubmit={() => bootM.mutate(prepareMutation(() => buildVpsBootPayload(boot)))}
     />
   );
 
@@ -630,9 +612,9 @@ export function VpsLifecyclePage() {
       onSelectedNodeLabelChange={setReplaceNodeLabel}
       gate={gate}
       pending={replaceM.isPending}
-      errorMessage={replaceM.isError ? mutationErrorMessage(replaceM.error, t('vps.lifecycle.validation.replace')) : undefined}
+      errorMessage={replaceM.isError ? mutationErrorMessage(replaceM.error, t('vps.lifecycle.validation.replace'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => replaceM.mutate()}
+      onSubmit={() => replaceM.mutate(prepareMutation(() => buildVpsReplacePayload(replace)))}
     />
   );
 
@@ -650,9 +632,9 @@ export function VpsLifecyclePage() {
       gate={gate}
       pending={migrateM.isPending}
       succeeded={migrateM.isSuccess}
-      errorMessage={migrateM.isError ? mutationErrorMessage(migrateM.error, t('vps.lifecycle.validation.migrate')) : undefined}
+      errorMessage={migrateM.isError ? mutationErrorMessage(migrateM.error, t('vps.lifecycle.validation.migrate'), t('vps.mutation.error.missing_action_state')) : undefined}
       onOpenTasks={() => chrome.openTasks()}
-      onSubmit={() => migrateM.mutate()}
+      onSubmit={() => migrateM.mutate(prepareMutation(() => buildVpsMigratePayload(migrate, migrateTargetContext)))}
     />
   );
 

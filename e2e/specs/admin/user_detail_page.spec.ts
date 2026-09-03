@@ -127,7 +127,7 @@ test('admin user detail: lifecycle state update sends object state', async ({ pa
       'PUT users/42': ({ reqJson }) => {
         const payload = (reqJson as any).user ?? {};
         user = { ...user, ...payload };
-        return { user };
+        return { user, _meta: { action_state_id: 741 } };
       },
       'GET users': () => ({ users: [] }),
     },
@@ -151,3 +151,136 @@ test('admin user detail: lifecycle state update sends object state', async ({ pa
   await expect.poll(() => updates.length).toBe(1);
   expect(updates).toEqual([{ user: { object_state: 'suspended' } }]);
 });
+
+test('admin user detail: resets lifecycle draft when the user route changes', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+  const updates: string[] = [];
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 100 },
+    handlers: {
+      'GET users/42': () => ({ user: { id: 42, login: 'alice', level: 1, object_state: 'active' } }),
+      'GET users/43': () => ({ user: { id: 43, login: 'bob', level: 1, object_state: 'active' } }),
+      'GET users': () => ({ users: [] }),
+      'PUT users/42': () => { updates.push('42'); return { user: { id: 42, object_state: 'suspended' } }; },
+      'PUT users/43': () => { updates.push('43'); return { user: { id: 43, object_state: 'active' } }; },
+    },
+  });
+
+  await page.goto('/admin/users/42');
+  await page.getByTestId('admin.user.lifecycle.state').selectOption('suspended');
+  await expect(page.getByTestId('admin.user.lifecycle.save')).toBeEnabled();
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/admin/users/43');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByTestId('admin.user.lifecycle.state')).toHaveValue('active');
+  await expect(page.getByTestId('admin.user.lifecycle.save')).toBeDisabled();
+  expect(updates).toEqual([]);
+});
+
+test('admin user detail: expiration-only update accepts a synchronous response without action state', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+
+  let updateRequests = 0;
+  let user = {
+    id: 42,
+    login: 'alice',
+    level: 1,
+    object_state: 'active',
+    expiration_date: null as string | null,
+    remind_after_date: null as string | null,
+  };
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 100 },
+    handlers: {
+      'GET users/42': () => ({ user }),
+      'PUT users/42': ({ reqJson }) => {
+        updateRequests += 1;
+        const payload = (reqJson as { user?: Record<string, unknown> }).user ?? {};
+        user = { ...user, ...payload };
+        return { user, _meta: {} };
+      },
+    },
+  });
+
+  await page.goto('/admin/users/42');
+  await page.getByTestId('admin.user.lifecycle.expiration').fill('2026-09-01T12:00');
+  await page.getByTestId('admin.user.lifecycle.save').click();
+
+  await expect.poll(() => updateRequests).toBe(1);
+  await expect(page.getByTestId('admin.user.mutation.uncertain')).toHaveCount(0);
+  await expect(page.getByTestId('admin.user.lifecycle.save')).toBeDisabled();
+});
+
+for (const scenario of [
+  {
+    name: 'missing action state',
+    response: (user: Record<string, unknown>) => ({ user, _meta: {} }),
+  },
+  {
+    name: 'lost transport response',
+    response: () => ({ status: 200, contentType: 'application/json', body: '{' }),
+  },
+] as const) {
+  test(`admin user detail: ${scenario.name} is reload-safe and requires review before acknowledgement`, async ({ page }) => {
+    await bootstrapVpsAdminWindow(page);
+
+    const user = {
+      id: 42,
+      login: 'alice',
+      level: 1,
+      full_name: 'Alice Example',
+      email: 'alice@example.test',
+      object_state: 'active',
+    };
+    let updateRequests = 0;
+    let releaseResponse: (() => void) | undefined;
+    const responseGate = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 100 },
+      handlers: {
+        'GET users/42': () => ({ user }),
+        'PUT users/42': async () => {
+          updateRequests += 1;
+          await responseGate;
+          return scenario.response(user);
+        },
+        'GET users': () => ({ users: [] }),
+      },
+    });
+
+    await page.goto('/admin/users/42');
+    await page.getByTestId('admin.user.lifecycle.state').selectOption('suspended');
+    await page.getByTestId('admin.user.lifecycle.save').click();
+
+    await expect(page.getByTestId('admin.user.mutation.pending')).toBeVisible();
+    await expect(page.getByTestId('admin.user.mutation.acknowledge')).toHaveCount(0);
+    await expect.poll(() => updateRequests).toBe(1);
+
+    releaseResponse?.();
+    await expect(page.getByTestId('admin.user.mutation.uncertain')).toBeVisible();
+    await expect(page.getByTestId('admin.user.mutation.acknowledge')).toBeDisabled();
+    await expect(page.getByTestId('admin.user.lifecycle.save')).toBeDisabled();
+
+    await page.reload();
+    await expect(page.getByTestId('admin.user.mutation.uncertain')).toBeVisible();
+    await expect(page.getByTestId('admin.user.lifecycle.save')).toBeDisabled();
+    await expect.poll(() => updateRequests).toBe(1);
+
+    await page.getByTestId('admin.user.mutation.open_tasks').click();
+    await expect(page.getByTestId('tasks.drawer')).toBeVisible();
+    await page.getByTestId('tasks.close-button').click();
+    await expect(page.getByTestId('admin.user.mutation.acknowledge')).toBeDisabled();
+
+    await page.getByTestId('admin.user.mutation.refresh').click();
+    await expect(page.getByTestId('admin.user.mutation.acknowledge')).toBeEnabled();
+    await expect.poll(() => updateRequests).toBe(1);
+
+    await page.getByTestId('admin.user.mutation.acknowledge').click();
+    await expect(page.getByTestId('admin.user.mutation.uncertain')).toHaveCount(0);
+    await expect.poll(() => updateRequests).toBe(1);
+  });
+}

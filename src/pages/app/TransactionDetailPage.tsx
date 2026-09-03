@@ -114,7 +114,7 @@ export function TransactionDetailPage() {
           </Link>
         }
         titleAfter={
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex max-w-full flex-wrap items-center gap-2">
             {badge}
             {operation ? <Badge variant={operationBadgeVariant(operation)}>{operationCategoryLabel(operation, t)}</Badge> : null}
             {operation && operation.severity !== 'normal' ? <Badge variant={operationBadgeVariant(operation)}>{operationSeverityLabel(operation, t)}</Badge> : null}
@@ -171,7 +171,7 @@ export function TransactionDetailPage() {
         <>
           {errorText ? (
             <Alert variant="danger" title={t('transactions.tx.error_title')} testId="transactions.items.detail.error">
-              <pre className="whitespace-pre-wrap text-xs">{errorText}</pre>
+              <pre className="max-w-full whitespace-pre-wrap break-all text-xs">{errorText}</pre>
             </Alert>
           ) : null}
 

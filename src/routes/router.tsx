@@ -5,6 +5,7 @@ import { getRuntimeConfig } from '../app/config';
 
 import { PublicLayout } from '../components/layout/PublicLayout';
 import { RouteProvidersLayout } from './RouteProvidersLayout';
+import { ParamKeyedRoute } from './ParamKeyedRoute';
 import { lazyRoute } from './lazyRoute';
 import * as CoreRoutes from './coreRouteComponents';
 import { adminFinanceRoutes } from './adminFinanceRoutes';
@@ -56,11 +57,11 @@ const DesignSandboxPage = lazyRoute(() => import('../pages/app/DesignSandboxPage
 const AdminInfoPage = lazyRoute(() => import('../pages/app/admin/AdminInfoPage'), 'AdminInfoPage');
 const AdminOutagesPage = lazyRoute(() => import('../pages/app/admin/AdminOutagesPage'), 'AdminOutagesPage');
 const NodesPage = lazyRoute(() => import('../pages/app/admin/NodesPage'), 'NodesPage');
-const NodeDetailPage = lazyRoute(() => import('../pages/app/admin/NodeDetailPage'), 'NodeDetailPage');
+const NodeDetailPageRoute = lazyRoute(() => import('../pages/app/admin/NodeDetailPageRoute'), 'NodeDetailPageRoute');
 const MigrationPlansPage = lazyRoute(() => import('../pages/app/admin/MigrationPlansPage'), 'MigrationPlansPage');
-const MigrationPlanDetailPage = lazyRoute(() => import('../pages/app/admin/MigrationPlanDetailPage'), 'MigrationPlanDetailPage');
+const MigrationPlanDetailPageRoute = lazyRoute(() => import('../pages/app/admin/MigrationPlanDetailPageRoute'), 'MigrationPlanDetailPageRoute');
 const UsersPage = lazyRoute(() => import('../pages/app/admin/UsersPage'), 'UsersPage');
-const AdminUserLayout = lazyRoute(() => import('../pages/app/admin/user/AdminUserLayout'), 'AdminUserLayout');
+const AdminUserLayout = lazyRoute(() => import('../pages/app/admin/user/AdminUserLayoutRoute'), 'AdminUserLayoutRoute');
 const AdminUserMailPage = lazyRoute(() => import('../pages/app/admin/user/AdminUserMailPage'), 'AdminUserMailPage');
 const AdminUserPaymentsPage = lazyRoute(() => import('../pages/app/admin/user/AdminUserPaymentsPage'), 'AdminUserPaymentsPage');
 const AdminUserHistoryPage = lazyRoute(() => import('../pages/app/admin/user/AdminUserHistoryPage'), 'AdminUserHistoryPage');
@@ -153,7 +154,7 @@ export const router = createBrowserRouter([
             { path: 'news', element: <CoreRoutes.NewsPage /> },
             { path: 'security-advisories', element: <CoreRoutes.SecurityAdvisoriesPage /> },
             { path: 'security-advisories/:advisoryId', element: <CoreRoutes.SecurityAdvisoryDetailPage /> },
-            { path: 'requests/registrations/:requestId/:token', element: <CoreRoutes.RegistrationCorrectionPage /> },
+            { path: 'requests/registrations/:requestId/:token', element: <ParamKeyedRoute params={['requestId', 'token']}><CoreRoutes.RegistrationCorrectionPage /></ParamKeyedRoute> },
             { path: '*', element: <NotFoundPage /> },
             // The old webui has a useful index page. We keep public status pages accessible.
           ],
@@ -187,10 +188,10 @@ export const router = createBrowserRouter([
             { path: 'nas/new', element: <NasDatasetCreatePage /> },
             { path: 'backups', element: <BackupCenterPage /> },
             { path: 'exports', element: <ExportsListPage /> },
-            { path: 'exports/:exportId', element: <ExportDetailPage /> },
+            { path: 'exports/:exportId', element: <ParamKeyedRoute param="exportId"><ExportDetailPage /></ParamKeyedRoute> },
             {
               path: 'datasets/:datasetId',
-              element: <DatasetLayout />,
+              element: <ParamKeyedRoute param="datasetId"><DatasetLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DatasetOverviewPage /> },
                 { path: 'snapshots', element: <DatasetSnapshotsPage /> },
@@ -202,7 +203,7 @@ export const router = createBrowserRouter([
             },
             {
               path: 'nas/:datasetId',
-              element: <DatasetLayout />,
+              element: <ParamKeyedRoute param="datasetId"><DatasetLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DatasetOverviewPage /> },
                 { path: 'snapshots', element: <DatasetSnapshotsPage /> },
@@ -217,7 +218,7 @@ export const router = createBrowserRouter([
             { path: 'networking', element: <CoreRoutes.UserNetworkPage /> },
             {
               path: 'dns/zones/:zoneId',
-              element: <DnsZoneLayout />,
+              element: <ParamKeyedRoute param="zoneId"><DnsZoneLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DnsZoneRecordsPage /> },
                 { path: 'transfers', element: <DnsZoneTransfersPage /> },
@@ -232,16 +233,16 @@ export const router = createBrowserRouter([
             { path: 'transactions/items/:transactionId', element: <CoreRoutes.TransactionDetailPage /> },
             { path: 'transactions/:chainId', element: <CoreRoutes.TransactionChainDetailPage /> },
             { path: 'action-states', element: <CoreRoutes.ActionStatesPage /> },
-            { path: 'action-states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'action-states/:actionStateId', element: <ParamKeyedRoute param="actionStateId"><CoreRoutes.ActionStateDetailPage /></ParamKeyedRoute> },
             { path: 'action_states', element: <Navigate to="../action-states" replace /> },
-            { path: 'action_states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'action_states/:actionStateId', element: <ParamKeyedRoute param="actionStateId"><CoreRoutes.ActionStateDetailPage /></ParamKeyedRoute> },
             { path: 'monitoring', element: <CoreRoutes.MonitoringEventsPage /> },
-            { path: 'monitoring/:eventId', element: <CoreRoutes.MonitoringEventDetailPage /> },
+            { path: 'monitoring/:eventId', element: <ParamKeyedRoute param="eventId"><CoreRoutes.MonitoringEventDetailPage /></ParamKeyedRoute> },
             { path: 'incidents', element: <CoreRoutes.IncidentsPage /> },
             { path: 'incidents/new', element: <CoreRoutes.IncidentReportNewPage /> },
             { path: 'incidents/:incidentId', element: <CoreRoutes.IncidentReportDetailPage /> },
             { path: 'oom-reports', element: <CoreRoutes.OomReportsPage /> },
-            { path: 'oom-reports/rules/:vpsId', element: <CoreRoutes.OomReportRulesPage /> },
+            { path: 'oom-reports/rules/:vpsId', element: <ParamKeyedRoute param="vpsId"><CoreRoutes.OomReportRulesPage /></ParamKeyedRoute> },
             {
               path: 'oom-reports/:oomReportId',
               element: <CoreRoutes.OomReportLayout />,
@@ -271,7 +272,7 @@ export const router = createBrowserRouter([
                 { path: 'namespaces', element: <ProfileUserNamespacesNamespacesPage /> },
                 { path: 'namespaces/:id', element: <ProfileUserNamespacesNamespaceDetailPage /> },
                 { path: 'maps', element: <ProfileUserNamespacesMapsPage /> },
-                { path: 'maps/:mapId', element: <ProfileUserNamespacesMapDetailPage /> },
+                { path: 'maps/:mapId', element: <ParamKeyedRoute param="mapId"><ProfileUserNamespacesMapDetailPage /></ParamKeyedRoute> },
               ],
             },
             { path: '_design', element: <DesignSandboxPage /> },
@@ -285,12 +286,12 @@ export const router = createBrowserRouter([
           children: [
             { index: true, element: <CoreRoutes.DashboardPage /> },
             { path: 'outages', element: <AdminOutagesPage /> },
-            { path: 'outages/:outageId', element: <AdminOutagesPage /> },
+            { path: 'outages/:outageId', element: <ParamKeyedRoute param="outageId"><AdminOutagesPage /></ParamKeyedRoute> },
             ...securityAdvisoryAdminRoutes,
             { path: 'nodes', element: <NodesPage /> },
-            { path: 'nodes/:nodeId', element: <NodeDetailPage /> },
+            { path: 'nodes/:nodeId', element: <NodeDetailPageRoute /> },
             { path: 'migration-plans', element: <MigrationPlansPage /> },
-            { path: 'migration-plans/:planId', element: <MigrationPlanDetailPage /> },
+            { path: 'migration-plans/:planId', element: <MigrationPlanDetailPageRoute /> },
             { path: 'admin-info', element: <AdminInfoPage /> },
             {
               path: 'user-namespaces',
@@ -300,7 +301,7 @@ export const router = createBrowserRouter([
                 { path: 'namespaces', element: <AdminUserNamespacesNamespacesPage /> },
                 { path: 'namespaces/:id', element: <AdminUserNamespacesNamespaceDetailPage /> },
                 { path: 'maps', element: <AdminUserNamespacesMapsPage /> },
-                { path: 'maps/:mapId', element: <AdminUserNamespacesMapDetailPage /> },
+                { path: 'maps/:mapId', element: <ParamKeyedRoute param="mapId"><AdminUserNamespacesMapDetailPage /></ParamKeyedRoute> },
               ],
             },
             {
@@ -313,9 +314,9 @@ export const router = createBrowserRouter([
                 { path: 'locations', element: <LocationsPage /> },
                 { path: 'os-templates', element: <OsTemplatesPage /> },
                 { path: 'networks', element: <NetworksPage /> },
-                { path: 'networks/:networkId', element: <NetworkDetailPage /> },
+                { path: 'networks/:networkId', element: <ParamKeyedRoute param="networkId"><NetworkDetailPage /></ParamKeyedRoute> },
                 { path: 'resource-packages', element: <ResourcePackagesPage /> },
-                { path: 'resource-packages/:packageId', element: <ResourcePackageDetailPage /> },
+                { path: 'resource-packages/:packageId', element: <ParamKeyedRoute param="packageId"><ResourcePackageDetailPage /></ParamKeyedRoute> },
                 { path: 'system-config', element: <SystemConfigPage /> },
                 { path: 'dns-resolvers', element: <DnsResolversPage /> },
                 { path: 'dns-servers', element: <DnsServersPage /> },
@@ -348,7 +349,7 @@ export const router = createBrowserRouter([
               children: [
                 { index: true, element: <Navigate to="ip-addresses" replace /> },
                 { path: 'ip-addresses', element: <IpAddressesPage /> },
-                { path: 'ip-addresses/:ipAddressId', element: <IpAddressDetailPage /> },
+                { path: 'ip-addresses/:ipAddressId', element: <ParamKeyedRoute param="ipAddressId"><IpAddressDetailPage /></ParamKeyedRoute> },
                 { path: 'host-ip-addresses', element: <HostIpAddressesPage /> },
                 { path: 'ip-address-assignments', element: <IpAssignmentsPage /> },
                 { path: 'live', element: <NetworkLivePage /> },
@@ -356,7 +357,7 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'ip-addresses', element: <IpAddressesPage /> },
-            { path: 'ip-addresses/:ipAddressId', element: <IpAddressDetailPage /> },
+            { path: 'ip-addresses/:ipAddressId', element: <ParamKeyedRoute param="ipAddressId"><IpAddressDetailPage /></ParamKeyedRoute> },
             { path: 'vps', element: <CoreRoutes.VpsListPage /> },
             { path: 'vps/new', element: <CoreRoutes.VpsCreatePage /> },
             {
@@ -379,10 +380,10 @@ export const router = createBrowserRouter([
             { path: 'nas', element: <NasDatasetsPage /> },
             { path: 'nas/new', element: <NasDatasetCreatePage /> },
             { path: 'exports', element: <ExportsListPage /> },
-            { path: 'exports/:exportId', element: <ExportDetailPage /> },
+            { path: 'exports/:exportId', element: <ParamKeyedRoute param="exportId"><ExportDetailPage /></ParamKeyedRoute> },
             {
               path: 'datasets/:datasetId',
-              element: <DatasetLayout />,
+              element: <ParamKeyedRoute param="datasetId"><DatasetLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DatasetOverviewPage /> },
                 { path: 'snapshots', element: <DatasetSnapshotsPage /> },
@@ -394,7 +395,7 @@ export const router = createBrowserRouter([
             },
             {
               path: 'nas/:datasetId',
-              element: <DatasetLayout />,
+              element: <ParamKeyedRoute param="datasetId"><DatasetLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DatasetOverviewPage /> },
                 { path: 'snapshots', element: <DatasetSnapshotsPage /> },
@@ -408,7 +409,7 @@ export const router = createBrowserRouter([
             { path: 'dns/tsig-keys', element: <AdminDnsTsigKeysPage /> },
             {
               path: 'dns/zones/:zoneId',
-              element: <DnsZoneLayout />,
+              element: <ParamKeyedRoute param="zoneId"><DnsZoneLayout /></ParamKeyedRoute>,
               children: [
                 { index: true, element: <DnsZoneRecordsPage /> },
                 { path: 'transfers', element: <DnsZoneTransfersPage /> },
@@ -423,16 +424,16 @@ export const router = createBrowserRouter([
             { path: 'transactions/items/:transactionId', element: <CoreRoutes.TransactionDetailPage /> },
             { path: 'transactions/:chainId', element: <CoreRoutes.TransactionChainDetailPage /> },
             { path: 'action-states', element: <CoreRoutes.ActionStatesPage /> },
-            { path: 'action-states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'action-states/:actionStateId', element: <ParamKeyedRoute param="actionStateId"><CoreRoutes.ActionStateDetailPage /></ParamKeyedRoute> },
             { path: 'action_states', element: <Navigate to="../action-states" replace /> },
-            { path: 'action_states/:actionStateId', element: <CoreRoutes.ActionStateDetailPage /> },
+            { path: 'action_states/:actionStateId', element: <ParamKeyedRoute param="actionStateId"><CoreRoutes.ActionStateDetailPage /></ParamKeyedRoute> },
             { path: 'monitoring', element: <CoreRoutes.MonitoringEventsPage /> },
-            { path: 'monitoring/:eventId', element: <CoreRoutes.MonitoringEventDetailPage /> },
+            { path: 'monitoring/:eventId', element: <ParamKeyedRoute param="eventId"><CoreRoutes.MonitoringEventDetailPage /></ParamKeyedRoute> },
             { path: 'incidents', element: <CoreRoutes.IncidentsPage /> },
             { path: 'incidents/new', element: <CoreRoutes.IncidentReportNewPage /> },
             { path: 'incidents/:incidentId', element: <CoreRoutes.IncidentReportDetailPage /> },
             { path: 'oom-reports', element: <CoreRoutes.OomReportsPage /> },
-            { path: 'oom-reports/rules/:vpsId', element: <CoreRoutes.OomReportRulesPage /> },
+            { path: 'oom-reports/rules/:vpsId', element: <ParamKeyedRoute param="vpsId"><CoreRoutes.OomReportRulesPage /></ParamKeyedRoute> },
             {
               path: 'oom-reports/:oomReportId',
               element: <CoreRoutes.OomReportLayout />,
@@ -443,10 +444,10 @@ export const router = createBrowserRouter([
               ],
             },
             { path: 'mailer/templates', element: <MailTemplatesPage /> },
-            { path: 'mailer/templates/:mailTemplateId', element: <MailTemplateDetailPage /> },
-            { path: 'mailer/templates/:mailTemplateId/translations/:translationId', element: <MailTemplateTranslationPage /> },
+            { path: 'mailer/templates/:mailTemplateId', element: <ParamKeyedRoute param="mailTemplateId"><MailTemplateDetailPage /></ParamKeyedRoute> },
+            { path: 'mailer/templates/:mailTemplateId/translations/:translationId', element: <ParamKeyedRoute params={['mailTemplateId', 'translationId']}><MailTemplateTranslationPage /></ParamKeyedRoute> },
             { path: 'mailer/mailboxes', element: <MailboxesPage /> },
-            { path: 'mailer/mailboxes/:mailboxId', element: <MailboxDetailPage /> },
+            { path: 'mailer/mailboxes/:mailboxId', element: <ParamKeyedRoute param="mailboxId"><MailboxDetailPage /></ParamKeyedRoute> },
             { path: 'mailer/recipients', element: <MailRecipientsPage /> },
             { path: 'mailer/log', element: <MailLogsPage /> },
             { path: 'mailer/log/:mailLogId', element: <MailLogDetailPage /> },
@@ -462,7 +463,7 @@ export const router = createBrowserRouter([
             { path: 'audit', element: <AuditPage /> },
             { path: 'audit/:historyId', element: <AuditEventPage /> },
             { path: 'requests', element: <RequestsPage /> },
-            { path: 'requests/:type/:requestId', element: <RequestDetailPage /> },
+            { path: 'requests/:type/:requestId', element: <ParamKeyedRoute params={['type', 'requestId']}><RequestDetailPage /></ParamKeyedRoute> },
             ...adminFinanceRoutes,
             { path: 'profile', element: <ProfilePage /> },
             { path: 'profile/resources', element: <ProfileResourcesPage /> },
@@ -481,7 +482,7 @@ export const router = createBrowserRouter([
                 { path: 'namespaces', element: <ProfileUserNamespacesNamespacesPage /> },
                 { path: 'namespaces/:id', element: <ProfileUserNamespacesNamespaceDetailPage /> },
                 { path: 'maps', element: <ProfileUserNamespacesMapsPage /> },
-                { path: 'maps/:mapId', element: <ProfileUserNamespacesMapDetailPage /> },
+                { path: 'maps/:mapId', element: <ParamKeyedRoute param="mapId"><ProfileUserNamespacesMapDetailPage /></ParamKeyedRoute> },
               ],
             },
             { path: '_design', element: <DesignSandboxPage /> },

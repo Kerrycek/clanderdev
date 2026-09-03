@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './appTypes';
 import type { Node } from './nodes';
 import type { User } from './users';
@@ -230,118 +230,136 @@ export async function fetchVps(vpsId: number, opts?: { includes?: string; signal
 }
 
 export async function updateVps(vpsId: number, params: Record<string, unknown>) {
-  return haveApiCall<Vps>({
+  const res = await haveApiCall<Vps>({
     method: 'PUT',
     path: `/vpses/${vpsId}`,
     namespace: 'vps',
     params,
   });
+  // Expiration/reminder-only writes are handled synchronously by the
+  // lifetimes concern. Every other update fires the VPS update chain.
+  const lifetimeOnlyKeys = new Set(['expiration_date', 'remind_after_date', 'change_reason']);
+  const lifetimeOnly = Object.keys(params).length > 0
+    && Object.keys(params).every((key) => lifetimeOnlyKeys.has(key));
+  return lifetimeOnly ? res : requireActionStateResult(res, 'VPS update');
 }
 
 export async function createVps(payload: CreateVpsPayload) {
-  return haveApiCall<Vps>({
+  const res = await haveApiCall<Vps>({
     method: 'POST',
     path: '/vpses',
     namespace: 'vps',
     params: buildCreateVpsParams(payload),
   });
+  return requireActionStateResult(res, 'VPS create');
 }
 
 export async function vpsStart(vpsId: number) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/start`,
   });
+  return requireActionStateResult(res, 'VPS start');
 }
 
 export async function vpsStop(vpsId: number, opts?: { force?: boolean }) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/stop`,
     namespace: 'vps',
     params: opts?.force ? { force: true } : undefined,
   });
+  return requireActionStateResult(res, 'VPS stop');
 }
 
 export async function vpsRestart(vpsId: number, opts?: { force?: boolean }) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/restart`,
     namespace: 'vps',
     params: opts?.force ? { force: true } : undefined,
   });
+  return requireActionStateResult(res, 'VPS restart');
 }
 
 export async function vpsPasswd(vpsId: number, type: 'simple' | 'secure' = 'secure') {
-  return haveApiCall<VpsPasswdReply>({
+  const res = await haveApiCall<VpsPasswdReply>({
     method: 'POST',
     path: `/vpses/${vpsId}/passwd`,
     namespace: 'vps',
     params: { type },
   });
+  return requireActionStateResult(res, 'VPS password reset');
 }
 
 export async function vpsClone(vpsId: number, params: VpsClonePayload) {
-  return haveApiCall<Vps>({
+  const res = await haveApiCall<Vps>({
     method: 'POST',
     path: `/vpses/${vpsId}/clone`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS clone');
 }
 
 export async function vpsSwapWith(vpsId: number, params: VpsSwapWithPayload) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/swap_with`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS swap');
 }
 
 export async function vpsReplace(vpsId: number, params: VpsReplacePayload) {
-  return haveApiCall<Vps>({
+  const res = await haveApiCall<Vps>({
     method: 'POST',
     path: `/vpses/${vpsId}/replace`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS replace');
 }
 
 export async function vpsBoot(vpsId: number, params: VpsBootPayload) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/boot`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS boot');
 }
 
 export async function vpsReinstall(vpsId: number, params: VpsReinstallPayload) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/reinstall`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS reinstall');
 }
 
 export async function vpsMigrate(vpsId: number, params: VpsMigratePayload) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'POST',
     path: `/vpses/${vpsId}/migrate`,
     namespace: 'vps',
     params: { ...params },
   });
+  return requireActionStateResult(res, 'VPS migrate');
 }
 
 export async function vpsDelete(vpsId: number, params?: { lazy?: boolean }) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'DELETE',
     path: `/vpses/${vpsId}`,
     namespace: 'vps',
     params,
   });
+  return requireActionStateResult(res, 'VPS delete');
 }
 
 export async function createConsoleToken(vpsId: number) {

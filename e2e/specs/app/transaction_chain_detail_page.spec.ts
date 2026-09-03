@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import {
+  expectNoDocumentHorizontalOverflow,
+  expectTableHorizontalScrollUsable,
+} from '../../helpers/horizontalOverflow';
 
 const handlers = {
   'GET transaction_chains/123': () => ({
@@ -164,7 +168,7 @@ const handlers = {
 };
 
 test.describe('@pr-smoke TransactionChainDetailPage', () => {
-  test('renders chain and transaction list', async ({ page }) => {
+  test('@pr-smoke-mobile renders chain and transaction list', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_TOKEN' });
     await installHaveApiMock(page, { handlers });
 
@@ -182,6 +186,10 @@ test.describe('@pr-smoke TransactionChainDetailPage', () => {
     await expect(page.getByTestId('transactions.chain.detail.tx.701')).toHaveAttribute('data-row-variant', 'warn');
     await expect(page.getByTestId('transactions.chain.detail.tx.702')).toHaveAttribute('data-row-variant', 'danger');
 
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoDocumentHorizontalOverflow(page);
+    await expectTableHorizontalScrollUsable(page, 'transactions.chain.detail.transactions.table');
+
     await page.getByTestId('transactions.chain.detail.tx.toggle.702').click();
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toBeVisible();
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toContainText('step failed on node2');
@@ -189,6 +197,8 @@ test.describe('@pr-smoke TransactionChainDetailPage', () => {
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toContainText('"a": 1');
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toContainText('"ok": false');
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toContainText('rollback_needed');
+    await expectNoDocumentHorizontalOverflow(page);
+    await page.setViewportSize({ width: 1280, height: 844 });
 
     await page.getByRole('button', { name: /collapse all|sbalit vše/i }).click();
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.702')).toBeHidden();
@@ -234,11 +244,16 @@ test.describe('@pr-smoke TransactionChainDetailPage', () => {
     await expect(page.getByTestId('transactions.chain.detail.info')).toContainText('1/3 · 33%');
     await expect(page.getByTestId('transactions.chain.detail.tx.902')).toContainText(/current step|aktuální krok/i);
 
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoDocumentHorizontalOverflow(page);
+    await expectTableHorizontalScrollUsable(page, 'transactions.chain.detail.transactions.table');
+
     await page.getByTestId('transactions.chain.detail.tx.toggle.902').click();
     await expect(page.getByTestId('transactions.chain.detail.tx.expanded.902')).toContainText('creating veth');
+    await expectNoDocumentHorizontalOverflow(page);
   });
 
-  test('renders admin route with admin-scoped links', async ({ page }) => {
+  test('@pr-smoke-mobile renders admin route with admin-scoped links', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_TOKEN' });
     await installHaveApiMock(page, {
       user: { id: 1, login: 'admin', level: 99 },
@@ -256,6 +271,9 @@ test.describe('@pr-smoke TransactionChainDetailPage', () => {
       'href',
       '/admin/transactions/items/702'
     );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoDocumentHorizontalOverflow(page);
+    await expectTableHorizontalScrollUsable(page, 'transactions.chain.detail.transactions.table');
   });
 
   test('deep reload keeps chain detail route and transaction table visible', async ({ page }) => {

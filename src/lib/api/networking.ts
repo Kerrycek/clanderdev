@@ -1,5 +1,5 @@
 import type { ResourceRef, User, Vps, NetworkInterface } from './app';
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { IpAddress } from './ipAddresses';
 
 export interface HostIpAddress {
@@ -110,35 +110,39 @@ export async function createHostIpAddress(payload: { ip_address: number; addr: s
 }
 
 export async function updateHostIpAddress(hostIpAddressId: number, params: Record<string, unknown>) {
-  return haveApiCall<HostIpAddress>({
+  const res = await haveApiCall<HostIpAddress>({
     method: 'PUT',
     path: `/host_ip_addresses/${hostIpAddressId}`,
     namespace: 'host_ip_address',
     params,
   });
+  return requireActionStateResult(res, 'host IP address update');
 }
 
 export async function deleteHostIpAddress(hostIpAddressId: number) {
-  return haveApiCall<null>({
+  const res = await haveApiCall<null>({
     method: 'DELETE',
     path: `/host_ip_addresses/${hostIpAddressId}`,
   });
+  return requireActionStateResult(res, 'host IP address delete');
 }
 
 export async function assignHostIpAddress(hostIpAddressId: number, payload: { network_interface: number }) {
-  return haveApiCall<HostIpAddress>({
+  const res = await haveApiCall<HostIpAddress>({
     method: 'POST',
     path: `/host_ip_addresses/${hostIpAddressId}/assign`,
     namespace: 'host_ip_address',
     params: { network_interface: payload.network_interface },
   });
+  return requireActionStateResult(res, 'host IP address assign');
 }
 
 export async function freeHostIpAddress(hostIpAddressId: number) {
-  return haveApiCall<HostIpAddress>({
+  const res = await haveApiCall<HostIpAddress>({
     method: 'POST',
     path: `/host_ip_addresses/${hostIpAddressId}/free`,
   });
+  return requireActionStateResult(res, 'host IP address free');
 }
 
 export async function fetchIpAddressAssignments(opts?: {

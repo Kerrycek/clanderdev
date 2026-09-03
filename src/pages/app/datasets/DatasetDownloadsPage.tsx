@@ -159,6 +159,7 @@ export function DatasetDownloadsPage() {
           objectLabel: datasetLabelForToast,
           object: datasetRef,
           progressTitleKey: "modal.dataset.download.create.title",
+          blockUi: true,
         });
       }
 

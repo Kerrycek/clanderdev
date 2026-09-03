@@ -1,5 +1,7 @@
 import { getRuntimeConfig } from '../../app/config';
+import { MALFORMED_HAVEAPI_ENVELOPE_ERROR_CODE, parseHaveApiEnvelope } from './haveapiEnvelope';
 
+export { MALFORMED_HAVEAPI_ENVELOPE_ERROR_CODE } from './haveapiEnvelope';
 export type JsonValue =
   | null
   | boolean
@@ -7,14 +9,12 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [k: string]: JsonValue };
-
 export interface HaveApiEnvelope {
   status: boolean;
   message?: string;
   errors?: unknown;
   response?: Record<string, unknown> | null;
 }
-
 export interface HaveApiRequestInfo {
   method: string;
   /** HaveAPI path (relative to apiBaseUrl), e.g. "/vpses" */
@@ -265,6 +265,67 @@ export function getMetaActionStateId(meta: unknown): number | undefined {
   return undefined;
 }
 
+export const MISSING_ACTION_STATE_ERROR_CODE = 'MISSING_ACTION_STATE' as const;
+
+/**
+ * Raised when an endpoint whose contract is an asynchronous action does not
+ * return a usable action-state id. The mutation may already have reached the
+ * server, so callers must fail closed and refresh state before offering a
+ * retry instead of treating the response as synchronous success.
+ */
+export class MissingActionStateError extends Error {
+  public readonly code = MISSING_ACTION_STATE_ERROR_CODE;
+  public readonly action: string;
+  public readonly result?: unknown;
+
+  constructor(action: string, result?: unknown) {
+    super(`Malformed ${action} response: missing action_state_id`);
+    this.name = 'MissingActionStateError';
+    this.action = action;
+    this.result = result;
+  }
+}
+
+export function isMissingActionStateError(error: unknown): error is MissingActionStateError {
+  return error instanceof MissingActionStateError
+    || (Boolean(error)
+      && typeof error === 'object'
+      && (error as { code?: unknown }).code === MISSING_ACTION_STATE_ERROR_CODE);
+}
+
+/**
+ * Whether a submitted mutation has an unknown outcome and must not be retried
+ * blindly. Explicit HaveAPI rejections and ordinary 4xx responses are
+ * authoritative; transport loss, malformed responses and server failures are
+ * not proof that the server did nothing.
+ */
+export function isAmbiguousMutationError(error: unknown): boolean {
+  if (isMissingActionStateError(error)) return true;
+  if (error instanceof HaveApiError) {
+    if (
+      error.envelope?.errors === 'INVALID_JSON_RESPONSE'
+      || error.envelope?.errors === MALFORMED_HAVEAPI_ENVELOPE_ERROR_CODE
+    ) return true;
+    if (typeof error.httpStatus === 'number') {
+      // These responses can be produced after a blocking mutation already
+      // reached the server, so they are not authoritative rejections.
+      if ([408, 425, 429].includes(error.httpStatus)) return true;
+      return error.httpStatus < 400 || error.httpStatus >= 500;
+    }
+    return false;
+  }
+  return error instanceof TypeError || (typeof DOMException !== 'undefined' && error instanceof DOMException);
+}
+
+/** Require the async-operation proof promised by a blocking API action. */
+export function requireActionStateResult<T extends { meta?: Record<string, unknown> }>(result: T, action: string): T {
+  const actionStateId = getMetaActionStateId(result.meta);
+  if (!Number.isInteger(actionStateId) || (actionStateId as number) <= 0) {
+    throw new MissingActionStateError(action, result);
+  }
+  return result;
+}
+
 /**
  * Many HaveAPI Index actions return pagination metadata in `_meta`, including `total_count`.
  */
@@ -339,18 +400,6 @@ function authHeaders(desc: any): Record<string, string> {
   return {};
 }
 
-async function safeJson(res: Response): Promise<HaveApiEnvelope> {
-  try {
-    return (await res.json()) as HaveApiEnvelope;
-  } catch {
-    return {
-      status: false,
-      message: `Invalid JSON response (HTTP ${res.status})`,
-      response: null,
-    };
-  }
-}
-
 export async function haveApiCall<T>(opts: CallOpts): Promise<{ data: T; meta?: Record<string, unknown>; envelope: HaveApiEnvelope }> {
   const cfg = getRuntimeConfig();
   const desc = await getHaveApiDescription();
@@ -416,7 +465,7 @@ export async function haveApiCall<T>(opts: CallOpts): Promise<{ data: T; meta?: 
 
 
   const res = await fetch(url, init);
-  const envelope = await safeJson(res);
+  const envelope = await parseHaveApiEnvelope(res);
 
   if (!res.ok) {
     // Some failures (e.g. 500) may still return JSON.

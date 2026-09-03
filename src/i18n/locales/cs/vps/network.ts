@@ -274,6 +274,7 @@ export const csVps_network = {
   'network.user.assign.location_missing_body': 'Bez lokality nelze bezpečně vybrat kompatibilní IP adresu.',
   'network.user.assign.submit': 'Přidat routu',
   'network.user.assign.error': 'Routu se nepodařilo přidat',
+  'network.user.assign.locked': 'Předchozí přiřazení stále čeká nebo se sleduje. Před další změnou zkontroluj Úlohy.',
   'network.user.assign.toast.assigned': 'Routa byla přidána',
   'network.user.assign.toast.assigned_body': '{address} se přidává k VPS {vps}.',
 } as const;

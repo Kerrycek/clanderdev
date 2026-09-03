@@ -18,6 +18,8 @@ export interface HelpBox {
   [k: string]: unknown;
 }
 
+export type ContextualHelpAccessMode = 'public' | 'authenticated';
+
 export async function fetchHelpBoxesAdmin(opts?: {
   page?: string;
   action?: string;
@@ -102,12 +104,19 @@ export async function deleteHelpBox(id: number) {
   });
 }
 
-export async function fetchContextualHelpBoxes(page: string, action: string) {
-  const res = await publicApiCall<HelpBox[]>({
+export async function fetchContextualHelpBoxes(
+  page: string,
+  action: string,
+  accessMode: ContextualHelpAccessMode
+) {
+  const request = {
     path: '/help_boxes',
     namespace: 'help_box',
     params: { page, action, view: true },
-  });
+  };
+  const res = accessMode === 'authenticated'
+    ? await haveApiCall<HelpBox[]>({ method: 'GET', ...request })
+    : await publicApiCall<HelpBox[]>(request);
 
   return { ...res, data: expectArray<HelpBox>(res.data, 'help_boxes#view') };
 }

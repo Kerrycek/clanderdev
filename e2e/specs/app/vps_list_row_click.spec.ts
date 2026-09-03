@@ -33,6 +33,13 @@ async function visibleVpsItem(page: Page, id: number): Promise<{ item: Locator; 
   return { item: card, actionPrefix: `vps.card.${id}` };
 }
 
+async function navigateWithinApp(page: Page, path: string) {
+  await page.evaluate((nextPath) => {
+    window.history.pushState({}, '', nextPath);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, path);
+}
+
 test.describe('@workflow-matrix @smoke VPS list row navigation', () => {
   test('clicking a row navigates to VPS detail', async ({ page }) => {
     const vps = makeVps(300);
@@ -147,6 +154,52 @@ test.describe('@workflow-matrix @smoke VPS list row navigation', () => {
     const req = await reqPromise;
     expect(req.postDataJSON()).toEqual({ vps: { lazy: true } });
     await expect(page).toHaveURL(/\/admin\/vps(?:\?|$)/);
+  });
+
+  test('admin delete keeps its submit-time payload while the reused list switches to user mode', async ({ page }) => {
+    const vps = makeVps(300);
+    let releaseGuard = () => {};
+    let markGuardStarted = () => {};
+    const guardRelease = new Promise<void>((resolve) => { releaseGuard = resolve; });
+    const guardStarted = new Promise<void>((resolve) => { markGuardStarted = resolve; });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 99 },
+      handlers: {
+        'GET vpses': () => ({ vpses: [vps] }),
+        'GET transaction_chains': async ({ searchParams }) => {
+          const isDeleteGuard =
+            searchParams.get('transaction_chain[class_name]') === 'Vps'
+            && searchParams.get('transaction_chain[row_id]') === '300';
+          if (isDeleteGuard) {
+            markGuardStarted();
+            await guardRelease;
+          }
+          return { transaction_chains: [] };
+        },
+        'DELETE vpses/300': () => ({ _meta: { action_state_id: 903 } }),
+      },
+    });
+    await bootstrapVpsAdminWindow(page);
+
+    await page.goto('/admin/vps');
+    const { actionPrefix } = await visibleVpsItem(page, 300);
+    await page.getByTestId(`${actionPrefix}.action.delete`).click();
+    await expect(page.getByTestId('vps.list.delete_confirm.lazy')).toBeChecked();
+
+    const deleteRequest = page.waitForRequest(
+      (request) => request.method() === 'DELETE' && request.url().includes('/api/v7.0/vpses/300')
+    );
+    await page.getByTestId('vps.list.delete_confirm.confirm').click();
+    await guardStarted;
+
+    await navigateWithinApp(page, '/app/vps');
+    await expect(page).toHaveURL(/\/app\/vps(?:\?|$)/);
+    await expect(page.getByTestId('vps.list.create')).toHaveAttribute('href', '/app/vps/new');
+
+    releaseGuard();
+    const request = await deleteRequest;
+    expect(request.postDataJSON()).toEqual({ vps: { lazy: true } });
   });
 
   test('my VPS view hides redundant owner context while admin view keeps it', async ({ page }) => {

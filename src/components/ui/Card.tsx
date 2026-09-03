@@ -6,7 +6,7 @@ export function Card(props: { id?: string; testId?: string; className?: string; 
     <div
       id={props.id}
       data-testid={props.testId}
-      className={clsx('rounded-lg border border-border bg-surface shadow-card', props.className)}
+      className={clsx('min-w-0 rounded-lg border border-border bg-surface shadow-card', props.className)}
     >
       {props.children}
     </div>

@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './appTypes';
 
 export interface NetworkInterface {
@@ -57,12 +57,13 @@ export async function fetchNetworkInterfaces(vpsId: number, opts?: { limit?: num
 }
 
 export async function updateNetworkInterface(netifId: number, params: Record<string, unknown>) {
-  return haveApiCall<NetworkInterface>({
+  const res = await haveApiCall<NetworkInterface>({
     method: 'PUT',
     path: `/network_interfaces/${netifId}`,
     namespace: 'network_interface',
     params,
   });
+  return requireActionStateResult(res, 'network interface update');
 }
 
 export async function fetchNetworkInterfaceAccountings(opts?: NetworkInterfaceAccountingListOpts) {

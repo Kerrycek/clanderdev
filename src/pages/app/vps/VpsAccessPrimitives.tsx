@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 
 import { useI18n } from '../../../app/i18n';
 import { Button } from '../../../components/ui/Button';
+import { isMissingActionStateError } from '../../../lib/api/haveapi';
 import type { ApiResult, VpsGeneratedPassword, VpsPasswordType, VpsPublicKey } from '../../../lib/api/vpsAccess';
 
 export type GeneratedCredential = {
@@ -11,11 +12,13 @@ export type GeneratedCredential = {
 
 export type PendingGeneratedCredential = GeneratedCredential & {
   asId: number;
+  vpsId: number;
 };
 
 export type PendingPublicKeyDeployment = {
   asId: number;
   keyLabel: string;
+  vpsId: number;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -52,7 +55,8 @@ export function actionStateFailed(value: unknown): boolean {
   return recordField(value, 'status') === false;
 }
 
-export function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown, missingActionStateMessage?: string): string {
+  if (missingActionStateMessage && isMissingActionStateError(error)) return missingActionStateMessage;
   if (isRecord(error) && typeof error['message'] === 'string') return error['message'];
   return String(error);
 }

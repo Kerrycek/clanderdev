@@ -36,7 +36,7 @@ async function routeConsoleStub(page: Parameters<typeof installHaveApiMock>[0]) 
 }
 
 test.describe('@smoke VPS console page', () => {
-  test('@workflow-matrix renders console iframe and can recreate session', async ({ page }) => {
+  test('@workflow-matrix keeps navigation read-only, then renders and recreates an explicitly requested session', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
     await routeConsoleStub(page);
@@ -67,8 +67,22 @@ test.describe('@smoke VPS console page', () => {
     await page.goto('/app/vps/123/console');
 
     await expect(page.getByTestId('vps.console.page')).toBeVisible();
-    await expect(page.getByTestId('vps.console.connection_state')).toContainText(/Connecting|Connected/);
+    await expect(page.getByTestId('vps.console.connection_state')).toContainText('Disconnected');
+    await expect(page.getByTestId('vps.console.not_started')).toContainText('Select New session');
     await expect(page.getByTestId('vps.console.new_session')).toBeVisible();
+    await expect(page.getByTestId('vps.console.iframe')).toHaveCount(0);
+    expect(createCalls).toBe(0);
+    expect(deleteCalls).toBe(0);
+
+    await page.reload();
+    await expect(page.getByTestId('vps.console.page')).toBeVisible();
+    await expect(page.getByTestId('vps.console.connection_state')).toContainText('Disconnected');
+    expect(createCalls).toBe(0);
+    expect(deleteCalls).toBe(0);
+
+    await page.getByTestId('vps.console.new_session').click();
+    await expect.poll(() => createCalls).toBe(1);
+    await expect(page.getByTestId('vps.console.connection_state')).toContainText(/Connecting|Connected/);
     await expect(page.getByTestId('vps.console.reconnect')).toBeVisible();
     await expect(page.getByTestId('vps.console.copy_url')).toHaveCount(0);
     await expect(page.getByTestId('vps.console.copy_ssh')).toBeVisible();
@@ -110,12 +124,14 @@ test.describe('@smoke VPS console page', () => {
       .toContain('/_console/console/123?session=T2');
 
     expect(deleteCalls).toBe(1);
-    expect(createCalls).toBeGreaterThanOrEqual(2);
+    expect(createCalls).toBe(2);
   });
 
-  test('preserves direct admin console reload', async ({ page }) => {
+  test('keeps direct admin console navigation and reload read-only until explicit session creation', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     await routeConsoleStub(page);
+
+    let createCalls = 0;
 
     await installHaveApiMock(page, {
       user: { id: 1, login: 'admin', level: 90 },
@@ -123,15 +139,28 @@ test.describe('@smoke VPS console page', () => {
         'GET vpses/123': () => ({ vps }),
         'GET ip_addresses': () => ({ ip_addresses: [] }),
         'GET transaction_chains': () => ({ transaction_chains: [] }),
-        'POST vpses/123/console_token': () => ({
-          token: 'ADMIN',
-          expiration: '2027-01-31T00:00:00Z',
-        }),
+        'POST vpses/123/console_token': () => {
+          createCalls += 1;
+          return {
+            token: 'ADMIN',
+            expiration: '2027-01-31T00:00:00Z',
+          };
+        },
       },
     });
 
     await page.goto('/admin/vps/123/console');
     await expect(page.getByTestId('vps.console.page')).toBeVisible();
+    await expect(page.getByTestId('vps.console.connection_state')).toContainText('Disconnected');
+    expect(createCalls).toBe(0);
+
+    await page.reload();
+    await expect(page.getByTestId('vps.console.page')).toBeVisible();
+    await expect(page.getByTestId('vps.console.not_started')).toBeVisible();
+    expect(createCalls).toBe(0);
+
+    await page.getByTestId('vps.console.new_session').click();
+    await expect.poll(() => createCalls).toBe(1);
     await expect(page.getByTestId('vps.console.open_new_tab')).toHaveAttribute(
       'href',
       /\/_console\/console\/123\?session=ADMIN/
@@ -162,12 +191,98 @@ test.describe('@smoke VPS console page', () => {
 
     await page.goto('/app/vps/123/console');
 
+    await expect(page.getByTestId('vps.console.not_started')).toBeVisible();
+    expect(createCalls).toBe(0);
+    await page.getByTestId('vps.console.new_session').click();
     await expect(page.getByTestId('vps.console.connection_state')).toContainText('Failed');
     await expect(page.getByTestId('vps.console.error')).toContainText('The console session could not be created');
     await expect(page.getByTestId('vps.console.retry')).toBeVisible();
 
     await page.getByTestId('vps.console.retry').click();
     await expect.poll(() => createCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test('fails closed when replacing a session cannot prove the old token stayed valid', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    await routeConsoleStub(page);
+
+    let createCalls = 0;
+    let deleteCalls = 0;
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'test', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET ip_addresses': () => ({ ip_addresses: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'POST vpses/123/console_token': () => {
+          createCalls += 1;
+          return { token: `T${createCalls}`, expiration: '2027-01-31T00:00:00Z' };
+        },
+        'DELETE vpses/123/console_token': () => {
+          deleteCalls += 1;
+          return { status: false, message: 'console revoke outcome unknown', response: null };
+        },
+      },
+    });
+
+    await page.goto('/app/vps/123/console');
+    await page.getByTestId('vps.console.new_session').click();
+    await expect(page.getByTestId('vps.console.iframe')).toBeVisible();
+
+    await page.getByTestId('vps.console.new_session').click();
+    await page.getByTestId('vps.console.new_session_dialog.confirm').click();
+
+    await expect(page.getByTestId('vps.console.new_session_error')).toBeVisible();
+    await expect(page.getByTestId('vps.console.revoked')).toBeVisible();
+    await expect(page.getByTestId('vps.console.iframe')).toHaveCount(0);
+    expect(deleteCalls).toBe(1);
+    expect(createCalls).toBe(1);
+  });
+
+  test('clears a stale revoke error after an explicit replacement succeeds', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    await routeConsoleStub(page);
+
+    let createCalls = 0;
+    let deleteCalls = 0;
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'test', level: 1 },
+      handlers: {
+        'GET vpses/123': () => ({ vps }),
+        'GET ip_addresses': () => ({ ip_addresses: [] }),
+        'GET transaction_chains': () => ({ transaction_chains: [] }),
+        'POST vpses/123/console_token': () => {
+          createCalls += 1;
+          return { token: `T${createCalls}`, expiration: '2027-01-31T00:00:00Z' };
+        },
+        'DELETE vpses/123/console_token': () => {
+          deleteCalls += 1;
+          if (deleteCalls === 1) {
+            return { status: false, message: 'temporary revoke failure', response: null };
+          }
+          return {};
+        },
+      },
+    });
+
+    await page.goto('/app/vps/123/console');
+    await page.getByTestId('vps.console.new_session').click();
+    await expect(page.getByTestId('vps.console.iframe')).toBeVisible();
+
+    await page.getByTestId('vps.console.revoke_session').click();
+    await page.getByTestId('vps.console.revoke_session_dialog.confirm').click();
+    await expect(page.getByTestId('vps.console.revoke_error')).toBeVisible();
+
+    await page.getByTestId('vps.console.new_session').click();
+    await page.getByTestId('vps.console.new_session_dialog.confirm').click();
+
+    await expect(page.getByTestId('vps.console.revoke_error')).toHaveCount(0);
+    await expect(page.getByTestId('vps.console.open_new_tab')).toHaveAttribute(
+      'href',
+      /\/_console\/console\/123\?session=T2/
+    );
+    expect(deleteCalls).toBe(2);
+    expect(createCalls).toBe(2);
   });
 
   test('shows unavailable state when no console server is configured', async ({ page }) => {

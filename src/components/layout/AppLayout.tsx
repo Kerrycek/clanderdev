@@ -28,16 +28,7 @@ import { useDocumentVisibility } from '../../lib/useDocumentVisibility';
 import { useNetworkStatus } from '../../lib/useNetworkStatus';
 import { tierAIntervalMs } from '../../lib/refreshTiers';
 import { consumePendingToast, queueScopeAllObjectsWarning } from '../../lib/pendingToasts';
-import {
-  LOCAL_LOCK_STORAGE_KEY,
-  localLockActionStateIds,
-  parseLocalLocksFromStorage,
-  pruneLocalLocks,
-  releaseLocalLock as releaseLocalLockReducer,
-  releaseLocalLocksByActionStateId as releaseLocalLocksByActionStateIdReducer,
-  upsertLocalLock,
-  type LocalLock,
-} from '../../lib/localLocks';
+import { localLockActionStateIds } from '../../lib/localLocks';
 import { useTaskCompletionToasts } from './useTaskCompletionToasts';
 import { ImpersonationBanner } from './ImpersonationBanner';
 import { ContextualHelpPanel } from './ContextualHelpPanel';
@@ -45,6 +36,17 @@ import { AppHeader } from './AppHeader';
 import { AppSidebar, buildSidebarNavItems } from './AppSidebar';
 import { SidebarTips } from './SidebarTips';
 import { FrontendFreshnessGuard } from './FrontendFreshnessGuard';
+import { useLocalMutationLocks } from './useLocalMutationLocks';
+
+const LEGACY_TRACKED_ACTION_STORAGE_KEY = 'webui-next.tracked_action_states';
+const LEGACY_PINNED_ACTION_STORAGE_KEY = 'webui-next.pinned_action_states';
+const LEGACY_PINNED_CHAIN_STORAGE_KEY = 'webui-next.pinned_transaction_chains';
+
+export function taskStorageScopeForUser(userId: unknown): string {
+  const id = Number(userId);
+  return Number.isSafeInteger(id) && id > 0 ? `user-${id}` : 'anonymous';
+}
+
 function useOutsideClick(ref: React.RefObject<HTMLElement | null>, onOutside: () => void, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
@@ -168,12 +170,15 @@ export function AppLayout(props: { children: React.ReactNode }) {
     }
   }, [i18n, location.hash, location.pathname, location.search, mode, navigate, toasts]);
 
-  // Track action_state_id values returned by blocking API actions (so we can show progress in the Tasks drawer).
-  const trackedStorageKey = 'webui-next.tracked_action_states';
+  const taskStorageScope = taskStorageScopeForUser(auth.user?.id);
+
+  // Task metadata and pins can contain object labels and backend IDs. Keep
+  // every persisted value scoped to the authenticated account.
+  const trackedStorageKey = `${LEGACY_TRACKED_ACTION_STORAGE_KEY}.${taskStorageScope}`;
 
   // Persisted pins for debugging sessions across reloads.
-  const pinnedActionStorageKey = 'webui-next.pinned_action_states';
-  const pinnedChainStorageKey = 'webui-next.pinned_transaction_chains';
+  const pinnedActionStorageKey = `${LEGACY_PINNED_ACTION_STORAGE_KEY}.${taskStorageScope}`;
+  const pinnedChainStorageKey = `${LEGACY_PINNED_CHAIN_STORAGE_KEY}.${taskStorageScope}`;
 
   const [tasksFilter, setTasksFilter] = useState('');
 
@@ -236,51 +241,29 @@ export function AppLayout(props: { children: React.ReactNode }) {
 
   const [highlightActionStateId, setHighlightActionStateId] = useState<number | null>(null);
 
-  // Local transition locks (sessionStorage, per-tab).
-  const [localLocks, setLocalLocks] = useState<LocalLock[]>(() => {
-    if (typeof window === 'undefined') return [];
-    return parseLocalLocksFromStorage(window.sessionStorage.getItem(LOCAL_LOCK_STORAGE_KEY), Date.now());
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Old unscoped values cannot be attributed safely after an account
+    // change. Do not migrate them into whichever user happens to sign in.
+    window.sessionStorage.removeItem(LEGACY_TRACKED_ACTION_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_PINNED_ACTION_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_PINNED_CHAIN_STORAGE_KEY);
+  }, []);
+
+  const {
+    localLocks,
+    acquireLocalLock,
+    settleLocalLock,
+    releaseLocalLock,
+    acknowledgeUncertainLocalLock,
+    releaseLocalLocksByActionStateId,
+    isLocallyLocked,
+  } = useLocalMutationLocks({
+    userId: auth.user?.id,
+    persistenceErrorMessage: i18n.t('vps.mutation.error.guard_storage'),
+    outcomeUncertainMessage: i18n.t('vps.mutation.error.outcome_uncertain'),
   });
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.sessionStorage.setItem(LOCAL_LOCK_STORAGE_KEY, JSON.stringify(localLocks));
-    } catch {
-      // ignore
-    }
-  }, [localLocks]);
-
-  // Periodic prune for stale locks (also covers reload/resume).
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const id = window.setInterval(() => {
-      setLocalLocks((prev) => pruneLocalLocks(prev, Date.now()));
-    }, 5000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const acquireLocalLock = useCallback((ref: ObjectRef, opts?: { actionStateId?: number; ttlMs?: number }) => {
-    const now = Date.now();
-    setLocalLocks((prev) => upsertLocalLock(pruneLocalLocks(prev, now), ref, now, opts));
-  }, []);
-
-  const releaseLocalLock = useCallback((ref: ObjectRef) => {
-    setLocalLocks((prev) => releaseLocalLockReducer(prev, ref));
-  }, []);
-
-  const releaseLocalLocksByActionStateId = useCallback((actionStateId: number) => {
-    setLocalLocks((prev) => releaseLocalLocksByActionStateIdReducer(prev, actionStateId));
-  }, []);
-
-  const isLocallyLocked = useCallback(
-    (ref: ObjectRef) => {
-      const key = objectRefKey(ref);
-      const now = Date.now();
-      return localLocks.some((l) => l.key === key && l.expiresAt > now);
-    },
-    [localLocks]
-  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -408,6 +391,9 @@ export function AppLayout(props: { children: React.ReactNode }) {
         /** When provided, binds a local transition lock to this action state. */
         object?: ObjectRef;
 
+        /** Exact durable request generation to bind to this action state. */
+        mutationGeneration?: import('../../lib/localLocks').LocalMutationGeneration;
+
         blockUi?: boolean;
         progressTitleKey?: TrackedActionState['progressTitleKey'];
       }
@@ -417,11 +403,16 @@ export function AppLayout(props: { children: React.ReactNode }) {
 
       // Bind/refresh the local lock when the API confirms an action_state_id.
       if (meta?.object) {
-        acquireLocalLock(meta.object, { actionStateId: id });
+        acquireLocalLock(meta.object, {
+          actionStateId: id,
+          generation: meta.mutationGeneration,
+        });
       }
 
       setHighlightActionStateId(id);
-      setBlockingActionStateId(id);
+      if (meta?.blockUi === true) {
+        setBlockingActionStateId(id);
+      }
 
       const safeMeta: Omit<TrackedActionState, 'id' | 'addedAt'> = {
         actionLabelKey: meta?.actionLabelKey,
@@ -489,7 +480,9 @@ export function AppLayout(props: { children: React.ReactNode }) {
 
       localLocks,
       acquireLocalLock,
+      settleLocalLock,
       releaseLocalLock,
+      acknowledgeUncertainLocalLock,
       releaseLocalLocksByActionStateId,
       isLocallyLocked,
     }),
@@ -510,7 +503,9 @@ export function AppLayout(props: { children: React.ReactNode }) {
       trackedActionStates,
       localLocks,
       acquireLocalLock,
+      settleLocalLock,
       releaseLocalLock,
+      acknowledgeUncertainLocalLock,
       releaseLocalLocksByActionStateId,
       isLocallyLocked,
     ]

@@ -1,7 +1,7 @@
 import { roleFromLevel } from '../roles';
 
 import { clusterSearch } from './clusterSearch';
-import { expectArray, haveApiCall, type HaveApiEnvelope } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult, type HaveApiEnvelope } from './haveapi';
 
 export interface User {
   id: number;
@@ -367,12 +367,17 @@ export async function createUser(payload: CreateUserPayload) {
 }
 
 export async function updateUser(userId: number, payload: Record<string, unknown>) {
-  return haveApiCall<User>({
+  const res = await haveApiCall<User>({
     method: 'PUT',
     path: `/users/${userId}`,
     namespace: 'user',
     params: payload,
   });
+  // User::Update only creates a chain for an object-state transition.
+  // Profile and lifetime-date-only writes are synchronous upstream.
+  return Object.prototype.hasOwnProperty.call(payload, 'object_state')
+    ? requireActionStateResult(res, 'user state update')
+    : res;
 }
 
 export async function deleteUser(userId: number, payload?: { object_state?: string }) {

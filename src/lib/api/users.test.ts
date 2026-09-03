@@ -208,7 +208,9 @@ describe('updateUser', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       makeOkResponse({
         status: true,
-        response: { user: { id: 1, login: 'kerry', level: 99 } },
+        response: {
+          user: { id: 1, login: 'kerry', level: 99 },
+        },
       })
     );
 
@@ -234,6 +236,28 @@ describe('updateUser', () => {
     });
     expect(init.method).toBe('PUT');
     expect(init.headers).toMatchObject({ 'X-Auth-Token': 'tok_123' });
+  });
+
+  it('accepts a synchronous lifetime-date update without an action-state id', async () => {
+    installApiFixture();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      makeOkResponse({ status: true, response: { user: { id: 1, login: 'kerry', level: 99 } } })
+    );
+
+    await expect(updateUser(1, { expiration_date: null })).resolves.toMatchObject({
+      data: { id: 1, login: 'kerry' },
+    });
+  });
+
+  it('fails closed when a user object-state update has no action-state id', async () => {
+    installApiFixture();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      makeOkResponse({ status: true, response: { user: { id: 1, login: 'kerry', level: 99 } } })
+    );
+
+    await expect(updateUser(1, { object_state: 'suspended' })).rejects.toMatchObject({
+      code: 'MISSING_ACTION_STATE',
+    });
   });
 });
 

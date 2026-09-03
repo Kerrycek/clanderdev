@@ -116,6 +116,24 @@ describe('runtimeBootstrap', () => {
     expect(target.vpsAdmin?.webuiNext?.sessionExpiresAt).toBe(123_456);
   });
 
+  it('preserves an explicit legacy session token without probing the BFF session', async () => {
+    const target: RuntimeSessionTarget = {
+      vpsAdmin: {
+        api: { url: 'https://api.example.test', version: '7.0' },
+        sessionToken: 'detached-legacy-session',
+      },
+    };
+    const fetchImpl = vi.fn();
+
+    expect(await loadBffRuntimeSession({
+      origin: 'https://example.test',
+      fetchImpl,
+      target,
+    })).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(target.vpsAdmin?.sessionToken).toBe('detached-legacy-session');
+  });
+
   it('ignores non-JSON session responses from static SPA fallbacks', async () => {
     const target: RuntimeSessionTarget = {
       vpsAdmin: {

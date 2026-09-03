@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 import type { ResourceRef } from './appTypes';
 import type { NetworkInterface } from './networkInterfaces';
 import type { User } from './users';
@@ -26,6 +26,7 @@ export interface IpAddress {
   size?: number;
   network_interface?: NetworkInterface | ResourceRef;
   user?: User | ResourceRef;
+  charged_environment?: ResourceRef;
   addr?: string;
   routed?: boolean;
   vps?: Vps | ResourceRef;
@@ -97,12 +98,13 @@ export async function fetchIpAddress(ipAddressId: number, opts?: { includes?: st
 }
 
 export async function updateIpAddress(ipAddressId: number, params: Record<string, unknown>) {
-  return haveApiCall<IpAddress>({
+  const res = await haveApiCall<IpAddress>({
     method: 'PUT',
     path: `/ip_addresses/${ipAddressId}`,
     namespace: 'ip_address',
     params,
   });
+  return requireActionStateResult(res, 'IP address update');
 }
 
 export async function assignIpAddressRoute(
@@ -114,12 +116,13 @@ export async function assignIpAddressRoute(
   };
   if (payload.route_via !== undefined && payload.route_via !== null) params['route_via'] = payload.route_via;
 
-  return haveApiCall<IpAddress>({
+  const res = await haveApiCall<IpAddress>({
     method: 'POST',
     path: `/ip_addresses/${ipAddressId}/assign`,
     namespace: 'ip_address',
     params,
   });
+  return requireActionStateResult(res, 'IP address route assign');
 }
 
 export async function assignIpAddressRouteWithHostAddress(
@@ -133,19 +136,21 @@ export async function assignIpAddressRouteWithHostAddress(
     params['host_ip_address'] = payload.host_ip_address;
   }
 
-  return haveApiCall<IpAddress>({
+  const res = await haveApiCall<IpAddress>({
     method: 'POST',
     path: `/ip_addresses/${ipAddressId}/assign_with_host_address`,
     namespace: 'ip_address',
     params,
   });
+  return requireActionStateResult(res, 'IP address route and host address assign');
 }
 
 export async function freeIpAddressRoute(ipAddressId: number) {
-  return haveApiCall<IpAddress>({
+  const res = await haveApiCall<IpAddress>({
     method: 'POST',
     path: `/ip_addresses/${ipAddressId}/free`,
   });
+  return requireActionStateResult(res, 'IP address route free');
 }
 
 export async function fetchIpAddressesForVps(vpsId: number, opts?: { limit?: number; includes?: string }) {

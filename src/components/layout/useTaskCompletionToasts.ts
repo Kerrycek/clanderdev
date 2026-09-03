@@ -28,6 +28,19 @@ function uniqPositiveInts(list: number[], max: number): number[] {
   return Array.from(set);
 }
 
+export function shouldReplayFinishedLockCallback(
+  actionStateId: number,
+  finished: boolean,
+  lockActionStateIds: readonly number[],
+  deliveredIds: ReadonlySet<number>,
+  previouslyFinished?: boolean
+): boolean {
+  return finished
+    && previouslyFinished !== false
+    && lockActionStateIds.includes(actionStateId)
+    && !deliveredIds.has(actionStateId);
+}
+
 function safeActionLabel(opts: {
   tracked: TrackedActionState;
   actionState?: ActionState | undefined;
@@ -166,6 +179,7 @@ export function useTaskCompletionToasts(opts: {
   });
 
   const prevActionRef = useRef(new Map<number, { finished: boolean; failing: boolean }>());
+  const finishedLockCallbacksRef = useRef(new Set<number>());
   const prevChainRef = useRef(new Map<number, { finished: boolean; failed: boolean }>());
   const notifiedRef = useRef(new Set<string>());
 
@@ -182,12 +196,24 @@ export function useTaskCompletionToasts(opts: {
       const failing = isFailingActionState(s);
 
       const prev = prevActionRef.current.get(id);
+      const replayFinishedLock = shouldReplayFinishedLockCallback(
+        id, finished, lockIds, finishedLockCallbacksRef.current, prev?.finished
+      );
+      if (replayFinishedLock && onActionFinished) {
+        finishedLockCallbacksRef.current.add(id);
+        onActionFinished(id, {
+          failed: failing,
+          actionState: s,
+          transactionChainId: extractRelatedTransactionChainIdFromActionState(s),
+        });
+      }
       if (!prev) {
         prevActionRef.current.set(id, { finished, failing });
 
         // If the action is already finished when we start observing it (e.g. after reload),
         // still fire the callback so local locks can be released.
-        if (finished && onActionFinished) {
+        if (finished && onActionFinished && !replayFinishedLock) {
+          if (lockIds.includes(id)) finishedLockCallbacksRef.current.add(id);
           onActionFinished(id, {
             failed: failing,
             actionState: s,
@@ -201,6 +227,7 @@ export function useTaskCompletionToasts(opts: {
       // Notify only on transition to finished.
       if (!prev.finished && finished) {
         if (onActionFinished) {
+          if (lockIds.includes(id)) finishedLockCallbacksRef.current.add(id);
           onActionFinished(id, {
             failed: failing,
             actionState: s,
@@ -247,7 +274,7 @@ export function useTaskCompletionToasts(opts: {
 
       prevActionRef.current.set(id, { finished, failing });
     }
-  }, [actionQs, onOpenTasks, t, toasts, trackedById, watchedActionIds, onActionFinished]);
+  }, [actionQs, lockIds, onOpenTasks, t, toasts, trackedById, watchedActionIds, onActionFinished]);
 
   useEffect(() => {
     // Transaction chain toasts

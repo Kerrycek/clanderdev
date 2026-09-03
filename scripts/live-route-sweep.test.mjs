@@ -64,6 +64,13 @@ test('manifest covers public, user and broad admin static surfaces without dupli
   assert.ok(LIVE_ROUTE_MANIFEST.some((item) => item.path === '/admin/cluster/dns-tsig-keys'));
 });
 
+test('user incident creation route certifies its explicit forbidden surface', () => {
+  const route = USER_STATIC_ROUTES.find((item) => item.id === 'app.incidents.new');
+  assert.ok(route);
+  assert.equal(route.path, '/app/incidents/new');
+  assert.equal(route.expectedTestId, 'incidents.new.forbidden');
+});
+
 test('manifest validator rejects duplicate ids and paths', () => {
   assert.throws(
     () => assertUniqueManifestRoutes([{ id: 'one', path: '/one' }, { id: 'one', path: '/two' }]),

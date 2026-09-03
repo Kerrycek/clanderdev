@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+import {
+  expectNoDocumentHorizontalOverflow,
+  expectTableHorizontalScrollUsable,
+} from '../../helpers/horizontalOverflow';
 
 const vps = {
   id: 123,
@@ -23,8 +27,12 @@ const vps = {
   dns_resolver: 'inherit',
 };
 
+const longPublicKeyLabel = `workstation-${'primary'.repeat(18)}`;
+const longPublicKeyFingerprint = `SHA256:${'abcdefghijklmnopqrstuvwxyz0123456789'.repeat(4)}`;
+const longPublicKeyComment = `main-laptop-${'comment'.repeat(24)}`;
+
 const publicKeys = [
-  { id: 8, label: 'workstation', fingerprint: 'SHA256:abc', comment: 'main laptop', auto_add: true },
+  { id: 8, label: longPublicKeyLabel, fingerprint: longPublicKeyFingerprint, comment: longPublicKeyComment, auto_add: true },
   { id: 9, label: 'backup', fingerprint: 'SHA256:def', comment: 'backup key', auto_add: false },
 ];
 
@@ -40,7 +48,7 @@ const hostKeys = [
   { id: 2, key_type: 'ssh-rsa', fingerprint: 'SHA256:host-rsa', public_key: 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ' },
 ];
 
-test('@workflow-matrix @pr-smoke VPS access page generates root password and deploys saved SSH key', async ({ page }) => {
+test('@workflow-matrix @pr-smoke @pr-smoke-mobile VPS access page generates root password and deploys saved SSH key', async ({ page }) => {
   await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
   await installHaveApiMock(page, {
@@ -73,6 +81,10 @@ test('@workflow-matrix @pr-smoke VPS access page generates root password and dep
   await expect(page.getByTestId('vps.access.host_keys.table')).toBeVisible();
   await expect(page.getByTestId('vps.access.host_keys.row.1')).toContainText('SHA256:host-ed25519');
   await expect(page.getByTestId('vps.access.host_keys.row.1')).toContainText('ssh-ed25519');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectNoDocumentHorizontalOverflow(page);
+  await expectTableHorizontalScrollUsable(page, 'vps.access.host_keys.table');
+  await page.setViewportSize({ width: 1280, height: 844 });
   await page.getByTestId('vps.access.password_type').selectOption('simple');
   await page.getByTestId('vps.access.password.generate').click();
 
@@ -100,7 +112,10 @@ test('@workflow-matrix @pr-smoke VPS access page generates root password and dep
   await page.getByTestId('tasks.close-button').click();
 
   await expect(page.getByTestId('vps.access.ssh.key')).toHaveValue('8');
-  await expect(page.getByTestId('vps.access.ssh.selected.fingerprint')).toContainText('SHA256:abc');
+  const selectedKeyCard = page.getByTestId('vps.access.ssh.selected.fingerprint').locator('..');
+  await expect(selectedKeyCard).toContainText(longPublicKeyLabel);
+  await expect(selectedKeyCard).toContainText(longPublicKeyFingerprint);
+  await expect(selectedKeyCard).toContainText(longPublicKeyComment);
   await page.getByTestId('vps.access.ssh.deploy').click();
 
   await expect(page.getByTestId('vps.access.ssh.confirm')).toBeVisible();
@@ -116,6 +131,34 @@ test('@workflow-matrix @pr-smoke VPS access page generates root password and dep
   await page.getByTestId('tasks.open-button').click();
   await expect(page.getByTestId('tasks.row.701')).toContainText('Deploy public key');
   await expect(page.getByTestId('vps.access.page')).toBeVisible();
+});
+
+test('@workflow-matrix @pr-smoke @pr-smoke-mobile admin VPS access contains long key data on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST_ADMIN' });
+
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 99 },
+    handlers: {
+      'GET vpses/123': () => ({ vps }),
+      'GET ip_addresses': () => ({
+        ip_addresses: [{ id: 55, addr: '198.51.100.10', network: { id: 5, role: 'public' } }],
+      }),
+      'GET transaction_chains': () => ({ transaction_chains: [] }),
+      'GET users/42/public_keys': () => ({ public_keys: publicKeys, _meta: { total_count: 2 } }),
+      'GET vpses/123/ssh_host_keys': () => ({ ssh_host_keys: hostKeys, _meta: { total_count: 2 } }),
+    },
+  });
+
+  await page.goto('/admin/vps/123/access');
+
+  await expect(page.getByTestId('vps.access.page')).toBeVisible();
+  const selectedKeyCard = page.getByTestId('vps.access.ssh.selected.fingerprint').locator('..');
+  await expect(selectedKeyCard).toContainText(longPublicKeyLabel);
+  await expect(selectedKeyCard).toContainText(longPublicKeyFingerprint);
+  await expect(selectedKeyCard).toContainText(longPublicKeyComment);
+  await expectNoDocumentHorizontalOverflow(page);
+  await expectTableHorizontalScrollUsable(page, 'vps.access.host_keys.table');
 });
 
 test('@workflow-matrix @pr-smoke VPS access reports failed SSH key deployment and opens tasks', async ({ page }) => {

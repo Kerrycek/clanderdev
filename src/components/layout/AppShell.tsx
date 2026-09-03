@@ -14,7 +14,7 @@ import { Spinner } from '../ui/Spinner';
 import { formatErrorMessage } from '../../lib/errors';
 import { withRouterBasename, withSameOriginNextParam } from '../../lib/routerPaths';
 
-import { AppLayout } from './AppLayout';
+import { AppLayout, taskStorageScopeForUser } from './AppLayout';
 import { SessionTokenKeepalive } from './SessionTokenKeepalive';
 
 function LoginRequired() {
@@ -152,11 +152,12 @@ function AdminAccessRequired() {
 export function AppShell(props: { mode: AppMode }) {
   // Subscribe to navigation changes so the shell updates chrome state immediately.
   useLocation();
+  const auth = useAuth();
 
   return (
     <AppModeProvider mode={props.mode}>
       <AuthGate mode={props.mode}>
-        <AppLayout>
+        <AppLayout key={taskStorageScopeForUser(auth.user?.id)}>
           <Outlet />
         </AppLayout>
       </AuthGate>

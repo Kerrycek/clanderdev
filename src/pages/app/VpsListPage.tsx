@@ -13,7 +13,8 @@ import { useChrome } from '../../components/layout/ChromeContext';
 import { ListShell } from '../../components/layout/ListShell';
 import { SyncStaleBanner } from '../../components/layout/SyncStaleBanner';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { objectRef } from '../../lib/objectRef';
+import { objectRef, type ObjectRef } from '../../lib/objectRef';
+import type { LocalMutationGeneration } from '../../lib/localLocks';
 import { Alert } from '../../components/ui/Alert';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { ErrorState } from '../../components/ui/ErrorState';
@@ -34,6 +35,12 @@ import { useVpsListSmartFilters } from './vps/useVpsListSmartFilters';
 
 type VpsPowerKind = 'start' | 'stop' | 'restart';
 type VpsListMutationKind = VpsPowerKind | 'delete';
+type DurableVpsLockContext = { lockRef: ObjectRef; mutationGeneration: LocalMutationGeneration };
+type VpsDeleteMutationVariables = {
+  vpsId: number;
+  objectLabel?: string;
+  apiOptions?: { lazy?: boolean };
+};
 
 interface BusyError extends Error {
   code: 'BUSY';
@@ -174,7 +181,11 @@ export function VpsListPage() {
     if (hasActiveChains(chainsRes.data)) throw createBusyError();
   }
 
-  function handleMutationSuccess(res: { meta?: Record<string, unknown> }, vars: { vpsId: number; kind: VpsListMutationKind; objectLabel?: string }) {
+  function handleMutationSuccess(
+    res: { meta?: Record<string, unknown> },
+    vars: { vpsId: number; kind: VpsListMutationKind; objectLabel?: string },
+    context?: DurableVpsLockContext
+  ) {
     const asId = getMetaActionStateId(res.meta);
     if (asId !== undefined) {
       const actionLabelKey =
@@ -186,7 +197,12 @@ export function VpsListPage() {
               ? 'action.vps.restart.label'
               : 'action.vps.delete.label';
       const objectLabel = vars.objectLabel ? String(vars.objectLabel) : t('common.vps_ref', { id: vars.vpsId });
-      chrome.trackActionState(asId, { actionLabelKey, objectLabel, object: objectRef('Vps', vars.vpsId) });
+      chrome.trackActionState(asId, {
+        actionLabelKey,
+        objectLabel,
+        object: context?.lockRef,
+        mutationGeneration: context?.mutationGeneration,
+      });
     }
 
     void qc.invalidateQueries({ queryKey: ['vps', 'list'] });
@@ -204,9 +220,13 @@ export function VpsListPage() {
     setActionError({ title: t('common.action_failed'), body: describeError(error) });
   }
 
-  function releaseMutationLock(vars: { vpsId: number } | undefined) {
+  function settleMutationLock(
+    vars: { vpsId: number } | undefined,
+    error: unknown,
+    context?: DurableVpsLockContext
+  ) {
     if (!vars) return;
-    chrome.releaseLocalLock(objectRef('Vps', vars.vpsId));
+    if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     setInFlight((prev) => {
       const next = { ...prev };
       delete next[vars.vpsId];
@@ -225,28 +245,32 @@ export function VpsListPage() {
     },
     onMutate: ({ vpsId, kind }) => {
       setActionError(null);
-      chrome.acquireLocalLock(objectRef('Vps', vpsId));
       setInFlight((prev) => ({ ...prev, [vpsId]: kind }));
+      const lockRef = objectRef('Vps', vpsId);
+      return chrome.acquireLocalLock(lockRef, { durable: true })
+        .then((mutationGeneration) => ({ lockRef, mutationGeneration }));
     },
-    onSuccess: (res, vars) => handleMutationSuccess(res, vars),
+    onSuccess: (res, vars, context) => handleMutationSuccess(res, vars, context),
     onError: handleMutationError,
-    onSettled: (_res, _err, vars) => releaseMutationLock(vars),
+    onSettled: (_res, error, vars, context) => settleMutationLock(vars, error, context),
   });
 
   // audit:ignore missing-local-lock-release
   const deleteM = useMutation({
-    mutationFn: async (vars: { vpsId: number; lazy?: boolean; objectLabel?: string }) => {
+    mutationFn: async (vars: VpsDeleteMutationVariables) => {
       await assertVpsNotBusy(vars.vpsId);
-      return vpsDelete(vars.vpsId, mode === 'admin' ? { lazy: vars.lazy ?? true } : undefined);
+      return vpsDelete(vars.vpsId, vars.apiOptions);
     },
     onMutate: ({ vpsId }) => {
       setActionError(null);
-      chrome.acquireLocalLock(objectRef('Vps', vpsId));
       setInFlight((prev) => ({ ...prev, [vpsId]: 'delete' }));
+      const lockRef = objectRef('Vps', vpsId);
+      return chrome.acquireLocalLock(lockRef, { durable: true })
+        .then((mutationGeneration) => ({ lockRef, mutationGeneration }));
     },
-    onSuccess: (res, vars) => handleMutationSuccess(res, { ...vars, kind: 'delete' }),
+    onSuccess: (res, vars, context) => handleMutationSuccess(res, { ...vars, kind: 'delete' }, context),
     onError: handleMutationError,
-    onSettled: (_res, _err, vars) => releaseMutationLock(vars),
+    onSettled: (_res, error, vars, context) => settleMutationLock(vars, error, context),
   });
 
   const rows = useMemo(() => q.data ?? [], [q.data]);
@@ -397,7 +421,11 @@ export function VpsListPage() {
           }}
           onConfirmDelete={(vars) => {
             setConfirm(null);
-            deleteM.mutate(vars);
+            deleteM.mutate({
+              vpsId: vars.vpsId,
+              objectLabel: vars.objectLabel,
+              apiOptions: mode === 'admin' ? { lazy: vars.lazy } : undefined,
+            });
           }}
         />
       ) : null}

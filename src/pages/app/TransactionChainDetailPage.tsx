@@ -151,7 +151,7 @@ export function TransactionChainDetailPage() {
           </Link>
         }
         titleAfter={
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex max-w-full flex-wrap items-center gap-2">
             {stateBadge}
             {chainQ.data && progress.pct !== null ? <Badge variant="neutral">{progress.pct}%</Badge> : null}
           </span>
@@ -283,7 +283,7 @@ export function TransactionChainDetailPage() {
                 <div className="sm:col-span-2 lg:col-span-3">
                   <details className="rounded-md border border-border bg-surface-2 p-3">
                     <summary className="cursor-pointer select-none text-sm font-medium">{t('transactions.chain.detail.section.concerns_raw')}</summary>
-                    <pre className="mt-2 overflow-x-auto text-xs text-muted">{safeJson((chainQ.data as any).concerns)}</pre>
+                    <pre className="mt-2 max-w-full overflow-x-auto text-xs text-muted">{safeJson((chainQ.data as any).concerns)}</pre>
                   </details>
                 </div>
 
@@ -304,7 +304,7 @@ export function TransactionChainDetailPage() {
             </CardBody>
           </Card>
 
-          <Card testId="transactions.chain.detail.transactions">
+          <Card testId="transactions.chain.detail.transactions" className="relative min-w-0 max-w-full overflow-x-hidden">
             <CardHeader
               title={t('transactions.chain.detail.section.transactions')}
               subtitle={
@@ -336,7 +336,7 @@ export function TransactionChainDetailPage() {
                   <div className="mt-1 text-sm text-muted">{t('transactions.chain.detail.empty.body')}</div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="min-w-0 max-w-full overflow-x-auto">
                   <Table testId="transactions.chain.detail.transactions.table" minWidth="lg" variant="list">
                     <thead>
                     <tr className="border-b border-border text-left text-xs text-muted">

@@ -119,3 +119,58 @@ test('admin incoming payment: assign to user', async ({ page }) => {
   await expect(page.getByTestId('admin.payments.incoming.assign.inline')).toHaveCount(0);
   await expect(page.getByText('alice')).toBeVisible();
 });
+
+test('admin incoming payment: route change drops the previous payment edits without writing', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+
+  const payment = (id: number) => ({
+    id,
+    state: 'unmatched',
+    date: '2026-02-14T09:00:00Z',
+    transaction_id: `TX-${id}`,
+    amount: 1000,
+    currency: 'CZK',
+    account_name: 'Test account',
+    vs: String(id),
+    user: null,
+    created_at: '2026-02-14T09:00:00Z',
+  });
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 100 },
+    handlers: {
+      'GET incoming_payments/300': () => ({ incoming_payment: payment(300) }),
+      'GET incoming_payments/301': () => ({ incoming_payment: payment(301) }),
+      'GET users/123': () => ({ user: { id: 123, login: 'alice' } }),
+      'PUT incoming_payments/300': () => ({ incoming_payment: payment(300) }),
+      'PUT incoming_payments/301': () => ({ incoming_payment: payment(301) }),
+      'POST user_payments': () => ({ user_payment: { id: 1 } }),
+    },
+  });
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())
+      && /\/api\/v7\.0\/(?:incoming_payments|user_payments)/.test(request.url())
+    ) {
+      mutations.push(request.url());
+    }
+  });
+
+  await page.goto(withAppUrl('/admin/payments/incoming/300'));
+  await page.getByTestId('admin.payments.incoming.state.select').selectOption('ignored');
+  await page.getByTestId('admin.payments.incoming.assign.user_id').fill('123');
+  await expect(page.getByTestId('admin.payments.incoming.state.save')).toBeEnabled();
+  await expect(page.getByTestId('admin.payments.incoming.assign.submit')).toBeEnabled();
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/admin/payments/incoming/301');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+
+  await expect(page.getByTestId('admin.payments.incoming.detail.301.state')).toBeVisible();
+  await expect(page.getByTestId('admin.payments.incoming.state.select')).toHaveValue('unmatched');
+  await expect(page.getByTestId('admin.payments.incoming.state.save')).toBeDisabled();
+  await expect(page.getByTestId('admin.payments.incoming.assign.user_id')).toHaveValue('');
+  await expect(page.getByTestId('admin.payments.incoming.assign.submit')).toBeDisabled();
+  expect(mutations).toEqual([]);
+});

@@ -274,6 +274,7 @@ export function HostIpAddressesPage() {
       ) : (
         <TableCard
           testId="admin.host_ip_addresses.table"
+          className="relative min-w-0 max-w-full overflow-x-hidden"
           footer={<KeysetPagination testId="admin.host_ip_addresses.pagination" page={paging.page} pageCount={paging.pageCount} canPrev={paging.canPrev} canNext={canNext} onPrev={paging.goPrev} onNext={() => paging.goNext(nextCursor ?? null)} onGoToPage={paging.goToPage} limit={paging.limit} onLimitChange={paging.setLimit} />}
         >
           <thead>

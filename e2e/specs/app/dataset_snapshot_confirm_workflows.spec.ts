@@ -1,6 +1,20 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
+
+function visibleSnapshot(page: Page, id: number) {
+  return page.locator([
+    `[data-testid="dataset.snapshots.row.${id}"]:visible`,
+    `[data-testid="dataset.snapshots.card.${id}"]:visible`,
+  ].join(', '));
+}
+
+function visibleSnapshotAction(page: Page, id: number, action: string) {
+  return page.locator([
+    `[data-testid="dataset.snapshots.row.${id}.${action}"]:visible`,
+    `[data-testid="dataset.snapshots.card.${id}.${action}"]:visible`,
+  ].join(', '));
+}
 
 test.describe('@smoke Dataset snapshots', () => {
   test('create snapshot deep link opens the create workflow', async ({ page }) => {
@@ -101,7 +115,7 @@ test.describe('@smoke Dataset snapshots', () => {
     await expect(page.getByTestId('modal.action_progress')).toBeVisible();
     await expect(page.getByTestId('modal.action_progress')).toContainText('#701');
     await page.getByTestId('modal.action_progress.continue').click();
-    await expect(page.getByTestId('dataset.snapshots.row.201')).toBeVisible();
+    await expect(visibleSnapshot(page, 201)).toBeVisible();
   });
 
   test('allows creating snapshot download when dataset state is omitted', async ({ page }) => {
@@ -163,13 +177,13 @@ test.describe('@smoke Dataset snapshots', () => {
 
     await page.goto('/app/datasets/10/snapshots');
 
-    await expect(page.getByTestId('dataset.snapshots.row.200')).toBeVisible();
-    await expect(page.getByTestId('dataset.snapshots.row.200.download')).toBeEnabled();
+    await expect(visibleSnapshot(page, 200)).toBeVisible();
+    await expect(visibleSnapshotAction(page, 200, 'download')).toBeEnabled();
 
     const reqPromise = page.waitForRequest(
       (r) => r.method() === 'POST' && r.url().includes('/api/v7.0/snapshot_downloads')
     );
-    await page.getByTestId('dataset.snapshots.row.200.download').click();
+    await visibleSnapshotAction(page, 200, 'download').click();
     expect((await reqPromise).postDataJSON()).toEqual({
       snapshot_download: {
         snapshot: 200,

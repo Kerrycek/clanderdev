@@ -136,6 +136,10 @@ export async function loadBffRuntimeSession(
 ): Promise<string | null> {
   const origin = options.origin ?? currentWindowOrigin();
   const target = options.target ?? (typeof window !== 'undefined' ? window : undefined);
+  if (typeof target?.vpsAdmin?.sessionToken === 'string' && target.vpsAdmin.sessionToken.trim()) {
+    return null;
+  }
+
   const fetchImpl = options.fetchImpl ?? (typeof fetch !== 'undefined' ? fetch : undefined);
   if (!target?.vpsAdmin || !fetchImpl) return null;
 

@@ -66,6 +66,26 @@ describe('vps access API wrappers', () => {
     expect(JSON.parse(String(init?.body))).toEqual({ vps: { public_key: 7 } });
   });
 
+  it('fails closed and does not return a password when passwd omits its action-state id', async () => {
+    setMockRuntime();
+    installOkFetch({ _meta: {}, vps: { password: 'must-not-be-returned' } });
+
+    await expect(resetVpsRootPassword(13)).rejects.toMatchObject({
+      code: 'MISSING_ACTION_STATE',
+      action: 'VPS password reset',
+    });
+  });
+
+  it('fails closed when deploy_public_key omits its action-state id', async () => {
+    setMockRuntime();
+    installOkFetch({ _meta: {}, vps: {} });
+
+    await expect(deployVpsPublicKey(13, 7)).rejects.toMatchObject({
+      code: 'MISSING_ACTION_STATE',
+      action: 'VPS public-key deployment',
+    });
+  });
+
   it('loads saved public keys for the VPS owner via the user dossier endpoint', async () => {
     setMockRuntime();
     const fetchMock = installOkFetch({

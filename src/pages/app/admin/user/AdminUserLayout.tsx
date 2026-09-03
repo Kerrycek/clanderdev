@@ -22,7 +22,7 @@ import { TabsNav } from '../../../../components/ui/TabsNav';
 export interface AdminUserOutletContext {
   user: User;
   userId: number;
-  refetch: () => void;
+  refetch: () => Promise<void>;
 }
 
 export function useAdminUserContext() {
@@ -181,7 +181,18 @@ export function AdminUserLayout() {
           detailsExtra={{ page: 'admin.user.detail', userId }}
         />
       ) : u ? (
-        <Outlet context={{ user: u, userId, refetch: () => q.refetch() }} />
+        <Outlet
+          context={{
+            user: u,
+            userId,
+            refetch: async () => {
+              const result = await q.refetch();
+              if (result.isError || !result.data) {
+                throw result.error ?? new Error(t('admin.user.load_error'));
+              }
+            },
+          }}
+        />
       ) : null}
     </DetailShell>
   );

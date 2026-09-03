@@ -8,12 +8,14 @@ import { useObjectScope } from '../../../app/objectScope';
 import { useChrome } from '../../../components/layout/ChromeContext';
 import { Alert } from '../../../components/ui/Alert';
 import { fetchDataset } from '../../../lib/api/datasets';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isMissingActionStateError } from '../../../lib/api/haveapi';
 import { datasetCapabilities } from '../../../lib/gates/dataset';
 import { createVpsMount, deleteVpsMount, fetchVpsMounts, findDatasetByName, updateVpsMount, type Dataset, type VpsMount } from '../../../lib/api/vpsMounts';
 import { gateVpsMutation } from '../../../lib/gates/vps';
+import { objectRef } from '../../../lib/objectRef';
 import { preflightVpsNotBusy } from './vpsPreflight';
 import { useVps } from './VpsContext';
+import { freezeVpsMutationSnapshot, type VpsMutationSnapshot } from './VpsMutationSnapshot';
 import {
   buildCreateMountPayload,
   buildUpdateMountPayload,
@@ -58,11 +60,13 @@ export function VpsStoragePage() {
   const chrome = useChrome();
   const qc = useQueryClient();
   const { t } = useI18n();
-  const { vps, canMutateVps, refetchChains, vpsRef, busyTransaction, busyLocalLock } = useVps();
+  const { vps, canMutateVps, busyTransaction, busyLocalLock } = useVps();
 
   const canAdmin = mode === 'admin' && auth.role === 'admin';
   const vpsId = vps.id;
   const objectLabel = vps.hostname || `#${vpsId}`;
+  const mutationErrorMessage = (error: unknown) =>
+    isMissingActionStateError(error) ? t('vps.mutation.error.missing_action_state') : errorMessage(error);
 
   const mountsQ = useQuery({
     queryKey: ['vps', vpsId, 'mounts'],
@@ -70,85 +74,100 @@ export function VpsStoragePage() {
     refetchOnWindowFocus: false,
   });
 
-  const invalidateMounts = () => qc.invalidateQueries({ queryKey: ['vps', vpsId, 'mounts'] });
-  const preflight = async () => {
-    if (!canMutateVps) throw new Error(t('gate.blocked.permission.body'));
-    return preflightVpsNotBusy({ vpsId, t, knownBusy: busyTransaction || busyLocalLock });
+  const invalidateMounts = (targetVpsId: number) => qc.invalidateQueries({ queryKey: ['vps', targetVpsId, 'mounts'] });
+  const preflight = async (variables: VpsMutationSnapshot) => {
+    if (!variables.canMutate) throw new Error(t('gate.blocked.permission.body'));
+    return preflightVpsNotBusy({ vpsId: variables.vpsId, t, knownBusy: variables.knownBusy });
   };
 
   const createMountM = useMutation({
-    mutationFn: async (params: Record<string, unknown>) => {
-      await preflight();
-      return createVpsMount(vpsId, params);
+    mutationFn: async (variables: VpsMutationSnapshot & { params: Record<string, unknown> }) => {
+      await preflight(variables);
+      return createVpsMount(variables.vpsId, variables.params);
     },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (response) => {
-      invalidateMounts();
+    onMutate: async (variables) => {
+      const lockRef = objectRef('Vps', variables.vpsId);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
+    },
+    onSuccess: (response, variables, context) => {
+      void invalidateMounts(variables.vpsId);
       const asId = getMetaActionStateId(response.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.mount.create.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           progressTitleKey: 'modal.vps.mount.create.title',
         });
       }
-      refetchChains();
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] });
     },
     onError: (error) => {
       if (errorMessage(error).includes('BUSY')) chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const updateMountM = useMutation({
-    mutationFn: async (payload: { mountId: number; params: Record<string, unknown> }) => {
-      await preflight();
-      return updateVpsMount(vpsId, payload.mountId, payload.params);
+    mutationFn: async (variables: VpsMutationSnapshot & { mountId: number; params: Record<string, unknown> }) => {
+      await preflight(variables);
+      return updateVpsMount(variables.vpsId, variables.mountId, variables.params);
     },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (response) => {
-      invalidateMounts();
+    onMutate: async (variables) => {
+      const lockRef = objectRef('Vps', variables.vpsId);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
+    },
+    onSuccess: (response, variables, context) => {
+      void invalidateMounts(variables.vpsId);
       const asId = getMetaActionStateId(response.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.mount.update.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           progressTitleKey: 'modal.vps.mount.update.title',
         });
       }
-      refetchChains();
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] });
     },
     onError: (error) => {
       if (errorMessage(error).includes('BUSY')) chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const deleteMountM = useMutation({
-    mutationFn: async (mountId: number) => {
-      await preflight();
-      return deleteVpsMount(vpsId, mountId);
+    mutationFn: async (variables: VpsMutationSnapshot & { mountId: number }) => {
+      await preflight(variables);
+      return deleteVpsMount(variables.vpsId, variables.mountId);
     },
-    onMutate: () => chrome.acquireLocalLock(vpsRef),
-    onSuccess: (response) => {
-      invalidateMounts();
+    onMutate: async (variables) => {
+      const lockRef = objectRef('Vps', variables.vpsId);
+      const mutationGeneration = await chrome.acquireLocalLock(lockRef, { durable: true });
+      return { lockRef, mutationGeneration };
+    },
+    onSuccess: (response, variables, context) => {
+      void invalidateMounts(variables.vpsId);
       const asId = getMetaActionStateId(response.meta);
       if (asId !== undefined) {
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.vps.mount.delete.label',
-          objectLabel,
-          object: vpsRef,
+          objectLabel: variables.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           progressTitleKey: 'modal.vps.mount.delete.title',
         });
       }
-      refetchChains();
+      void qc.invalidateQueries({ queryKey: ['transaction_chain', 'list', { className: 'Vps', rowId: variables.vpsId }] });
     },
     onError: (error) => {
       if (errorMessage(error).includes('BUSY')) chrome.openTasks();
     },
-    onSettled: () => chrome.releaseLocalLock(vpsRef),
+    onSettled: (_data, error, _variables, context) => context && chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration),
   });
 
   const busyLocal = busyLocalLock || createMountM.isPending || updateMountM.isPending || deleteMountM.isPending;
@@ -208,11 +227,17 @@ export function VpsStoragePage() {
     if (validationError) return;
 
     try {
-      await createMountM.mutateAsync(buildCreateMountPayload(draft, canAdmin));
+      await createMountM.mutateAsync(freezeVpsMutationSnapshot({
+        vpsId,
+        params: Object.freeze({ ...buildCreateMountPayload(draft, canAdmin) }),
+        canMutate: canMutateVps,
+        knownBusy: busyTransaction || busyLocalLock,
+        objectLabel,
+      }));
       setCreateOpen(false);
       resetCreate();
     } catch (error) {
-      setCreateError(errorMessage(error));
+      setCreateError(mutationErrorMessage(error));
     }
   };
 
@@ -238,11 +263,18 @@ export function VpsStoragePage() {
     if (validationError) return;
 
     try {
-      await updateMountM.mutateAsync({ mountId: editMount.id, params: buildUpdateMountPayload(draft, canAdmin) });
+      await updateMountM.mutateAsync(freezeVpsMutationSnapshot({
+        vpsId,
+        mountId: editMount.id,
+        params: Object.freeze({ ...buildUpdateMountPayload(draft, canAdmin) }),
+        canMutate: canMutateVps,
+        knownBusy: busyTransaction || busyLocalLock,
+        objectLabel,
+      }));
       setEditOpen(false);
       setEditMount(null);
     } catch (error) {
-      setEditError(errorMessage(error));
+      setEditError(mutationErrorMessage(error));
     }
   };
 
@@ -260,11 +292,17 @@ export function VpsStoragePage() {
     if (!deleteTarget) return;
     setDeleteError(null);
     try {
-      await deleteMountM.mutateAsync(deleteTarget.id);
+      await deleteMountM.mutateAsync(freezeVpsMutationSnapshot({
+        vpsId,
+        mountId: deleteTarget.id,
+        canMutate: canMutateVps,
+        knownBusy: busyTransaction || busyLocalLock,
+        objectLabel,
+      }));
       setDeleteOpen(false);
       setDeleteTarget(null);
     } catch (error) {
-      setDeleteError(errorMessage(error));
+      setDeleteError(mutationErrorMessage(error));
     }
   };
 

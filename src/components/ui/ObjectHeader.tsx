@@ -68,13 +68,13 @@ export function ObjectHeader(props: {
       data-document-title-root
       data-document-title-kind="object"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 sm:flex-1">
           {kicker ? <div className="text-xs text-muted">{kicker}</div> : null}
 
           <div className={clsx(kicker ? 'mt-1' : undefined, 'flex flex-wrap items-center gap-2')}>
-            <h1 className="text-xl font-semibold" data-document-title-heading>{props.title}</h1>
-            {props.titleAfter ? <div className="shrink-0">{props.titleAfter}</div> : null}
+            <h1 className="min-w-0 break-words text-xl font-semibold [overflow-wrap:anywhere]" data-document-title-heading>{props.title}</h1>
+            {props.titleAfter ? <div className="min-w-0 max-w-full">{props.titleAfter}</div> : null}
           </div>
 
           {props.badges ? <div className="mt-2 flex flex-wrap items-center gap-2">{props.badges}</div> : null}
@@ -85,10 +85,10 @@ export function ObjectHeader(props: {
         </div>
 
         {props.right || props.actions ? (
-          <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+          <div className="flex min-w-0 w-full flex-col gap-2 sm:w-auto sm:shrink-0 sm:items-end">
             {props.right ? <div>{props.right}</div> : null}
             {props.actions ? (
-              <div className="flex flex-wrap items-center gap-2 sm:justify-end">{props.actions}</div>
+              <div className="flex min-w-0 w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{props.actions}</div>
             ) : null}
           </div>
         ) : null}

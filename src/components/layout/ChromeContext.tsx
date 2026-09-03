@@ -2,7 +2,11 @@ import React, { createContext, useContext } from 'react';
 
 import type { TranslationKey } from '../../app/i18n';
 import type { ObjectRef } from '../../lib/objectRef';
-import type { LocalLock } from '../../lib/localLocks';
+import type {
+  AcquireLocalMutationLock,
+  LocalLock,
+  LocalMutationGeneration,
+} from '../../lib/localLocks';
 
 export interface TrackedActionState {
   id: number;
@@ -73,6 +77,9 @@ export interface ChromeContextValue {
       /** When provided, binds a local transition lock to this action state. */
       object?: ObjectRef;
 
+      /** Exact durable request generation to bind to this action state. */
+      mutationGeneration?: LocalMutationGeneration;
+
       /** Show a dismissible progress popover for this action. */
       blockUi?: boolean;
 
@@ -93,14 +100,27 @@ export interface ChromeContextValue {
   // Local transition locks
   // ----------------------
 
-  /** Active local locks for this browser tab (sessionStorage). */
+  /** Active local locks shared across tabs and user/admin views for the same authenticated user. */
   localLocks: LocalLock[];
 
   /** Acquire/refresh a local lock for the object (typically called in mutation onMutate). */
-  acquireLocalLock: (ref: ObjectRef, opts?: { actionStateId?: number; ttlMs?: number }) => void;
+  acquireLocalLock: AcquireLocalMutationLock;
+
+  /**
+   * Finish a mutation's local lock. Ambiguous missing-task responses retain a
+   * persisted uncertainty lock; ordinary failures release the unbound lock.
+   */
+  settleLocalLock: (
+    ref: ObjectRef,
+    error: unknown,
+    generation?: LocalMutationGeneration
+  ) => void;
 
   /** Release an unbound local lock (typically called in mutation onSettled). */
   releaseLocalLock: (ref: ObjectRef) => void;
+
+  /** Clear an ambiguous lock after the user explicitly reconciled/acknowledged the outcome. */
+  acknowledgeUncertainLocalLock: (ref: ObjectRef, uncertaintyId?: string) => void;
 
   /** Release any lock bound to the given action_state_id (typically called when it finishes). */
   releaseLocalLocksByActionStateId: (actionStateId: number) => void;

@@ -3,6 +3,40 @@ import { expect, test } from '@playwright/test';
 import { bootstrapVpsAdminWindow, installHaveApiMock } from '../../fixtures';
 
 test.describe('Blocking action progress modal', () => {
+  test('keeps a non-blocking tracked action in Tasks without opening the progress modal', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'test', level: 1 },
+      handlers: {
+        'GET action_states/41': () => ({
+          action_state: {
+            id: 41,
+            label: 'Background task',
+            status: true,
+            finished: false,
+            current: 1,
+            total: 2,
+            created_at: '2026-01-26T12:00:00Z',
+            updated_at: '2026-01-26T12:00:01Z',
+          },
+        }),
+      },
+    });
+
+    await page.goto('/app/action-states/41');
+
+    await page.getByTestId('action_state.detail.track').click();
+
+    await expect(page.getByTestId('action_state.detail.dismiss')).toBeVisible();
+    await expect(page.getByTestId('modal.action_progress')).toBeHidden();
+
+    await page.getByTestId('action_state.detail.open_tasks').click();
+    await expect(page.getByTestId('tasks.drawer')).toBeVisible();
+    await expect(page.getByTestId('tasks.row.41')).toBeVisible();
+    await expect(page.getByTestId('modal.action_progress')).toBeHidden();
+  });
+
   test('opens and closes the blocking progress modal for start VPS', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 

@@ -18,7 +18,7 @@ function lastFetchCall() {
 
 describe('network interface API wrappers', () => {
   test('fetchNetworkInterfaces filters interfaces by VPS id', async () => {
-    globalThis.fetch = mockFetchOk({ network_interfaces: [{ id: 1, name: 'eth0' }] }) as any;
+    globalThis.fetch = mockFetchOk({ network_interfaces: [{ id: 1, name: 'eth0' }] }) as unknown as typeof fetch;
 
     const res = await fetchNetworkInterfaces(123, { limit: 25 });
 
@@ -32,7 +32,10 @@ describe('network interface API wrappers', () => {
   });
 
   test('updateNetworkInterface sends editable fields through the network_interface namespace', async () => {
-    globalThis.fetch = mockFetchOk({ network_interface: { id: 1, name: 'eth0-renamed' } }) as any;
+    globalThis.fetch = mockFetchOk({
+      network_interface: { id: 1, name: 'eth0-renamed' },
+      _meta: { action_state_id: 801 },
+    }) as unknown as typeof fetch;
 
     await updateNetworkInterface(1, {
       name: 'eth0-renamed',
@@ -54,8 +57,16 @@ describe('network interface API wrappers', () => {
     });
   });
 
+  test('updateNetworkInterface fails closed when blocking proof is missing', async () => {
+    globalThis.fetch = mockFetchOk({ network_interface: { id: 1, name: 'eth0-renamed' } }) as unknown as typeof fetch;
+
+    await expect(updateNetworkInterface(1, { name: 'eth0-renamed' })).rejects.toMatchObject({
+      code: 'MISSING_ACTION_STATE',
+    });
+  });
+
   test('fetchNetworkInterfaceAccountingForVps scopes accounting by VPS and month', async () => {
-    globalThis.fetch = mockFetchOk({ network_interface_accountings: [{ id: 9, bytes_in: 1024, bytes_out: 2048 }] }) as any;
+    globalThis.fetch = mockFetchOk({ network_interface_accountings: [{ id: 9, bytes_in: 1024, bytes_out: 2048 }] }) as unknown as typeof fetch;
 
     const res = await fetchNetworkInterfaceAccountingForVps(123, 2026, 6);
 
@@ -71,7 +82,7 @@ describe('network interface API wrappers', () => {
   });
 
   test('fetchNetworkInterfaceAccountings supports monthly user traffic filters', async () => {
-    globalThis.fetch = mockFetchOk({ network_interface_accountings: [{ id: 10, bytes_in: 4096, bytes_out: 8192 }] }) as any;
+    globalThis.fetch = mockFetchOk({ network_interface_accountings: [{ id: 10, bytes_in: 4096, bytes_out: 8192 }] }) as unknown as typeof fetch;
 
     const res = await fetchNetworkInterfaceAccountings({
       user: 7,

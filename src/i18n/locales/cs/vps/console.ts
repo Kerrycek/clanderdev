@@ -3,6 +3,8 @@ export const csVps_console = {
   'vps.console.title': 'Konzole',
   'vps.console.subtitle': 'Webová vzdálená konzole VPS.',
   'vps.console.basic_hint': 'Sezení konzole je dočasné.',
+  'vps.console.not_started.title': 'Sezení konzole není spuštěné',
+  'vps.console.not_started.body': 'Otevření této stránky nevytváří sezení. Dočasný token konzole si vyžádej akcí Nové sezení.',
   'vps.console.expires_at': 'Sezení vyprší {time}',
   'vps.console.new_session.label': 'Nové sezení',
   'vps.console.new_session.title_hint': 'Vytvořit nové sezení konzole',

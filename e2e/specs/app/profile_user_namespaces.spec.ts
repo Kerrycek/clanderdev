@@ -133,3 +133,52 @@ test('profile: user namespaces - create map and edit entries', async ({ page }) 
   await page.getByTestId('profile.userns.map.rename.save').click();
   await expect(page.getByTestId('profile.userns.map.subtitle')).toContainText('Renamed map');
 });
+
+test('profile: changing the map route drops stale edits and delete confirmation', async ({ page }) => {
+  const map = (id: number) => ({
+    id,
+    label: `Map ${id}`,
+    user_namespace: { id: 101, size: 65536 },
+  });
+  await installHaveApiMock({
+    page,
+    authorizeUser: { user: { id: 1, login: 'testuser', level: 1 } },
+    handlers: {
+      'GET user_namespace_maps/501': () => ({ user_namespace_map: map(501) }),
+      'GET user_namespace_maps/502': () => ({ user_namespace_map: map(502) }),
+      'GET user_namespace_maps/501/entries': () => ({ entries: [] }),
+      'GET user_namespace_maps/502/entries': () => ({ entries: [] }),
+      'GET vpses': () => ({ vpses: [], _meta: { total_count: 0 } }),
+      'PUT user_namespace_maps/501': () => ({ user_namespace_map: map(501) }),
+      'PUT user_namespace_maps/502': () => ({ user_namespace_map: map(502) }),
+      'DELETE user_namespace_maps/501': () => ({}),
+      'DELETE user_namespace_maps/502': () => ({}),
+    },
+  });
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method())
+      && request.url().includes('/api/v7.0/user_namespace_maps')
+    ) {
+      mutations.push(request.url());
+    }
+  });
+
+  await page.goto('/app/profile/user-namespaces/maps/501');
+  await expect(page.getByTestId('profile.userns.map.rename.input')).toHaveValue('Map 501');
+  await page.getByTestId('profile.userns.map.rename.input').fill('Stale map 501 rename');
+  await page.getByTestId('profile.userns.map.add.vps_id').fill('201');
+  await page.getByTestId('profile.userns.map.delete').click();
+  await expect(page.getByTestId('profile.userns.map.delete_map.confirm')).toBeVisible();
+
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/app/profile/user-namespaces/maps/502');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+
+  await expect(page.getByTestId('profile.userns.map.rename.input')).toHaveValue('Map 502');
+  await expect(page.getByTestId('profile.userns.map.add.vps_id')).toHaveValue('');
+  await expect(page.getByTestId('profile.userns.map.delete_map.confirm')).toHaveCount(0);
+  expect(mutations).toEqual([]);
+});

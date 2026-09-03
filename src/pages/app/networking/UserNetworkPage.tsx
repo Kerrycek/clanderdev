@@ -7,7 +7,9 @@ import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useObjectScope } from '../../../app/objectScope';
 import { ListShell } from '../../../components/layout/ListShell';
+import { MutationUncertaintyPanel, type MutationReconcileResult } from '../../../components/layout/MutationUncertaintyPanel';
 import { PageHeader } from '../../../components/layout/PageHeader';
+import { useChrome } from '../../../components/layout/ChromeContext';
 import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
@@ -19,13 +21,15 @@ import { Select } from '../../../components/ui/Select';
 import { StatusDot } from '../../../components/ui/StatusDot';
 import { TableCard } from '../../../components/ui/TableCard';
 import type { ResourceRef } from '../../../lib/api/appTypes';
-import { fetchIpAddresses, type IpAddress } from '../../../lib/api/ipAddresses';
+import { fetchIpAddress, fetchIpAddresses, type IpAddress } from '../../../lib/api/ipAddresses';
 import type { NetworkInterface } from '../../../lib/api/networkInterfaces';
 import {
   fetchIpAddressAssignments,
   type IpAddressAssignment,
 } from '../../../lib/api/networking';
 import { fetchVpsList } from '../../../lib/api/vps';
+import { reconcileIpAddressMutation } from '../../../lib/ipAddressMutationIntent';
+import type { LocalLock } from '../../../lib/localLocks';
 import { AssignIpAddressModal } from './AssignIpAddressModal';
 import {
   assignableIpKind,
@@ -153,6 +157,7 @@ export function UserNetworkPage() {
   const auth = useAuth();
   const { basePath } = useAppMode();
   const { t } = useI18n();
+  const chrome = useChrome();
   const scope = useObjectScope();
   const [searchParams, setSearchParams] = useSearchParams();
   const userId = resourceId(auth.user?.id as number | string | undefined);
@@ -228,6 +233,10 @@ export function UserNetworkPage() {
 
   const loading = vpsesQ.isLoading || assignedQ.isLoading || (detachedQ.isLoading && rows.length === 0);
   const error = vpsesQ.error ?? assignedQ.error ?? (rows.length === 0 ? detachedQ.error : null);
+  const uncertainIpLocks = useMemo(
+    () => chrome.localLocks.filter((lock) => lock.kind === 'IpAddress' && lock.uncertain === true),
+    [chrome.localLocks]
+  );
 
   const openAssignment = (ip?: IpAddress) => {
     setInitialIp(ip ?? null);
@@ -245,6 +254,20 @@ export function UserNetworkPage() {
     void vpsesQ.refetch();
     void assignedQ.refetch();
     void detachedQ.refetch();
+  };
+
+  const reconcileUncertainIp = async (lock: LocalLock): Promise<MutationReconcileResult> => {
+    try {
+      const current = (await fetchIpAddress(lock.id, {
+        includes:
+          'network__primary_location__environment,network_interface__vps,'
+          + 'user,vps,charged_environment',
+      })).data;
+      await Promise.all([assignedQ.refetch(), detachedQ.refetch(), vpsesQ.refetch()]);
+      return reconcileIpAddressMutation(lock, current);
+    } catch {
+      return 'error';
+    }
   };
 
   const rowActions = (ip: IpAddress) => {
@@ -339,6 +362,20 @@ export function UserNetworkPage() {
         </div>
       }
     >
+      {activeTab === 'addresses' && uncertainIpLocks.length > 0 ? (
+        <div className="space-y-3" data-testid="network.user.assignment_uncertainties">
+          {uncertainIpLocks.map((lock) => (
+            <MutationUncertaintyPanel
+              key={lock.uncertaintyId ?? lock.key}
+              object={{ kind: 'IpAddress', id: lock.id }}
+              lock={lock}
+              reconcile={() => reconcileUncertainIp(lock)}
+              testIdPrefix={`network.user.assign.uncertain.${lock.id}`}
+            />
+          ))}
+        </div>
+      ) : null}
+
       {activeTab === 'traffic' ? (
         <UserNetworkTrafficCard userId={userId} isAdmin={scopedUserId !== undefined} />
       ) : null}
