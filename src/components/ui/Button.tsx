@@ -21,8 +21,10 @@ type BaseProps = {
   'aria-label'?: string;
   role?: React.AriaRole;
   'aria-selected'?: boolean;
+  'aria-pressed'?: boolean;
   'aria-controls'?: string;
   tabIndex?: number;
+  autoFocus?: boolean;
   children: React.ReactNode;
 };
 
@@ -85,6 +87,7 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
         aria-label={ariaLabel}
         role={props.role}
         aria-selected={props['aria-selected']}
+        aria-pressed={props['aria-pressed']}
         aria-controls={props['aria-controls']}
         tabIndex={props.tabIndex}
         aria-disabled={disabled}
@@ -108,6 +111,7 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
         aria-label={ariaLabel}
         role={props.role}
         aria-selected={props['aria-selected']}
+        aria-pressed={props['aria-pressed']}
         aria-controls={props['aria-controls']}
         tabIndex={props.tabIndex}
         aria-disabled={disabled}
@@ -130,8 +134,10 @@ export function Button(props: ButtonProps | AnchorProps | RouterLinkProps) {
       aria-label={ariaLabel}
       role={props.role}
       aria-selected={props['aria-selected']}
+      aria-pressed={props['aria-pressed']}
       aria-controls={props['aria-controls']}
       tabIndex={props.tabIndex}
+      autoFocus={props.autoFocus}
     >
       {content}
     </button>

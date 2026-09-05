@@ -1,25 +1,28 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../../app/appMode';
+import { useAuth } from '../../../../app/auth';
 import { useI18n } from '../../../../app/i18n';
+import { useToasts } from '../../../../app/toasts';
 
 import {
-  addMailTemplateRecipient,
-  createMailRecipient,
   createMailTemplateTranslation,
   deleteMailTemplateRecipient,
-  fetchMailRecipients,
   fetchMailTemplate,
   fetchMailTemplateRecipients,
   fetchMailTemplateTranslations,
   updateMailTemplate,
   type MailRecipient,
+  type MailTemplate,
+  type MailTemplateUpdateInput,
   type MailTemplateRecipient,
   type MailTemplateTranslation,
 } from '../../../../lib/api/mailer';
 import { fetchLanguages, type Language } from '../../../../lib/api/languages';
+import { HaveApiError, isAmbiguousMutationError } from '../../../../lib/api/haveapi';
+import { formatErrorMessage } from '../../../../lib/errors';
 import { formatDateTime } from '../../../../lib/format';
 import { resourceId, refLabel } from '../../../../lib/resources';
 
@@ -31,34 +34,61 @@ import { Button } from '../../../../components/ui/Button';
 import { Card } from '../../../../components/ui/Card';
 import { ConfirmDialog } from '../../../../components/ui/ConfirmDialog';
 import { ErrorState } from '../../../../components/ui/ErrorState';
-import { Input } from '../../../../components/ui/Input';
 import { LoadingState } from '../../../../components/ui/LoadingState';
 import { Modal } from '../../../../components/ui/Modal';
 import { ObjectHeader } from '../../../../components/ui/ObjectHeader';
-import { Select, type SelectOption } from '../../../../components/ui/Select';
+import type { SelectOption } from '../../../../components/ui/Select';
 import { TableCard } from '../../../../components/ui/TableCard';
 import { TableRowLink } from '../../../../components/ui/TableRowLink';
-import { Textarea } from '../../../../components/ui/Textarea';
 
 import { MailerTabs } from './MailerTabs';
+import {
+  MailTemplateEditorModal,
+  mailTemplateEditorUpdatePayload,
+} from './MailTemplateEditorModal';
+import { MailTemplateRecipientModal } from './MailTemplateRecipientModal';
+import { MailTemplateSummaryCard } from './MailTemplateSummaryCard';
+import {
+  MailTemplateTranslationCreateIndeterminateGuard,
+  type IndeterminateMailTemplateTranslationCreateAttempt,
+} from './MailTemplateTranslationCreateIndeterminateGuard';
+import {
+  emptyMailTemplateTranslationDraft,
+  MailTemplateTranslationDraftFields,
+  type MailTemplateTranslationDraft,
+} from './MailTemplateTranslationDraftFields';
+import {
+  clearMailTemplateTranslationCreateGuard,
+  persistMailTemplateTranslationCreateGuard,
+  readMailTemplateTranslationCreateGuard,
+} from './mailTemplateCreateGuardStorage';
+import {
+  readMailRecipientCreateGuard,
+  readMailTemplateRecipientGuard,
+} from './mailRecipientMutationGuardStorage';
+import { mailTemplateEditFingerprint, strictPositiveIntegerId } from './mailerMutationSafety';
+
+class StaleMailTemplateEditError extends Error {
+  constructor() {
+    super('mail template changed on server');
+    this.name = 'StaleMailTemplateEditError';
+  }
+}
 
 function parsePositiveInt(v: string | undefined): number | null {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return strictPositiveIntegerId(v);
 }
 
-function splitCsv(v: unknown): string[] {
-  return String(v ?? '')
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
+const MAILER_RELATION_FETCH_LIMIT = 500;
 
 export function MailTemplateDetailPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const { pushToast } = useToasts();
+  const auth = useAuth();
+  const guardScope = String(auth.user?.id ?? 'unknown');
 
   const { mailTemplateId } = useParams();
   const id = useMemo(() => parsePositiveInt(mailTemplateId), [mailTemplateId]);
@@ -71,40 +101,55 @@ export function MailTemplateDetailPage() {
   });
 
   const recipientsQ = useQuery({
-    queryKey: ['mailer', 'mail_templates', 'recipients', 'index', { id, limit: 500 }],
+    queryKey: ['mailer', 'mail_templates', 'recipients', 'index', { id, limit: MAILER_RELATION_FETCH_LIMIT }],
     enabled: id !== null,
-    queryFn: async () => (await fetchMailTemplateRecipients(id as number, { limit: 500 })).data,
+    queryFn: async () => (await fetchMailTemplateRecipients(id as number, { limit: MAILER_RELATION_FETCH_LIMIT })).data,
     staleTime: 10_000,
   });
 
   const translationsQ = useQuery({
-    queryKey: ['mailer', 'mail_templates', 'translations', 'index', { id, limit: 500 }],
+    queryKey: ['mailer', 'mail_templates', 'translations', 'index', { id, limit: MAILER_RELATION_FETCH_LIMIT }],
     enabled: id !== null,
-    queryFn: async () => (await fetchMailTemplateTranslations(id as number, { limit: 500 })).data,
+    queryFn: async () => (await fetchMailTemplateTranslations(id as number, { limit: MAILER_RELATION_FETCH_LIMIT })).data,
     staleTime: 10_000,
   });
 
-  const [userVisibility, setUserVisibility] = useState<string>('');
-  const uvCurrent = String((tplQ.data as any)?.user_visibility ?? '').trim() || 'default';
-
-  useEffect(() => {
-    if (!tplQ.data) return;
-    setUserVisibility(uvCurrent);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tplQ.data]);
-
-  const saveUvM = useMutation({
-    mutationFn: async () => {
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  const [templateEditorError, setTemplateEditorError] = useState<string | null>(null);
+  const [templateEditorBaseline, setTemplateEditorBaseline] = useState<string | null>(null);
+  const [templateEditorStale, setTemplateEditorStale] = useState(false);
+  const updateTemplateM = useMutation({
+    mutationFn: async (payload: MailTemplateUpdateInput) => {
       if (id === null) throw new Error('invalid template id');
-      return (await updateMailTemplate(id, { user_visibility: userVisibility })).data;
+      if (templateEditorBaseline === null) throw new Error('missing template edit baseline');
+
+      const latest = (await fetchMailTemplate(id)).data;
+      if (strictPositiveIntegerId(latest?.id) !== id) {
+        throw new TypeError('Malformed mail template readback: mismatched id');
+      }
+      if (mailTemplateEditFingerprint(latest) !== templateEditorBaseline) {
+        qc.setQueryData(['mailer', 'mail_templates', 'show', { id }], latest);
+        setTemplateEditorStale(true);
+        throw new StaleMailTemplateEditError();
+      }
+      return (await updateMailTemplate(id, payload)).data;
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates'] });
+      setTemplateEditorOpen(false);
+      setTemplateEditorError(null);
+      pushToast({ variant: 'ok', title: t('mailer.templates.update.success') });
+    },
+    onError: (error) => {
+      if (error instanceof StaleMailTemplateEditError) {
+        setTemplateEditorError(null);
+        return;
+      }
+      const message = formatErrorMessage(error);
+      setTemplateEditorError(message);
+      pushToast({ variant: 'danger', title: t('mailer.templates.update.error'), body: message });
     },
   });
-
-  const roles = splitCsv((tplQ.data as any)?.registry_roles);
-  const isPublic = Boolean((tplQ.data as any)?.registry_public);
 
   const associatedRecipientIds = useMemo(() => {
     const ids = new Set<number>();
@@ -115,136 +160,170 @@ export function MailTemplateDetailPage() {
     }
     return ids;
   }, [recipientsQ.data]);
+  const recipientRelationsCapped = (recipientsQ.data?.length ?? 0) >= MAILER_RELATION_FETCH_LIMIT;
+  const translationRelationsCapped = (translationsQ.data?.length ?? 0) >= MAILER_RELATION_FETCH_LIMIT;
 
   // --- Add / create recipient modal ---
   const [recipientModalOpen, setRecipientModalOpen] = useState(false);
-  const [recipientModalMode, setRecipientModalMode] = useState<'existing' | 'create'>('existing');
-  const [recipientSearch, setRecipientSearch] = useState('');
-  const [selectedRecipientId, setSelectedRecipientId] = useState<number | null>(null);
-  const [newRecipient, setNewRecipient] = useState<{ label: string; to: string; cc: string; bcc: string }>({
-    label: '',
-    to: '',
-    cc: '',
-    bcc: '',
-  });
+  const [recipientRecoveryAvailable, setRecipientRecoveryAvailable] = useState(() => (
+    id !== null && Boolean(
+      readMailTemplateRecipientGuard(guardScope, id)
+      || readMailRecipientCreateGuard(guardScope),
+    )
+  ));
 
-  const allRecipientsQ = useQuery({
-    queryKey: ['mailer', 'mail_recipients', 'index', { limit: 500 }],
-    enabled: recipientModalOpen,
-    queryFn: async () => (await fetchMailRecipients({ limit: 500 })).data,
-    staleTime: 30_000,
-  });
-
-  const addRecipientM = useMutation({
-    mutationFn: async (mailRecipientId: number) => {
-      if (id === null) throw new Error('invalid template id');
-      return (await addMailTemplateRecipient(id, mailRecipientId)).data;
-    },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'recipients'] });
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'show'] });
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'index'] });
-      setRecipientModalOpen(false);
-      setSelectedRecipientId(null);
-      setRecipientSearch('');
-      setRecipientModalMode('existing');
-    },
-  });
-
-  const createRecipientM = useMutation({
-    mutationFn: async (payload: { label?: string; to?: string; cc?: string; bcc?: string }) =>
-      (await createMailRecipient(payload)).data,
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_recipients', 'index'] });
-    },
-  });
+  useEffect(() => {
+    setRecipientRecoveryAvailable(
+      id !== null && Boolean(
+        readMailTemplateRecipientGuard(guardScope, id)
+        || readMailRecipientCreateGuard(guardScope),
+      ),
+    );
+  }, [guardScope, id]);
 
   const [removeRecipientId, setRemoveRecipientId] = useState<number | null>(null);
+  const removeRecipientSubmitRef = useRef(false);
+
+  const finishRecipientRemoval = async () => {
+    await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'recipients'] });
+    await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'show'] });
+    await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'index'] });
+    setRemoveRecipientId(null);
+  };
 
   const removeRecipientM = useMutation({
     mutationFn: async (mailRecipientId: number) => {
       if (id === null) throw new Error('invalid template id');
       return await deleteMailTemplateRecipient(id, mailRecipientId);
     },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'recipients'] });
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'show'] });
-      await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'index'] });
-      setRemoveRecipientId(null);
+    onSuccess: finishRecipientRemoval,
+    onError: async (error, mailRecipientId) => {
+      if (error instanceof HaveApiError && error.httpStatus === 404) {
+        await finishRecipientRemoval();
+        return;
+      }
+      if (!isAmbiguousMutationError(error)) return;
+
+      const refreshed = await recipientsQ.refetch();
+      const relations = refreshed.data ?? [];
+      const complete = !refreshed.isError && relations.length < MAILER_RELATION_FETCH_LIMIT;
+      const stillLinked = relations.some((relation) => (
+        resourceId((relation as MailTemplateRecipient).mail_recipient) === mailRecipientId
+      ));
+      if (complete && !stillLinked) await finishRecipientRemoval();
+    },
+    onSettled: () => {
+      removeRecipientSubmitRef.current = false;
     },
   });
+
+  const removeRecipientTarget = useMemo(() => {
+    if (removeRecipientId === null) return null;
+    const relation = (recipientsQ.data ?? []).find((candidate) => (
+      resourceId((candidate as MailTemplateRecipient).mail_recipient) === removeRecipientId
+    ));
+    const recipient = (relation as MailTemplateRecipient | undefined)?.mail_recipient;
+    return {
+      id: removeRecipientId,
+      label: refLabel(recipient) ?? `#${removeRecipientId}`,
+    };
+  }, [recipientsQ.data, removeRecipientId]);
 
   // --- Add translation modal (guarded) ---
   const [confirmAddTranslationOpen, setConfirmAddTranslationOpen] = useState(false);
   const [translationModalOpen, setTranslationModalOpen] = useState(false);
+  const [indeterminateTranslation, setIndeterminateTranslation] = useState<IndeterminateMailTemplateTranslationCreateAttempt | null>(
+    () => id === null ? null : readMailTemplateTranslationCreateGuard(guardScope, id),
+  );
+  const createTranslationSubmitRef = useRef(false);
+
+  useEffect(() => {
+    setIndeterminateTranslation(
+      id === null ? null : readMailTemplateTranslationCreateGuard(guardScope, id),
+    );
+  }, [guardScope, id]);
 
   const languagesQ = useQuery({
-    queryKey: ['languages', 'index', { limit: 500 }],
-    queryFn: async () => (await fetchLanguages({ limit: 500 })).data,
+    queryKey: ['languages', 'index', { limit: MAILER_RELATION_FETCH_LIMIT }],
+    queryFn: async () => (await fetchLanguages({ limit: MAILER_RELATION_FETCH_LIMIT })).data,
     staleTime: 60_000,
   });
+  const languagesCapped = (languagesQ.data?.length ?? 0) >= MAILER_RELATION_FETCH_LIMIT;
+
+  const usedLanguageIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const translation of translationsQ.data ?? []) {
+      const languageId = resourceId(translation.language);
+      if (languageId) ids.add(languageId);
+    }
+    return ids;
+  }, [translationsQ.data]);
 
   const languageOptions: SelectOption[] = useMemo(() => {
     const opts: SelectOption[] = [{ value: '', label: t('common.select') }];
     for (const l of languagesQ.data ?? []) {
       const lid = Number((l as any).id);
       if (!Number.isFinite(lid) || lid <= 0) continue;
+      if (usedLanguageIds.has(lid)) continue;
       const label = String((l as any).label ?? (l as any).code ?? `#${lid}`);
       opts.push({ value: String(lid), label });
     }
     return opts;
-  }, [languagesQ.data, t]);
+  }, [languagesQ.data, t, usedLanguageIds]);
 
-  const [newTranslation, setNewTranslation] = useState<{
-    language: string;
-    from: string;
-    reply_to: string;
-    return_path: string;
-    subject: string;
-    text_plain: string;
-    text_html: string;
-  }>({
-    language: '',
-    from: '',
-    reply_to: '',
-    return_path: '',
-    subject: '',
-    text_plain: '',
-    text_html: '',
-  });
+  const [newTranslation, setNewTranslation] = useState<MailTemplateTranslationDraft>(
+    emptyMailTemplateTranslationDraft,
+  );
+  const selectedLanguageAvailable = languageOptions.some((option) => (
+    option.value !== '' && option.value === newTranslation.language
+  ));
 
   const createTranslationM = useMutation({
     mutationFn: async (payload: {
       language: number;
-      from?: string;
-      reply_to?: string;
-      return_path?: string;
+      from: string;
+      reply_to?: string | null;
+      return_path?: string | null;
       subject: string;
-      text_plain?: string;
-      text_html?: string;
+      text_plain?: string | null;
+      text_html?: string | null;
     }) => {
       if (id === null) throw new Error('invalid template id');
-      return (await createMailTemplateTranslation(id, payload)).data;
+      const languageLabel = languageOptions.find((option) => option.value === String(payload.language))?.label
+        ?? `#${payload.language}`;
+      if (!persistMailTemplateTranslationCreateGuard(guardScope, id, { ...payload, languageLabel })) {
+        throw new Error(t('mailer.templates.detail.translations.modal.guard_storage_error'));
+      }
+      const created = (await createMailTemplateTranslation(id, payload)).data;
+      const createdId = strictPositiveIntegerId(created?.id);
+      if (createdId === null) {
+        throw new TypeError('Malformed mail template translation create response: missing id');
+      }
+      return { ...created, id: createdId };
     },
     onSuccess: async () => {
+      clearMailTemplateTranslationCreateGuard(guardScope, id as number);
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'translations'] });
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'show'] });
       await qc.invalidateQueries({ queryKey: ['mailer', 'mail_templates', 'index'] });
       setTranslationModalOpen(false);
-      setNewTranslation({ language: '', from: '', reply_to: '', return_path: '', subject: '', text_plain: '', text_html: '' });
+      setIndeterminateTranslation(null);
+      setNewTranslation(emptyMailTemplateTranslationDraft());
+    },
+    onError: (error, payload) => {
+      if (!isAmbiguousMutationError(error)) {
+        if (id !== null) clearMailTemplateTranslationCreateGuard(guardScope, id);
+        return;
+      }
+      const languageLabel = languageOptions.find((option) => option.value === String(payload.language))?.label
+        ?? `#${payload.language}`;
+      setIndeterminateTranslation({ ...payload, languageLabel });
+      setTranslationModalOpen(false);
+    },
+    onSettled: () => {
+      createTranslationSubmitRef.current = false;
     },
   });
-
-  const canSaveUv = userVisibility.trim() && userVisibility !== uvCurrent;
-
-  const uvOptions: SelectOption[] = useMemo(
-    () => [
-      { value: 'default', label: t('mailer.templates.visibility.default') },
-      { value: 'visible', label: t('mailer.templates.visibility.visible') },
-      { value: 'invisible', label: t('mailer.templates.visibility.invisible') },
-    ],
-    [t]
-  );
 
   if (id === null) {
     return (
@@ -260,7 +339,7 @@ export function MailTemplateDetailPage() {
     );
   }
 
-  const tpl = tplQ.data as any;
+  const tpl = tplQ.data as MailTemplate | undefined;
   const title = String(tpl?.label ?? tpl?.name ?? `#${id}`);
 
   return (
@@ -275,6 +354,33 @@ export function MailTemplateDetailPage() {
           </Link>
         }
         meta={<span className="text-xs text-faint">#{id}</span>}
+        actions={
+          tpl ? (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setTemplateEditorBaseline(mailTemplateEditFingerprint(tpl));
+                  setTemplateEditorStale(false);
+                  setTemplateEditorError(null);
+                  updateTemplateM.reset();
+                  setTemplateEditorOpen(true);
+                }}
+                testId="admin.mailer.templates.detail.edit"
+              >
+                {t('common.edit')}
+              </Button>
+              <Button
+                variant="danger"
+                disabled
+                disabledReason={t('mailer.templates.delete.blocked_body')}
+                testId="admin.mailer.templates.detail.delete.blocked"
+              >
+                {t('common.delete')}
+              </Button>
+            </>
+          ) : null
+        }
       />
 
       {tplQ.isLoading ? (
@@ -297,112 +403,15 @@ export function MailTemplateDetailPage() {
         />
       ) : (
         <>
-          {/* Summary */}
-          <Card>
-            <div className="grid gap-4 p-4 md:grid-cols-2">
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.templates.fields.name')}</div>
-                <div className="mt-1 text-sm">{String(tpl?.name ?? t('common.na'))}</div>
-              </div>
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.templates.fields.template_id')}</div>
-                <div className="mt-1 text-sm font-mono">{String(tpl?.template_id ?? t('common.na'))}</div>
-              </div>
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.templates.fields.label')}</div>
-                <div className="mt-1 text-sm">{String(tpl?.label ?? t('common.na'))}</div>
-              </div>
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.templates.fields.updated')}</div>
-                <div className="mt-1 text-sm">{formatDateTime(tpl?.updated_at)}</div>
-              </div>
+          <Alert
+            variant="warn"
+            title={t('mailer.templates.delete.blocked_title')}
+            testId="admin.mailer.templates.detail.delete_blocked"
+          >
+            {t('mailer.templates.delete.blocked_body')}
+          </Alert>
 
-              <div className="md:col-span-2">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="w-full sm:w-72">
-                    <div className="text-xs font-medium text-muted">{t('mailer.templates.fields.user_visibility')}</div>
-                    <div className="mt-1">
-                      <Select
-                        value={userVisibility}
-                        onChange={(e) => setUserVisibility(e.target.value)}
-                        options={uvOptions}
-                        testId="admin.mailer.templates.detail.visibility.select"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setUserVisibility(uvCurrent);
-                      }}
-                      disabled={!canSaveUv || saveUvM.isPending}
-                      testId="admin.mailer.templates.detail.visibility.reset"
-                    >
-                      {t('common.reset')}
-                    </Button>
-                    <Button
-                      variant="primary"
-                      onClick={() => saveUvM.mutate()}
-                      loading={saveUvM.isPending}
-                      disabled={!canSaveUv}
-                      testId="admin.mailer.templates.detail.visibility.save"
-                    >
-                      {t('common.save')}
-                    </Button>
-                  </div>
-                </div>
-
-                {saveUvM.isError ? (
-                  <div className="mt-3">
-                    <Alert variant="danger" title={t('mailer.templates.detail.save_visibility_error')}>
-                      {String((saveUvM.error as any)?.message ?? saveUvM.error)}
-                    </Alert>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </Card>
-
-          {/* Registry metadata */}
-          <Card>
-            <div className="p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="text-sm font-semibold">{t('mailer.templates.detail.registry.title')}</div>
-                {isPublic ? <Badge variant="info">{t('mailer.templates.badge.public')}</Badge> : <Badge variant="neutral">{t('mailer.templates.badge.internal')}</Badge>}
-              </div>
-
-              {tpl?.registry_description ? <div className="mt-2 text-sm text-muted">{String(tpl.registry_description)}</div> : null}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                {roles.length ? (
-                  roles.map((r) => (
-                    <Badge key={r} variant="neutral">
-                      {r}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted">{t('common.na')}</span>
-                )}
-              </div>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.templates.detail.registry.vars')}</div>
-                  <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-fg">
-                    {String(tpl?.registry_vars ?? t('common.na'))}
-                  </pre>
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.templates.detail.registry.params')}</div>
-                  <pre className="mt-1 max-h-64 overflow-auto rounded-md border border-border bg-surface p-3 text-xs text-fg">
-                    {String(tpl?.registry_params ?? t('common.na'))}
-                  </pre>
-                </div>
-              </div>
-            </div>
-          </Card>
+          <MailTemplateSummaryCard template={tpl} />
 
           {/* Recipients */}
           <Card>
@@ -414,12 +423,29 @@ export function MailTemplateDetailPage() {
               <Button
                 variant="secondary"
                 onClick={() => setRecipientModalOpen(true)}
+                disabled={
+                  recipientsQ.data === undefined
+                  || recipientsQ.isError
+                  || (recipientRelationsCapped && !recipientRecoveryAvailable)
+                }
+                disabledReason={recipientRelationsCapped && !recipientRecoveryAvailable
+                  ? t('mailer.templates.detail.recipients.relation_fetch_limit_notice', { limit: MAILER_RELATION_FETCH_LIMIT })
+                  : recipientsQ.data === undefined || recipientsQ.isError
+                    ? t('mailer.templates.detail.recipients.actions_unavailable')
+                    : undefined}
                 testId="admin.mailer.templates.detail.recipients.add"
               >
                 {t('mailer.templates.detail.recipients.add')}
               </Button>
             </div>
             <div className="p-4">
+              {recipientRelationsCapped ? (
+                <div className="mb-4">
+                  <Alert variant="warn" testId="admin.mailer.templates.detail.recipients.fetch_limit_notice">
+                    {t('mailer.templates.detail.recipients.relation_fetch_limit_notice', { limit: MAILER_RELATION_FETCH_LIMIT })}
+                  </Alert>
+                </div>
+              ) : null}
               {recipientsQ.isLoading ? (
                 <LoadingState testId="admin.mailer.templates.detail.recipients.loading" />
               ) : recipientsQ.isError ? (
@@ -469,7 +495,10 @@ export function MailTemplateDetailPage() {
                               <Button
                                 variant="danger"
                                 size="sm"
-                                onClick={() => setRemoveRecipientId(rid)}
+                                onClick={() => {
+                                  removeRecipientM.reset();
+                                  setRemoveRecipientId(rid);
+                                }}
                                 testId={`admin.mailer.templates.detail.recipients.remove.${rid}`}
                               >
                                 {t('common.remove')}
@@ -495,12 +524,75 @@ export function MailTemplateDetailPage() {
               <Button
                 variant="secondary"
                 onClick={() => setConfirmAddTranslationOpen(true)}
+                disabled={
+                  indeterminateTranslation !== null
+                  || translationsQ.data === undefined
+                  || translationsQ.isError
+                  || languagesQ.data === undefined
+                  || languagesQ.isError
+                  || translationRelationsCapped
+                  || languagesCapped
+                  || languageOptions.length <= 1
+                }
+                disabledReason={indeterminateTranslation
+                  ? t('mailer.templates.detail.translations.indeterminate.body')
+                  : translationRelationsCapped || languagesCapped
+                    ? t('mailer.templates.detail.translations.fetch_limit_notice', { limit: MAILER_RELATION_FETCH_LIMIT })
+                  : (translationsQ.data === undefined || translationsQ.isError || languagesQ.data === undefined || languagesQ.isError)
+                    ? t('mailer.templates.detail.translations.actions_unavailable')
+                    : languageOptions.length <= 1
+                      ? t('mailer.templates.detail.translations.no_available_languages')
+                      : undefined}
                 testId="admin.mailer.templates.detail.translations.add"
               >
                 {t('mailer.templates.detail.translations.add')}
               </Button>
             </div>
             <div className="p-4">
+              {translationRelationsCapped || languagesCapped ? (
+                <div className="mb-4">
+                  <Alert variant="warn" testId="admin.mailer.templates.detail.translations.fetch_limit_notice">
+                    {t('mailer.templates.detail.translations.fetch_limit_notice', { limit: MAILER_RELATION_FETCH_LIMIT })}
+                  </Alert>
+                </div>
+              ) : null}
+              {indeterminateTranslation ? (
+                <div className="mb-4">
+                  <MailTemplateTranslationCreateIndeterminateGuard
+                    templateId={id}
+                    attempt={indeterminateTranslation}
+                    onListRefresh={() => translationsQ.refetch()}
+                    onResolved={() => {
+                      clearMailTemplateTranslationCreateGuard(guardScope, id);
+                      setIndeterminateTranslation(null);
+                    }}
+                  />
+                </div>
+              ) : null}
+              {languagesQ.isError ? (
+                <div className="mb-4">
+                  <Alert
+                    variant="danger"
+                    title={t('mailer.templates.detail.translations.languages_load_error')}
+                    testId="admin.mailer.templates.detail.translations.languages_error"
+                  >
+                    <Button variant="secondary" size="sm" onClick={() => void languagesQ.refetch()}>
+                      {t('common.retry')}
+                    </Button>
+                  </Alert>
+                </div>
+              ) : null}
+              {!languagesQ.isLoading && !languagesQ.isError && languageOptions.length <= 1 ? (
+                <div className="mb-4">
+                  <Alert
+                    variant="info"
+                    title={t('mailer.templates.detail.translations.no_available_languages')}
+                    testId="admin.mailer.templates.detail.translations.no_available_languages"
+                  >
+                    {t('mailer.templates.detail.translations.no_available_languages_body')}
+                  </Alert>
+                </div>
+              ) : null}
               {translationsQ.isLoading ? (
                 <LoadingState testId="admin.mailer.templates.detail.translations.loading" />
               ) : translationsQ.isError ? (
@@ -512,7 +604,9 @@ export function MailTemplateDetailPage() {
                   detailsExtra={{ page: 'admin.mailer.templates.detail.translations' }}
                 />
               ) : (translationsQ.data ?? []).length === 0 ? (
-                <div className="text-sm text-muted">{t('mailer.templates.detail.translations.empty')}</div>
+                <Alert variant="info" title={t('mailer.templates.detail.translations.empty_title')}>
+                  {t('mailer.templates.detail.translations.empty')}
+                </Alert>
               ) : (
                 <TableCard minWidth="lg" tableTestId="admin.mailer.templates.detail.translations.table">
                   <thead>
@@ -553,185 +647,44 @@ export function MailTemplateDetailPage() {
             {t('common.back')}
           </Button>
 
-          {/* Recipient modal */}
-          <Modal
+          <MailTemplateEditorModal
+            open={templateEditorOpen}
+            mode="edit"
+            template={tpl}
+            error={templateEditorError}
+            saving={updateTemplateM.isPending}
+            stale={templateEditorStale}
+            onLoadLatest={() => {
+              setTemplateEditorBaseline(mailTemplateEditFingerprint(tpl));
+              setTemplateEditorStale(false);
+              setTemplateEditorError(null);
+              updateTemplateM.reset();
+            }}
+            onClose={() => {
+              setTemplateEditorOpen(false);
+              setTemplateEditorError(null);
+              setTemplateEditorBaseline(null);
+              setTemplateEditorStale(false);
+              updateTemplateM.reset();
+            }}
+            onSubmit={(values) => updateTemplateM.mutate(mailTemplateEditorUpdatePayload(values))}
+          />
+
+          <MailTemplateRecipientModal
+            key={`${guardScope}:${id}`}
             open={recipientModalOpen}
-            onClose={() => setRecipientModalOpen(false)}
-            title={t('mailer.templates.detail.recipients.add')}
-            size="lg"
-            testId="admin.mailer.templates.detail.recipients.modal"
-            footer={
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs text-muted">{t('mailer.templates.detail.recipients.modal.hint')}</div>
-                <div className="flex items-center gap-2">
-                  <Button variant="secondary" onClick={() => setRecipientModalOpen(false)}>
-                    {t('common.cancel')}
-                  </Button>
-                  {recipientModalMode === 'existing' ? (
-                    <Button
-                      variant="primary"
-                      onClick={() => {
-                        if (selectedRecipientId) addRecipientM.mutate(selectedRecipientId);
-                      }}
-                      loading={addRecipientM.isPending}
-                      disabled={!selectedRecipientId || associatedRecipientIds.has(selectedRecipientId)}
-                      testId="admin.mailer.templates.detail.recipients.modal.add"
-                    >
-                      {t('common.add')}
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      onClick={async () => {
-                        if (id === null) return;
-                        const created = await createRecipientM.mutateAsync({
-                          label: newRecipient.label.trim() || undefined,
-                          to: newRecipient.to.trim() || undefined,
-                          cc: newRecipient.cc.trim() || undefined,
-                          bcc: newRecipient.bcc.trim() || undefined,
-                        });
-                        const rid = Number((created as any).id);
-                        if (Number.isFinite(rid) && rid > 0) addRecipientM.mutate(rid);
-                      }}
-                      loading={createRecipientM.isPending || addRecipientM.isPending}
-                      disabled={!newRecipient.to.trim() && !newRecipient.cc.trim() && !newRecipient.bcc.trim()}
-                      testId="admin.mailer.templates.detail.recipients.modal.create"
-                    >
-                      {t('mailer.templates.detail.recipients.modal.create_and_add')}
-                    </Button>
-                  )}
-                </div>
-              </div>
-            }
-          >
-            <div className="mb-3 flex flex-wrap gap-2">
-              <Button
-                variant={recipientModalMode === 'existing' ? 'primary' : 'secondary'}
-                onClick={() => setRecipientModalMode('existing')}
-                size="sm"
-                testId="admin.mailer.templates.detail.recipients.modal.mode.existing"
-              >
-                {t('mailer.templates.detail.recipients.modal.mode.existing')}
-              </Button>
-              <Button
-                variant={recipientModalMode === 'create' ? 'primary' : 'secondary'}
-                onClick={() => setRecipientModalMode('create')}
-                size="sm"
-                testId="admin.mailer.templates.detail.recipients.modal.mode.create"
-              >
-                {t('mailer.templates.detail.recipients.modal.mode.create')}
-              </Button>
-            </div>
-
-            {recipientModalMode === 'existing' ? (
-              <>
-                <div className="mb-3">
-                  <Input
-                    value={recipientSearch}
-                    onChange={(e) => setRecipientSearch(e.target.value)}
-                    placeholder={t('mailer.templates.detail.recipients.modal.search')}
-                    testId="admin.mailer.templates.detail.recipients.modal.search"
-                  />
-                </div>
-
-                {allRecipientsQ.isLoading ? (
-                  <LoadingState testId="admin.mailer.templates.detail.recipients.modal.loading" />
-                ) : allRecipientsQ.isError ? (
-                  <ErrorState
-                    testId="admin.mailer.templates.detail.recipients.modal.error"
-                    title={t('mailer.templates.detail.recipients.modal.load_error')}
-                    error={allRecipientsQ.error}
-                    onRetry={() => void allRecipientsQ.refetch()}
-                    detailsExtra={{ page: 'admin.mailer.templates.detail.recipients.modal' }}
-                  />
-                ) : (
-                  <div className="max-h-scroll-registry overflow-auto rounded-md border border-border">
-                    {(allRecipientsQ.data ?? [])
-                      .filter((r) => {
-                        const needle = recipientSearch.trim().toLowerCase();
-                        if (!needle) return true;
-                        const hay = `${String((r as any).label ?? '')} ${String((r as any).to ?? '')} ${String((r as any).cc ?? '')} ${String((r as any).bcc ?? '')}`.toLowerCase();
-                        return hay.includes(needle);
-                      })
-                      .map((r: MailRecipient) => {
-                        const rid = Number((r as any).id);
-                        const label = String((r as any).label ?? `#${rid}`);
-                        const to = String((r as any).to ?? '');
-                        const cc = String((r as any).cc ?? '');
-                        const bcc = String((r as any).bcc ?? '');
-                        const selected = selectedRecipientId === rid;
-                        const already = associatedRecipientIds.has(rid);
-
-                        return (
-                          <button
-                            key={rid}
-                            type="button"
-                            className={
-                              'w-full border-b border-border px-3 py-2 text-left text-sm transition last:border-b-0 ' +
-                              (selected ? 'bg-surface-2' : 'hover:bg-surface-2')
-                            }
-                            onClick={() => setSelectedRecipientId(rid)}
-                            disabled={already}
-                            data-testid={`admin.mailer.templates.detail.recipients.modal.pick.${rid}`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">{label}</div>
-                                <div className="mt-0.5 truncate text-xs text-muted" title={to}>
-                                  {to || t('common.na')}
-                                </div>
-                              </div>
-                              {already ? <Badge variant="warn">{t('mailer.templates.detail.recipients.modal.already_added')}</Badge> : null}
-                            </div>
-                            {(cc || bcc) ? (
-                              <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted">
-                                {cc ? <span className="truncate" title={cc}>CC: {cc}</span> : null}
-                                {bcc ? <span className="truncate" title={bcc}>BCC: {bcc}</span> : null}
-                              </div>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                  </div>
-                )}
-
-                {selectedRecipientId && associatedRecipientIds.has(selectedRecipientId) ? (
-                  <div className="mt-3">
-                    <Alert variant="warn" title={t('mailer.templates.detail.recipients.modal.already_added')}>
-                      {t('mailer.templates.detail.recipients.modal.already_added_desc')}
-                    </Alert>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <div className="grid gap-3">
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('common.label')}</div>
-                  <Input
-                    value={newRecipient.label}
-                    onChange={(e) => setNewRecipient({ ...newRecipient, label: e.target.value })}
-                    placeholder={t('mailer.recipients.create.label_placeholder')}
-                  />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.to')}</div>
-                  <Input value={newRecipient.to} onChange={(e) => setNewRecipient({ ...newRecipient, to: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.cc')}</div>
-                  <Input value={newRecipient.cc} onChange={(e) => setNewRecipient({ ...newRecipient, cc: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.recipients.fields.bcc')}</div>
-                  <Input value={newRecipient.bcc} onChange={(e) => setNewRecipient({ ...newRecipient, bcc: e.target.value })} placeholder={t('mailer.recipients.create.address_placeholder')} />
-                </div>
-                <Alert variant="info" title={t('mailer.templates.detail.recipients.modal.create_info')}>
-                  {t('mailer.templates.detail.recipients.modal.create_info_desc')}
-                </Alert>
-              </div>
-            )}
-          </Modal>
-
+            templateId={id}
+            guardScope={guardScope}
+            actionsBlocked={recipientRelationsCapped}
+            associatedRecipientIds={associatedRecipientIds}
+            onClose={() => {
+              setRecipientModalOpen(false);
+              setRecipientRecoveryAvailable(Boolean(
+                readMailTemplateRecipientGuard(guardScope, id)
+                || readMailRecipientCreateGuard(guardScope),
+              ));
+            }}
+          />
           {/* Remove recipient confirm */}
           <ConfirmDialog
             open={removeRecipientId !== null}
@@ -740,12 +693,37 @@ export function MailTemplateDetailPage() {
             danger
             confirmLabel={t('common.remove')}
             confirmLoading={removeRecipientM.isPending}
-            onCancel={() => setRemoveRecipientId(null)}
+            onCancel={() => {
+              if (!removeRecipientM.isPending) {
+                setRemoveRecipientId(null);
+                removeRecipientM.reset();
+              }
+            }}
             onConfirm={() => {
-              if (removeRecipientId) removeRecipientM.mutate(removeRecipientId);
+              if (!removeRecipientId || removeRecipientSubmitRef.current || removeRecipientM.isPending) return;
+              removeRecipientSubmitRef.current = true;
+              removeRecipientM.mutate(removeRecipientId);
             }}
             testId="admin.mailer.templates.detail.recipients.remove_confirm"
-          />
+          >
+            {removeRecipientTarget ? (
+              <p
+                className="mb-3 text-sm font-medium"
+                data-testid="admin.mailer.templates.detail.recipients.remove_confirm.target"
+              >
+                {t('mailer.templates.detail.recipients.remove_confirm.target', removeRecipientTarget)}
+              </p>
+            ) : null}
+            {removeRecipientM.isError ? (
+              <Alert
+                variant="danger"
+                title={t('mailer.templates.detail.recipients.remove_error')}
+                testId="admin.mailer.templates.detail.recipients.remove_error"
+              >
+                {formatErrorMessage(removeRecipientM.error)}
+              </Alert>
+            ) : null}
+          </ConfirmDialog>
 
           {/* Confirm add translation */}
           <ConfirmDialog
@@ -755,6 +733,8 @@ export function MailTemplateDetailPage() {
             onCancel={() => setConfirmAddTranslationOpen(false)}
             onConfirm={() => {
               setConfirmAddTranslationOpen(false);
+              createTranslationM.reset();
+              setNewTranslation(emptyMailTemplateTranslationDraft());
               setTranslationModalOpen(true);
             }}
             testId="admin.mailer.templates.detail.translations.add_confirm"
@@ -763,27 +743,45 @@ export function MailTemplateDetailPage() {
           {/* Add translation modal */}
           <Modal
             open={translationModalOpen}
-            onClose={() => setTranslationModalOpen(false)}
+            onClose={() => {
+              if (!createTranslationM.isPending) {
+                setTranslationModalOpen(false);
+                setNewTranslation(emptyMailTemplateTranslationDraft());
+              }
+            }}
             title={t('mailer.templates.detail.translations.add')}
             size="lg"
             testId="admin.mailer.templates.detail.translations.modal"
             footer={
               <div className="flex items-center justify-end gap-2">
-                <Button variant="secondary" onClick={() => setTranslationModalOpen(false)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setTranslationModalOpen(false);
+                    setNewTranslation(emptyMailTemplateTranslationDraft());
+                  }}
+                  disabled={createTranslationM.isPending}
+                >
                   {t('common.cancel')}
                 </Button>
                 <Button
                   variant="primary"
                   loading={createTranslationM.isPending}
-                  disabled={!newTranslation.subject.trim() || !parsePositiveInt(newTranslation.language)}
+                  disabled={
+                    !newTranslation.from.trim() ||
+                    !newTranslation.subject.trim() ||
+                    !selectedLanguageAvailable
+                  }
                   onClick={() => {
+                    if (createTranslationSubmitRef.current || createTranslationM.isPending || indeterminateTranslation) return;
                     const lid = parsePositiveInt(newTranslation.language);
-                    if (!lid) return;
+                    if (!lid || !selectedLanguageAvailable) return;
+                    createTranslationSubmitRef.current = true;
                     createTranslationM.mutate({
                       language: lid,
-                      from: newTranslation.from.trim() || undefined,
-                      reply_to: newTranslation.reply_to.trim() || undefined,
-                      return_path: newTranslation.return_path.trim() || undefined,
+                      from: newTranslation.from.trim(),
+                      reply_to: newTranslation.reply_to.trim() || null,
+                      return_path: newTranslation.return_path.trim() || null,
                       subject: newTranslation.subject.trim(),
                       text_plain: newTranslation.text_plain || undefined,
                       text_html: newTranslation.text_html || undefined,
@@ -796,71 +794,13 @@ export function MailTemplateDetailPage() {
               </div>
             }
           >
-            <div className="grid gap-3">
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.language')}</div>
-                <Select
-                  value={newTranslation.language}
-                  onChange={(e) => setNewTranslation({ ...newTranslation, language: e.target.value })}
-                  options={languageOptions}
-                  testId="admin.mailer.templates.detail.translations.modal.language"
-                />
-              </div>
-
-              <div>
-                <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.subject')}</div>
-                <Input
-                  value={newTranslation.subject}
-                  onChange={(e) => setNewTranslation({ ...newTranslation, subject: e.target.value })}
-                  placeholder={t('mailer.translations.fields.subject_placeholder')}
-                  testId="admin.mailer.templates.detail.translations.modal.subject"
-                />
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-3">
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.from')}</div>
-                  <Input value={newTranslation.from} onChange={(e) => setNewTranslation({ ...newTranslation, from: e.target.value })} testId="admin.mailer.templates.detail.translations.modal.from" />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.reply_to')}</div>
-                  <Input value={newTranslation.reply_to} onChange={(e) => setNewTranslation({ ...newTranslation, reply_to: e.target.value })} testId="admin.mailer.templates.detail.translations.modal.reply_to" />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.return_path')}</div>
-                  <Input value={newTranslation.return_path} onChange={(e) => setNewTranslation({ ...newTranslation, return_path: e.target.value })} testId="admin.mailer.templates.detail.translations.modal.return_path" />
-                </div>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.text_plain')}</div>
-                  <Textarea
-                    value={newTranslation.text_plain}
-                    onChange={(e) => setNewTranslation({ ...newTranslation, text_plain: e.target.value })}
-                    rows={10}
-                    className="font-mono text-xs"
-                    testId="admin.mailer.templates.detail.translations.modal.text_plain"
-                  />
-                </div>
-                <div>
-                  <div className="text-xs font-medium text-muted">{t('mailer.translations.fields.text_html')}</div>
-                  <Textarea
-                    value={newTranslation.text_html}
-                    onChange={(e) => setNewTranslation({ ...newTranslation, text_html: e.target.value })}
-                    rows={10}
-                    className="font-mono text-xs"
-                    testId="admin.mailer.templates.detail.translations.modal.text_html"
-                  />
-                </div>
-              </div>
-
-              {createTranslationM.isError ? (
-                <Alert variant="danger" title={t('mailer.templates.detail.translations.modal.create_error')}>
-                  {String((createTranslationM.error as any)?.message ?? createTranslationM.error)}
-                </Alert>
-              ) : null}
-            </div>
+            <MailTemplateTranslationDraftFields
+              draft={newTranslation}
+              languageOptions={languageOptions}
+              pending={createTranslationM.isPending}
+              error={createTranslationM.error}
+              onChange={setNewTranslation}
+            />
           </Modal>
         </>
       )}

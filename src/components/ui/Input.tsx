@@ -21,6 +21,7 @@ export interface InputProps {
   autoComplete?: string;
   min?: string | number;
   max?: string | number;
+  maxLength?: number;
   step?: string | number;
   onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
@@ -54,6 +55,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(function Inp
       autoComplete={props.autoComplete}
       min={props.min}
       max={props.max}
+      maxLength={props.maxLength}
       step={props.step}
       disabled={props.disabled}
       onChange={props.onChange}
