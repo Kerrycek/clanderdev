@@ -36,7 +36,7 @@ function rewriteAdminPathForUserScope(rest: string): string {
 
   if (rest === '/incidents/new') return '/incidents';
 
-  if (matchesPathPrefix(rest, '/payments/incoming')) return '/payments';
+  if (matchesPathPrefix(rest, '/payments')) return '/payments';
 
   const adminOnlyPrefixes = [
     '/nodes',
@@ -60,7 +60,7 @@ function rewriteUserPathForAdminScope(rest: string): string {
   const adminNamespacesPath = rewritePrefixedPath(rest, '/profile/user-namespaces', '/user-namespaces');
   if (adminNamespacesPath) return adminNamespacesPath;
 
-  if (rest === '/payments') return '/payments/incoming';
+  if (rest === '/payments') return '/payments';
 
   return rest;
 }
@@ -88,7 +88,10 @@ export function computeOtherModeUrl(opts: {
 
   if (opts.mode === 'admin') {
     const targetRest = rewriteAdminPathForUserScope(rest);
-    const safeSearch = targetRest ? search : '';
+    // Admin Finance routes collapse into the personal payment page. Their
+    // user/date/keyset parameters have different semantics there, so never
+    // carry them across scopes.
+    const safeSearch = targetRest && !matchesPathPrefix(rest, '/payments') ? search : '';
     return `/app${targetRest}${safeSearch}${hash}`;
   }
 

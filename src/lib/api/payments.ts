@@ -84,6 +84,27 @@ export interface UserPayment {
   [k: string]: unknown;
 }
 
+export interface UserPaymentIndexCapabilityDescription {
+  input?: {
+    parameters?: Record<string, unknown>;
+    [k: string]: unknown;
+  };
+  /** Tolerate HaveAPI's generic single-key response unwrapping. */
+  parameters?: Record<string, unknown>;
+  [k: string]: unknown;
+}
+
+export function userPaymentIndexSupportsPeriod(
+  capability: UserPaymentIndexCapabilityDescription | undefined,
+): boolean {
+  const parameters = capability?.input?.parameters ?? capability?.parameters;
+  return Boolean(
+    parameters
+    && Object.prototype.hasOwnProperty.call(parameters, 'created_from')
+    && Object.prototype.hasOwnProperty.call(parameters, 'created_to')
+  );
+}
+
 export type CreateUserPaymentInput =
   | {
       /** Target user ID */
@@ -121,21 +142,41 @@ export async function createUserPayment(opts: CreateUserPaymentInput) {
   });
 }
 
-export async function fetchUserPayments(opts?: { limit?: number; fromId?: number; userId?: number; accountedById?: number }) {
+export async function fetchUserPayments(opts?: {
+  limit?: number;
+  fromId?: number;
+  userId?: number;
+  accountedById?: number;
+  createdFrom?: string;
+  createdTo?: string;
+  signal?: AbortSignal;
+}) {
   const params: Record<string, unknown> = {};
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
   if (opts?.userId !== undefined) params['user'] = opts.userId;
   if (opts?.accountedById !== undefined) params['accounted_by'] = opts.accountedById;
+  if (opts?.createdFrom !== undefined) params['created_from'] = opts.createdFrom;
+  if (opts?.createdTo !== undefined) params['created_to'] = opts.createdTo;
 
   const res = await haveApiCall<UserPayment[]>({
     method: 'GET',
     path: '/user_payments',
     namespace: 'user_payment',
     params,
+    signal: opts?.signal,
   });
 
   return { ...res, data: expectArray<UserPayment>(res.data, 'user_payments#index') };
+}
+
+/** Read the effective index contract before relying on server-side period filters. */
+export async function fetchUserPaymentIndexCapability(signal?: AbortSignal) {
+  return haveApiCall<UserPaymentIndexCapabilityDescription>({
+    method: 'OPTIONS',
+    path: '/user_payments?method=GET',
+    signal,
+  });
 }
 
 export async function fetchPaymentInstructions(userId: number) {

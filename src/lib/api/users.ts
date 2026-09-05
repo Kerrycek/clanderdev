@@ -41,9 +41,10 @@ export async function fetchCurrentUser() {
 export interface FetchUsersOpts {
   limit?: number;
   fromId?: number;
+  signal?: AbortSignal;
+  /** Explicit lifecycle scope; omitted requests default to active users. */ objectState?: string;
   /** Request an exact total for filters supported directly by HaveAPI. */
   count?: boolean;
-
   /**
    * Legacy admin list search from the redesign snapshot.
    *
@@ -57,9 +58,8 @@ export interface FetchUsersOpts {
    *
    * Current upstream only exposes `admin=true`; `support`/`user` are derived
    * client-side from `level`.
-   */
+  */
   role?: 'user' | 'support' | 'admin';
-
   /** Explicit level filter (admin only). */
   level?: number;
 
@@ -75,10 +75,7 @@ export interface FetchUsersOpts {
   enableNewLoginNotification?: boolean;
 }
 
-interface RawFetchUsersOpts {
-  limit?: number;
-  fromId?: number;
-  count?: boolean;
+interface RawFetchUsersOpts extends Pick<FetchUsersOpts, 'limit' | 'fromId' | 'signal' | 'objectState' | 'count'> {
   level?: number;
   mailerEnabled?: boolean;
   adminOnly?: boolean;
@@ -201,6 +198,7 @@ async function rawFetchUsers(opts?: RawFetchUsersOpts): Promise<UserListResult> 
 
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
+  if (opts?.objectState !== undefined) params['object_state'] = opts.objectState;
   if (opts?.level !== undefined) params['level'] = opts.level;
   if (opts?.mailerEnabled !== undefined) params['mailer_enabled'] = opts.mailerEnabled;
   if (opts?.adminOnly) params['admin'] = true;
@@ -218,6 +216,7 @@ async function rawFetchUsers(opts?: RawFetchUsersOpts): Promise<UserListResult> 
     namespace: 'user',
     params,
     meta: opts?.count ? { count: true } : undefined,
+    signal: opts?.signal,
   });
 
   return { ...res, data: expectArray<User>(res.data, 'users') };
@@ -228,6 +227,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
   const safeOpts: FetchUsersOpts = {
     limit,
     fromId: opts?.fromId,
+    signal: opts?.signal,
+    objectState: opts?.objectState,
     count: opts?.count,
     q: normalizeQueryNeedle(opts?.q),
     role: opts?.role,
@@ -247,6 +248,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     return rawFetchUsers({
       limit,
       fromId: safeOpts.fromId,
+      signal: safeOpts.signal,
+      objectState: safeOpts.objectState,
       count: safeOpts.count,
       level: safeOpts.level,
       mailerEnabled: safeOpts.mailerEnabled,
@@ -271,6 +274,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     const batch = await rawFetchUsers({
       limit: batchLimit,
       fromId: cursor,
+      signal: safeOpts.signal,
+      objectState: safeOpts.objectState,
       level: safeOpts.level,
       mailerEnabled: safeOpts.mailerEnabled,
       adminOnly: safeOpts.role === 'admin',
@@ -395,24 +400,25 @@ export async function deleteUser(userId: number, payload?: { object_state?: stri
  * The backend uses SQL `LIKE`, so this helper automatically wraps the query in
  * `%…%` to support partial matches.
  */
-export async function searchUsers(opts: { q: string; limit?: number }) {
+export async function searchUsers(opts: { q: string; limit?: number; objectStates?: string[] }) {
   const q = String(opts.q ?? '').trim();
   const limit = typeof opts.limit === 'number' && opts.limit > 0 ? opts.limit : 20;
 
-  if (!q) {
-    return { data: [] as User[] };
-  }
+  if (!q) return { data: [] as User[] };
 
   const like = `%${q}%`;
   const directSearches: Array<Record<string, string | number | boolean>> = [];
   const baseParams = { limit } as const;
+  const objectStates = Array.from(new Set((opts.objectStates ?? []).map((state) => state.trim()).filter(Boolean)));
+  const stateScopes = objectStates.length > 0 ? objectStates : [undefined];
+  const inScope = (user: User) => objectStates.length === 0 || objectStates.includes(String(user.object_state ?? ''));
 
   if (/^#?\d+$/.test(q)) {
     const userId = Number(q.replace(/^#/, ''));
     if (Number.isFinite(userId) && userId > 0) {
       try {
         const userRes = await fetchUser(Math.trunc(userId));
-        return { data: [userRes.data] };
+        if (inScope(userRes.data)) return { data: [userRes.data] };
       } catch {
         // Fall through to text/cluster search. Numeric strings can also be
         // payment IDs or appear in profile fields on older deployments.
@@ -423,9 +429,12 @@ export async function searchUsers(opts: { q: string; limit?: number }) {
   // NOTE: the backend combines filters with AND, not OR. Search each likely
   // field separately and merge the result so all user pickers behave like the
   // global search box.
-  directSearches.push({ ...baseParams, login: like });
-  directSearches.push({ ...baseParams, full_name: like });
-  directSearches.push({ ...baseParams, email: like });
+  for (const objectState of stateScopes) {
+    const scope: Record<string, string | number | boolean> = objectState ? { object_state: objectState } : {};
+    for (const field of ['login', 'full_name', 'email'] as const) {
+      directSearches.push({ ...baseParams, ...scope, [field]: like });
+    }
+  }
 
   const settledDirect = await Promise.allSettled(
     directSearches.map((params) =>
@@ -478,7 +487,7 @@ export async function searchUsers(opts: { q: string; limit?: number }) {
 
   const merged: User[] = [];
   const mergedIds = new Set<number>();
-  for (const user of [...directUsers, ...clusterUsers]) {
+  for (const user of [...directUsers, ...clusterUsers].filter(inScope)) {
     if (mergedIds.has(user.id)) continue;
     mergedIds.add(user.id);
     merged.push(user);

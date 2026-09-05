@@ -80,7 +80,7 @@ describe('buildSidebarNavItems', () => {
       'users',
       'user-namespaces',
       'requests',
-      'payments-incoming',
+      'finance',
       'cluster',
       'nodes',
       'migration-plans',
@@ -112,6 +112,7 @@ describe('buildSidebarNavItems', () => {
 
     expect(visibleIds).not.toContain('security-advisories');
     expect(visibleIds).not.toContain('action-states');
+    expect(items.find((item) => item.id === 'finance')?.to).toBe('/admin/payments/incoming');
     expect(sidebarFooterNavItems(items).map((item) => item.id)).toEqual(['account']);
   });
 

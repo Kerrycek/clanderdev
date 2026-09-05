@@ -36,7 +36,7 @@ describe('modeSwitch', () => {
         pathname: '/app/payments',
         search: '?year=2026',
       })
-    ).toBe('/admin/payments/incoming?year=2026');
+    ).toBe('/admin/payments?year=2026');
 
     expect(
       computeOtherModeUrl({
@@ -54,7 +54,15 @@ describe('modeSwitch', () => {
         pathname: '/admin/payments/incoming/42',
         search: '?page=2',
       })
-    ).toBe('/app/payments?page=2');
+    ).toBe('/app/payments');
+
+    expect(
+      computeOtherModeUrl({
+        mode: 'admin',
+        pathname: '/admin/payments/history',
+        search: '?user=42&from=2026-08-01&to=2026-08-31&from_id=175&page=2&limit=25',
+      })
+    ).toBe('/app/payments');
 
     expect(
       computeOtherModeUrl({

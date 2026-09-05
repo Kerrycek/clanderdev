@@ -127,6 +127,8 @@ export function AdminUserPaymentsPage() {
     onSuccess: () => {
       toasts.pushToast({ variant: 'ok', title: t('admin.user.payments.settings.toast.paid_until_saved') });
       void qc.invalidateQueries({ queryKey: ['user_accounts', userId] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      void qc.invalidateQueries({ queryKey: ['payment_stats', 'estimate_income'] });
       refetch();
     },
     onError: (e) => {
@@ -145,6 +147,8 @@ export function AdminUserPaymentsPage() {
     onSuccess: () => {
       toasts.pushToast({ variant: 'ok', title: t('admin.user.payments.settings.toast.monthly_saved') });
       void qc.invalidateQueries({ queryKey: ['user_accounts', userId] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      void qc.invalidateQueries({ queryKey: ['payment_stats', 'estimate_income'] });
       refetch();
     },
     onError: (e) => {
@@ -183,6 +187,8 @@ export function AdminUserPaymentsPage() {
       setQuickAmount('');
       void qc.invalidateQueries({ queryKey: ['user_payments'] });
       void qc.invalidateQueries({ queryKey: ['user_accounts', userId] });
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      void qc.invalidateQueries({ queryKey: ['payment_stats', 'estimate_income'] });
       refetch();
     },
     onError: (e) => {

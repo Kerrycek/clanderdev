@@ -150,9 +150,9 @@ export function buildSidebarNavItems(opts: {
     items.push({ id: 'mailer', to: `${basePath}/mailer/templates`, label: t('nav.mailer'), icon: <Mail size={18} />, group: 'content' });
     items.push({ id: 'content', to: `${basePath}/content/news`, label: t('nav.content'), icon: <FileText size={18} />, group: 'content' });
     items.push({
-      id: 'payments-incoming',
-      to: `${basePath}/payments/incoming`,
-      label: t('nav.incoming_payments'),
+      id: 'finance',
+      to: role === 'admin' ? `${basePath}/payments` : `${basePath}/payments/incoming`,
+      label: t('nav.finance'),
       icon: <CreditCard size={18} />,
       group: 'users-finance',
     });
