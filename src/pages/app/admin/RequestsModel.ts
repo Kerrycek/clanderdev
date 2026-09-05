@@ -18,7 +18,16 @@ export type RequestFilterKey =
   | 'client_ptr'
   | 'id';
 
-export const CLOSED_REQUEST_STATES = new Set(['approved', 'denied', 'ignored']);
+export const DEFAULT_ADMIN_REQUEST_STATE = 'awaiting';
+export const ALL_ADMIN_REQUEST_STATES = 'all';
+const ADMIN_REQUEST_FILTER_PARAMS = ['type', 'q', 'user', 'admin', 'api_ip', 'client_ip', 'client_ptr'];
+
+export function resetAdminRequestPaginationOnFilterChange(next: URLSearchParams, current: URLSearchParams): void {
+  const stateChanged = adminRequestStateFilterFromUrl(next.get('state')) !== adminRequestStateFilterFromUrl(current.get('state'));
+  if (!stateChanged && !ADMIN_REQUEST_FILTER_PARAMS.some((key) => next.get(key) !== current.get(key))) return;
+  next.delete('from_id');
+  next.delete('page');
+}
 
 export function safeNumber(value: string | undefined | null): number | undefined {
   const t = String(value ?? '').trim();
@@ -122,6 +131,18 @@ export function defaultStateOptions(): string[] {
   return ['', 'awaiting', 'pending_correction', 'approved', 'denied', 'ignored'];
 }
 
+export function adminRequestStateFilterFromUrl(value: string | null | undefined): string {
+  const state = String(value ?? '').trim();
+  if (state === ALL_ADMIN_REQUEST_STATES) return state;
+  if (state && defaultStateOptions().includes(state)) return state;
+  return DEFAULT_ADMIN_REQUEST_STATE;
+}
+
+export function adminRequestApiState(state: string | null | undefined): string | undefined {
+  const normalized = adminRequestStateFilterFromUrl(state);
+  return normalized === ALL_ADMIN_REQUEST_STATES ? undefined : normalized;
+}
+
 export function canonicalKey(rawKey: string): RequestFilterKey | null {
   const k = rawKey.trim().toLowerCase();
   if (!k) return null;
@@ -150,6 +171,8 @@ export function resolveStateValue(value: string): string | null {
   const v = value.trim().toLowerCase();
   if (!v) return null;
 
+  if (v === ALL_ADMIN_REQUEST_STATES || v === '*') return ALL_ADMIN_REQUEST_STATES;
+
   const known = defaultStateOptions().filter((x) => x);
   const exact = known.find((state) => state.toLowerCase() === v);
   if (exact) return exact;
@@ -160,6 +183,7 @@ export function resolveStateValue(value: string): string | null {
 }
 
 export function visibleRequestRows(rows: UnifiedRequestRow[], state: string | undefined): UnifiedRequestRow[] {
-  if (state) return rows;
-  return rows.filter((row) => !CLOSED_REQUEST_STATES.has(requestState(row)));
+  const normalized = adminRequestStateFilterFromUrl(state);
+  if (normalized === ALL_ADMIN_REQUEST_STATES) return rows;
+  return rows.filter((row) => requestState(row) === normalized);
 }

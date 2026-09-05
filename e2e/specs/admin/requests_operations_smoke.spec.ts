@@ -52,15 +52,22 @@ test('@workflow-matrix @smoke admin requests: detail actions, inline expansion, 
   await page.goto('/admin/requests');
   await expect(page.getByTestId('admin.requests.table')).toBeVisible();
 
-  await page.getByTestId('admin.requests.quick.awaiting').click();
-  await expect(page).toHaveURL(/state=awaiting/);
   await expect.poll(() => states.includes('awaiting')).toBeTruthy();
+  expect(new URL(page.url()).searchParams.get('state')).toBeNull();
+  await expect(page.getByTestId('admin.requests.quick.awaiting')).toHaveAttribute('aria-pressed', 'true');
 
   const row123 = page.getByTestId('admin.requests.row.registration.123');
+  await row123.press('Enter');
+  await expect(page).toHaveURL('/admin/requests/registration/123');
+  await page.goBack();
+  await expect(page.getByTestId('admin.requests.table')).toBeVisible();
   await row123.getByTestId('admin.requests.expand.registration.123').click();
   const expanded123 = page.getByTestId('admin.requests.expanded_row.registration.123');
   await expect(expanded123.getByTestId('admin.requests.expanded.registration.123')).toBeVisible();
   await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.approve')).toBeVisible();
+  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.deny')).toBeVisible();
+  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.ignore')).toBeVisible();
+  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.request_correction')).toBeVisible();
 
   await expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.approve').click();
   await expect(page.getByTestId('admin.requests.expanded.registration.123.resolve.modal')).toBeVisible();
@@ -74,11 +81,7 @@ test('@workflow-matrix @smoke admin requests: detail actions, inline expansion, 
       activate: true,
     },
   });
-  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.deny')).toBeVisible();
-  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.ignore')).toBeVisible();
-  await expect(expanded123.getByTestId('admin.requests.expanded.registration.123.resolve.action.request_correction')).toBeVisible();
-
-  await page.getByTestId('admin.requests.row.registration.123').click();
+  await page.goto('/admin/requests/registration/123');
   await expect(page).toHaveURL('/admin/requests/registration/123');
   await expect(page.getByTestId('admin.requests.detail.ops.action_state')).toHaveAttribute('href', '/admin/action-states/177');
   await expect(page.getByTestId('admin.requests.detail.ops.chain')).toHaveAttribute('href', '/admin/transactions/88');
@@ -205,6 +208,10 @@ test('@workflow-matrix @smoke admin requests: expand all and collapse all affect
   await expect(page.getByTestId('admin.requests.expanded_row.registration.201').getByTestId('admin.requests.expanded.registration.201')).toBeVisible();
   await expect(page.getByTestId('admin.requests.expanded_row.registration.200').getByTestId('admin.requests.expanded.registration.200')).toBeVisible();
   await expect(page.getByTestId('admin.requests.expanded_row.change.199').getByTestId('admin.requests.expanded.change.199')).toBeVisible();
+  await expect(page.getByTestId('admin.requests.expanded.change.199.resolve.action.request_correction')).toHaveCount(0);
+
+  await page.getByTestId('admin.requests.bulk.select.change.199').check();
+  await expect(page.getByTestId('admin.requests.bulk.action').locator('option[value="request_correction"]')).toBeDisabled();
 
   await page.getByTestId('admin.requests.collapse_all').click();
   await expect(page.getByTestId('admin.requests.expanded_row.registration.201')).toHaveCount(0);
@@ -212,7 +219,7 @@ test('@workflow-matrix @smoke admin requests: expand all and collapse all affect
   await expect(page.getByTestId('admin.requests.expanded_row.change.199')).toHaveCount(0);
 });
 
-test('@workflow-matrix @smoke admin requests: advanced filters stay inline and closed requests are hidden by default', async ({ page }) => {
+test('@workflow-matrix @smoke admin requests: advanced filters stay inline and the default queue only includes awaiting requests', async ({ page }) => {
   await bootstrapVpsAdminWindow(page);
 
   await installHaveApiMock(page, {
@@ -236,4 +243,114 @@ test('@workflow-matrix @smoke admin requests: advanced filters stay inline and c
 
   await advanced.getByLabel(/stav|state/i).selectOption('ignored');
   await expect(page).toHaveURL(/state=ignored/);
+  await expect(page.getByTestId('admin.requests.row.registration.301')).toHaveCount(0);
+  await expect(page.getByTestId('admin.requests.row.registration.302')).toBeVisible();
+});
+
+test('@workflow-matrix @smoke @smoke-mobile admin requests: correction queue stays outside the default admin work queue', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+
+  const registrationStates: Array<string | null> = [];
+  const changeStates: Array<string | null> = [];
+  let correctionState = 'pending_correction';
+  const visibleRegistration = (id: number) => page.locator(
+    `[data-testid="admin.requests.row.registration.${id}"]:visible, [data-testid="admin.requests.mobile.row.registration.${id}"]:visible`,
+  );
+
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 100 },
+    handlers: {
+      'GET user_request/registrations': ({ searchParams }) => {
+        const state = searchParams.get('registration[state]');
+        registrationStates.push(state);
+        const registrations = [registration(501, 'awaiting'), registration(500, correctionState)];
+        return { registrations: state ? registrations.filter((request) => request.state === state) : registrations };
+      },
+      'GET user_request/changes': ({ searchParams }) => {
+        const state = searchParams.get('change[state]');
+        changeStates.push(state);
+        return { changes: [] };
+      },
+    },
+  });
+
+  await page.goto('/admin/requests');
+  await expect(visibleRegistration(501)).toBeVisible();
+  await expect(visibleRegistration(500)).toHaveCount(0);
+  await expect.poll(() => registrationStates.at(-1)).toBe('awaiting');
+  await expect.poll(() => changeStates.at(-1)).toBe('awaiting');
+  expect(new URL(page.url()).searchParams.get('state')).toBeNull();
+
+  await page.getByTestId('admin.requests.quick.pending_correction').click();
+  await expect(page).toHaveURL(/state=pending_correction/);
+  await expect(visibleRegistration(500)).toBeVisible();
+  await expect(visibleRegistration(501)).toHaveCount(0);
+  await expect.poll(() => registrationStates.at(-1)).toBe('pending_correction');
+  await expect.poll(() => changeStates.at(-1)).toBe('pending_correction');
+  await expect(page.getByTestId('admin.requests.quick.pending_correction')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.reload();
+  await expect(visibleRegistration(500)).toBeVisible();
+  await expect(page).toHaveURL(/state=pending_correction/);
+
+  await visibleRegistration(500).getByTestId('admin.requests.expand.registration.500').click();
+  await expect(page.locator('[data-testid="admin.requests.expanded.registration.500.resolve.action.request_correction"]:visible')).toHaveCount(0);
+  await page.locator('[data-testid="admin.requests.bulk.select.registration.500"]:visible, [data-testid="admin.requests.bulk.select.mobile.registration.500"]:visible').check();
+  await expect(page.getByTestId('admin.requests.bulk.action').locator('option[value="request_correction"]')).toBeDisabled();
+
+  correctionState = 'awaiting';
+  await page.getByTestId('admin.requests.quick.pending_correction').click();
+  await expect.poll(() => registrationStates.at(-1)).toBe('awaiting');
+  await expect(visibleRegistration(500)).toBeVisible();
+  await expect(visibleRegistration(501)).toBeVisible();
+  await expect(page).not.toHaveURL(/[?&]state=/);
+});
+
+test('@workflow-matrix @smoke @smoke-mobile admin requests: all states is explicit, shareable, and clears back to the work queue', async ({ page }) => {
+  await bootstrapVpsAdminWindow(page);
+
+  const registrationStates: Array<string | null> = [];
+  const changeStates: Array<string | null> = [];
+  const registrations = [registration(603, 'awaiting'), registration(602, 'pending_correction'), registration(601, 'denied')];
+  const visibleRegistration = (id: number) => page.locator(
+    `[data-testid="admin.requests.row.registration.${id}"]:visible, [data-testid="admin.requests.mobile.row.registration.${id}"]:visible`,
+  );
+
+  await installHaveApiMock(page, {
+    user: { id: 1, login: 'admin', level: 100 },
+    handlers: {
+      'GET user_request/registrations': ({ searchParams }) => {
+        const state = searchParams.get('registration[state]');
+        registrationStates.push(state);
+        return { registrations: state ? registrations.filter((request) => request.state === state) : registrations };
+      },
+      'GET user_request/changes': ({ searchParams }) => {
+        changeStates.push(searchParams.get('change[state]'));
+        return { changes: [] };
+      },
+    },
+  });
+
+  await page.goto('/admin/requests?state=all&from_id=700&page=2');
+  await expect.poll(() => registrationStates.at(-1)).toBeNull();
+  await expect.poll(() => changeStates.at(-1)).toBeNull();
+  await expect(visibleRegistration(603)).toBeVisible();
+  await expect(visibleRegistration(602)).toBeVisible();
+  await expect(visibleRegistration(601)).toBeVisible();
+  await expect(page.getByTestId('admin.requests.chip.state')).toBeVisible();
+
+  const registrationCalls = registrationStates.length;
+  await page.reload();
+  await expect.poll(() => registrationStates.length).toBeGreaterThan(registrationCalls);
+  await expect(page).toHaveURL(/state=all/);
+  await expect(visibleRegistration(601)).toBeVisible();
+
+  await page.getByRole('button', { name: /^(Vymazat filtry|Clear filters)$/ }).click();
+  await expect.poll(() => registrationStates.at(-1)).toBe('awaiting');
+  await expect.poll(() => changeStates.at(-1)).toBe('awaiting');
+  await expect(page).not.toHaveURL(/[?&](?:state|from_id)=/);
+  await expect.poll(() => new URL(page.url()).searchParams.get('page')).toBe('1');
+  await expect(visibleRegistration(603)).toBeVisible();
+  await expect(visibleRegistration(602)).toHaveCount(0);
+  await expect(visibleRegistration(601)).toHaveCount(0);
 });
