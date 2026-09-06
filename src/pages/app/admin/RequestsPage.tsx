@@ -6,7 +6,6 @@ import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
 import { useToasts } from '../../../app/toasts';
 import { useChrome } from '../../../components/layout/ChromeContext';
-
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { searchUsers } from '../../../lib/api/users';
 import {
@@ -29,12 +28,13 @@ import { RequestsFilters } from './RequestsFilters';
 import { RequestsListContent } from './RequestsListContent';
 import { RequestsListStatus } from './RequestsListStatus';
 import {
+  ALL_ADMIN_REQUEST_STATES, DEFAULT_ADMIN_REQUEST_STATE, adminRequestApiState, adminRequestStateFilterFromUrl,
   canonicalKey,
   changeRows,
   defaultStateOptions,
   mergeByIdDesc,
   parseTypeValue,
-  registrationRows,
+  registrationRows, resetAdminRequestPaginationOnFilterChange,
   requestId,
   requestKey,
   requestType,
@@ -53,12 +53,11 @@ export function RequestsPage() {
   const toasts = useToasts();
   const chrome = useChrome();
   const navigate = useNavigate();
-
   const tierSlowRefetchMs = useTierSlowIntervalMs();
   const [sp, setSp] = useSearchParams();
 
   const [type, setType] = useState<RequestTypeFilter>(() => requestTypeFilterFromUrl(sp.get('type')));
-  const [state, setState] = useState(() => sp.get('state') ?? '');
+  const [state, setState] = useState(() => adminRequestStateFilterFromUrl(sp.get('state')));
   const [qText, setQText] = useState(() => sp.get('q') ?? '');
   const [userId, setUserId] = useState(() => sp.get('user') ?? '');
   const [adminId, setAdminId] = useState(() => sp.get('admin') ?? '');
@@ -79,7 +78,7 @@ export function RequestsPage() {
   // Sync from URL on navigation.
   useEffect(() => {
     setType(requestTypeFilterFromUrl(sp.get('type')));
-    setState(sp.get('state') ?? '');
+    setState(adminRequestStateFilterFromUrl(sp.get('state')));
     setQText(sp.get('q') ?? '');
     setUserId(isAdmin ? sp.get('user') ?? '' : '');
     setAdminId(isAdmin ? sp.get('admin') ?? '' : '');
@@ -95,8 +94,8 @@ export function RequestsPage() {
     if (type && type !== 'all') next.set('type', type);
     else next.delete('type');
 
-    const st = state.trim();
-    if (st && defaultStateOptions().includes(st)) next.set('state', st);
+    const st = adminRequestStateFilterFromUrl(state);
+    if (st !== DEFAULT_ADMIN_REQUEST_STATE && (st === ALL_ADMIN_REQUEST_STATES || defaultStateOptions().includes(st))) next.set('state', st);
     else next.delete('state');
 
     const q = qText.trim();
@@ -118,10 +117,12 @@ export function RequestsPage() {
     if (clientPtr.trim()) next.set('client_ptr', clientPtr.trim());
     else next.delete('client_ptr');
 
+    resetAdminRequestPaginationOnFilterChange(next, sp);
     if (next.toString() !== sp.toString()) setSp(next, { replace: true });
   }, [adminId, apiIp, clientIp, clientPtr, isAdmin, qText, setSp, sp, state, type, userId]);
 
-  const stateTrim = state.trim() || undefined;
+  const stateFilter = adminRequestStateFilterFromUrl(state);
+  const apiState = adminRequestApiState(stateFilter);
   const qTrim = qText.trim() || undefined;
   const userIdNum = safeNumber(userId);
   const adminIdNum = safeNumber(adminId);
@@ -129,7 +130,7 @@ export function RequestsPage() {
   const filtersActive = Boolean(
     qTrim ||
       (type && type !== 'all') ||
-      stateTrim ||
+      stateFilter !== DEFAULT_ADMIN_REQUEST_STATE ||
       (isAdmin && userIdNum !== undefined) ||
       (isAdmin && adminIdNum !== undefined) ||
       apiIp.trim() ||
@@ -139,7 +140,7 @@ export function RequestsPage() {
 
   function clearFilters() {
     setType('all');
-    setState('');
+    setState(DEFAULT_ADMIN_REQUEST_STATE);
     setQText('');
     setUserId('');
     setAdminId('');
@@ -155,7 +156,7 @@ export function RequestsPage() {
     filterKey: JSON.stringify({
       scope: basePath,
       type,
-      state: stateTrim,
+      state: stateFilter,
       q: qTrim,
       user: isAdmin ? userIdNum : undefined,
       admin: isAdmin ? adminIdNum : undefined,
@@ -181,7 +182,7 @@ export function RequestsPage() {
         enabled: needRegs,
         limit: pagination.limit,
         fromId: pagination.fromId,
-        state: stateTrim,
+        state: apiState,
         q: qTrim,
         userId: isAdmin ? userIdNum : undefined,
         adminId: isAdmin ? adminIdNum : undefined,
@@ -195,7 +196,7 @@ export function RequestsPage() {
       await fetchRegistrationRequests({
         limit: pagination.limit,
         fromId: pagination.fromId,
-        state: stateTrim,
+        state: apiState,
         q: qTrim,
         userId: isAdmin ? userIdNum : undefined,
         adminId: isAdmin ? adminIdNum : undefined,
@@ -216,7 +217,7 @@ export function RequestsPage() {
         enabled: needChanges,
         limit: pagination.limit,
         fromId: pagination.fromId,
-        state: stateTrim,
+        state: apiState,
         q: qTrim,
         userId: isAdmin ? userIdNum : undefined,
         adminId: isAdmin ? adminIdNum : undefined,
@@ -230,7 +231,7 @@ export function RequestsPage() {
       await fetchChangeRequests({
         limit: pagination.limit,
         fromId: pagination.fromId,
-        state: stateTrim,
+        state: apiState,
         q: qTrim,
         userId: isAdmin ? userIdNum : undefined,
         adminId: isAdmin ? adminIdNum : undefined,
@@ -253,8 +254,8 @@ export function RequestsPage() {
           ? changeRows(ch)
           : mergeByIdDesc(reg, ch, pagination.limit);
 
-    return visibleRequestRows(raw, stateTrim);
-  }, [ch, pagination.limit, reg, stateTrim, type]);
+    return visibleRequestRows(raw, stateFilter);
+  }, [ch, pagination.limit, reg, stateFilter, type]);
 
   const visibleKeys = useMemo(() => new Set(rows.map((r) => requestKey(r))), [rows]);
   const allVisibleExpanded = rows.length > 0 && rows.every((r) => expandedKeys.has(requestKey(r)));
@@ -329,10 +330,11 @@ export function RequestsPage() {
   }
 
   const selectedRows = useMemo(() => rows.filter((row) => selectedKeys.has(requestKey(row))), [rows, selectedKeys]);
+  const bulkCorrectionAllowed = selectedRows.length > 0 && selectedRows.every((row) => requestType(row) === 'registration' && row.state !== 'pending_correction');
   const bulkNeedsReason = bulkAction === 'deny' || bulkAction === 'request_correction';
 
   async function applyBulkAction() {
-    if (selectedRows.length === 0 || bulkSubmitting) return;
+    if (selectedRows.length === 0 || bulkSubmitting || (bulkAction === 'request_correction' && !bulkCorrectionAllowed)) return;
     const reason = bulkReason.trim();
     if (bulkNeedsReason && !reason) {
       toasts.pushToast({ variant: 'danger', title: t('requests.bulk.reason_required') });
@@ -724,7 +726,7 @@ export function RequestsPage() {
     if (st) {
       suggestions.push({
         id: `state.${st}`,
-        primary: t('requests.smart.suggest.state', { state: t(requestStateLabelKey(st)) }),
+        primary: t('requests.smart.suggest.state', { state: st === ALL_ADMIN_REQUEST_STATES ? t('requests.list.filter.state.all') : t(requestStateLabelKey(st)) }),
         secondary: `state:${st}`,
         onPick: () => {
           setState(st);
@@ -787,8 +789,6 @@ export function RequestsPage() {
       />
     );
   }
-
-
   return (
     <ListShell
       testId="admin.requests.list"
@@ -833,7 +833,6 @@ export function RequestsPage() {
           collapseAllVisible={collapseAllVisible}
         />
       }
-
     >
       {isAdmin && rows.length > 0 ? (
         <RequestsBulkActions
@@ -842,6 +841,7 @@ export function RequestsPage() {
           action={bulkAction}
           reason={bulkReason}
           needsReason={bulkNeedsReason}
+          correctionAllowed={bulkCorrectionAllowed}
           submitting={bulkSubmitting}
           onActionChange={setBulkAction}
           onReasonChange={setBulkReason}

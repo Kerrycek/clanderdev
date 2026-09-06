@@ -22,6 +22,8 @@ import { UserLookupInput } from '../../../components/ui/UserLookupInput';
 import type { ToneVariant } from '../../../components/ui/tone';
 
 import {
+  ALL_ADMIN_REQUEST_STATES,
+  DEFAULT_ADMIN_REQUEST_STATE,
   defaultStateOptions,
   safeNumber,
   type RequestTypeFilter,
@@ -87,14 +89,16 @@ export function RequestsFilters(props: {
       );
     }
 
-    if (stateTrim) {
-      const tone = (tableVariantFromBadgeVariant(requestStateBadgeVariant(stateTrim)) ?? 'neutral') as ToneVariant;
+    if (stateTrim && stateTrim !== DEFAULT_ADMIN_REQUEST_STATE) {
+      const tone = stateTrim === ALL_ADMIN_REQUEST_STATES
+        ? 'neutral'
+        : (tableVariantFromBadgeVariant(requestStateBadgeVariant(stateTrim)) ?? 'neutral') as ToneVariant;
       chips.push(
         <FilterChip
           key="state"
-          label={`state:${t(requestStateLabelKey(stateTrim))}`}
+          label={`state:${stateTrim === ALL_ADMIN_REQUEST_STATES ? t('requests.list.filter.state.all') : t(requestStateLabelKey(stateTrim))}`}
           tone={tone}
-          onRemove={() => props.setState('')}
+          onRemove={() => props.setState(DEFAULT_ADMIN_REQUEST_STATE)}
           testId="admin.requests.chip.state"
         />
       );
@@ -271,7 +275,8 @@ export function RequestsFilters(props: {
           <Button
             variant={props.state === 'awaiting' ? 'primary' : 'secondary'}
             size="sm"
-            onClick={() => props.setState(props.state === 'awaiting' ? '' : 'awaiting')}
+            onClick={() => props.setState(DEFAULT_ADMIN_REQUEST_STATE)}
+            aria-pressed={props.state === DEFAULT_ADMIN_REQUEST_STATE}
             testId="admin.requests.quick.awaiting"
           >
             {t(requestStateLabelKey('awaiting'))}
@@ -280,7 +285,8 @@ export function RequestsFilters(props: {
           <Button
             variant={props.state === 'pending_correction' ? 'primary' : 'secondary'}
             size="sm"
-            onClick={() => props.setState(props.state === 'pending_correction' ? '' : 'pending_correction')}
+            onClick={() => props.setState(props.state === 'pending_correction' ? DEFAULT_ADMIN_REQUEST_STATE : 'pending_correction')}
+            aria-pressed={props.state === 'pending_correction'}
             testId="admin.requests.quick.pending_correction"
           >
             {t(requestStateLabelKey('pending_correction'))}
@@ -349,14 +355,16 @@ export function RequestsFilters(props: {
                 <div className="text-sm font-medium">{t('requests.list.filter.state.label')}</div>
                 <div className="mt-1">
                   <Select value={props.state} onChange={(event) => props.setState(event.target.value)} aria-label={t('requests.list.filter.state.aria')}>
-                    <option value="">{t('requests.list.filter.state.open')}</option>
                     {defaultStateOptions()
                       .filter((value) => value)
                       .map((value) => (
                         <option key={value} value={value}>
-                          {t(requestStateLabelKey(value))}
+                          {value === DEFAULT_ADMIN_REQUEST_STATE
+                            ? t('requests.list.filter.state.open')
+                            : t(requestStateLabelKey(value))}
                         </option>
                       ))}
+                    <option value={ALL_ADMIN_REQUEST_STATES}>{t('requests.list.filter.state.all')}</option>
                   </Select>
                 </div>
               </div>

@@ -14,6 +14,7 @@ export function RequestsBulkActions(props: {
   action: ResolveUserRequestAction;
   reason: string;
   needsReason: boolean;
+  correctionAllowed: boolean;
   submitting: boolean;
   onActionChange: (action: ResolveUserRequestAction) => void;
   onReasonChange: (reason: string) => void;
@@ -24,6 +25,7 @@ export function RequestsBulkActions(props: {
 }) {
   const { t } = useI18n();
   const missingReason = props.needsReason && !props.reason.trim();
+  const actionAllowed = props.action !== 'request_correction' || props.correctionAllowed;
 
   return (
     <Card className="mb-4" testId="admin.requests.bulk">
@@ -52,7 +54,7 @@ export function RequestsBulkActions(props: {
             <option value="approve">{t('requests.resolve.action.approve')}</option>
             <option value="deny">{t('requests.resolve.action.deny')}</option>
             <option value="ignore">{t('requests.resolve.action.ignore')}</option>
-            <option value="request_correction">
+            <option value="request_correction" disabled={!props.correctionAllowed}>
               {t('requests.resolve.action.request_correction')}
             </option>
           </Select>
@@ -97,7 +99,7 @@ export function RequestsBulkActions(props: {
               variant={requestActionVariant(props.action)}
               onClick={props.onApply}
               loading={props.submitting}
-              disabled={props.selectedRowsLength === 0 || missingReason}
+              disabled={props.selectedRowsLength === 0 || missingReason || !actionAllowed}
               testId="admin.requests.bulk.apply"
             >
               {t('requests.bulk.apply')}

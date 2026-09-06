@@ -65,18 +65,20 @@ export function requestOperationalLinks(request: ReviewableRequest | undefined) 
 }
 
 export function requestReviewActions(
+  reqType: RequestReviewType,
   request: ReviewableRequest | undefined,
   isAdmin: boolean,
 ): ResolveUserRequestAction[] {
   if (!isAdmin || !request) return [];
   const state = String(request.state ?? '').trim();
+  const canRequestCorrection = reqType === 'registration';
 
-  if (state === 'approved') return ['deny', 'ignore', 'request_correction'];
-  if (state === 'denied') return ['approve', 'ignore', 'request_correction'];
-  if (state === 'ignored') return ['approve', 'deny', 'request_correction'];
+  if (state === 'approved') return canRequestCorrection ? ['deny', 'ignore', 'request_correction'] : ['deny', 'ignore'];
+  if (state === 'denied') return canRequestCorrection ? ['approve', 'ignore', 'request_correction'] : ['approve', 'ignore'];
+  if (state === 'ignored') return canRequestCorrection ? ['approve', 'deny', 'request_correction'] : ['approve', 'deny'];
 
   const actions: ResolveUserRequestAction[] = ['approve', 'deny', 'ignore'];
-  if (state === 'awaiting' || state === 'pending_correction') {
+  if (canRequestCorrection && state === 'awaiting') {
     actions.push('request_correction');
   }
   return actions;
