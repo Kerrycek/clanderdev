@@ -21,7 +21,7 @@ import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { Modal } from '../../../components/ui/Modal';
 
-import { fetchTransactionChains } from '../../../lib/api/transactions';
+import { fetchActiveTransactionChains } from '../../../lib/api/transactions';
 import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   createDatasetSnapshot,
@@ -144,18 +144,18 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   const rollbackUncertainLock = (chrome.localLocks ?? []).find((lock) =>
     lock.kind === datasetRef.kind && lock.id === datasetRef.id && lock.uncertain === true
   );
-
   const reconcileRollbackOutcome = (): Promise<MutationReconcileResult> =>
     reconcileDatasetSnapshotRollback({
       datasetId: dataset.id,
+      fetchActiveChains: () => fetchActiveTransactionChains({ className: 'Dataset', rowId: dataset.id }),
       refetchChains,
       refetchDataset,
       refetchSnapshots: snapsQ.refetch,
     });
 
   async function preflightDatasetNotBusy(targetDatasetId = dataset.id) {
-    const chainsRes = await fetchTransactionChains({ className: 'Dataset', rowId: targetDatasetId, limit: 10 });
-    if (hasActiveChains(chainsRes.data)) {
+    const activeChains = await fetchActiveTransactionChains({ className: 'Dataset', rowId: targetDatasetId });
+    if (hasActiveChains(activeChains)) {
       const err: any = new Error(t('toast.action_blocked.body'));
       err.code = 'BUSY';
       throw err;

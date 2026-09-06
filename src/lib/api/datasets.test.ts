@@ -8,6 +8,7 @@ import {
   fetchDatasetSnapshots,
   fetchDatasets,
   fetchSnapshotDownloads,
+  rollbackDatasetSnapshot,
   updateDataset,
 } from './datasets';
 
@@ -86,6 +87,28 @@ describe('datasets API wrappers', () => {
 
     const body = JSON.parse(String(init?.body));
     expect(body).toEqual({ snapshot: { label: 'before-upgrade' } });
+  });
+
+  test('rollback requires a valid action-state id', async () => {
+    setMockRuntime();
+    vi.stubGlobal('fetch', mockFetchOk({ ok: true, _meta: {} }));
+
+    await expect(rollbackDatasetSnapshot(123, 9)).rejects.toMatchObject({
+      code: 'MISSING_ACTION_STATE',
+    });
+  });
+
+  test('rollback accepts and preserves a valid action-state id', async () => {
+    setMockRuntime();
+    const fetchMock = mockFetchOk({ _meta: { action_state_id: 812 } });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(rollbackDatasetSnapshot(123, 9)).resolves.toMatchObject({
+      meta: { action_state_id: 812 },
+    });
+    const [url, init] = firstFetchCall(fetchMock);
+    expect(String(url)).toContain('/v7.0/datasets/123/snapshots/9/rollback');
+    expect(init?.method).toBe('POST');
   });
 
   test('createDataset sends dataset namespace with parent and properties', async () => {

@@ -48,11 +48,6 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
           ) : null}
           {props.datasets.map((dataset) => {
             const selected = props.selectedDataset?.id === dataset.id;
-            const snapshotCount = typeof dataset.snapshots_count === 'number'
-              && Number.isFinite(dataset.snapshots_count)
-              && dataset.snapshots_count >= 0
-              ? dataset.snapshots_count
-              : undefined;
             return (
               <button
                 key={dataset.id}
@@ -78,14 +73,6 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
                 {dataset.vps ? (
                   <div className="mt-2 truncate text-sm text-muted">
                     {t('backups.vps')}: {resourceLabel(dataset.vps)}
-                  </div>
-                ) : null}
-                {props.section === 'snapshots' && snapshotCount !== undefined ? (
-                  <div
-                    className="mt-2 text-xs font-medium text-muted"
-                    data-testid={`backups.snapshots.row.${dataset.id}.count`}
-                  >
-                    {t('backups.workspace.datasets.snapshot_count', { count: snapshotCount })}
                   </div>
                 ) : null}
               </button>

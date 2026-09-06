@@ -1,4 +1,4 @@
-import { expectArray, haveApiCall } from './haveapi';
+import { expectArray, haveApiCall, requireActionStateResult } from './haveapi';
 
 /**
  * Datasets, snapshots and snapshot download links.
@@ -247,10 +247,11 @@ export async function deleteDatasetSnapshot(datasetId: number, snapshotId: numbe
 }
 
 export async function rollbackDatasetSnapshot(datasetId: number, snapshotId: number) {
-  return haveApiCall<void>({
+  const res = await haveApiCall<void>({
     method: 'POST',
     path: `/datasets/${datasetId}/snapshots/${snapshotId}/rollback`,
   });
+  return requireActionStateResult(res, 'dataset snapshot rollback');
 }
 
 export async function fetchSnapshotDownloads(opts?: {

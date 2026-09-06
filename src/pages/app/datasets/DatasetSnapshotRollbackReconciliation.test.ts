@@ -17,7 +17,8 @@ describe('reconcileDatasetSnapshotRollback', () => {
 
     await expect(reconcileDatasetSnapshotRollback({
       datasetId: 10,
-      refetchChains: () => success([]),
+      fetchActiveChains: () => Promise.resolve([]),
+      refetchChains: () => success([{ id: 80, state: 'done' }]),
       refetchDataset: () => success({ id: 10 }),
       refetchSnapshots,
     })).resolves.toBe('error');
@@ -27,7 +28,11 @@ describe('reconcileDatasetSnapshotRollback', () => {
   it('keeps the guard while a related transaction chain is active', async () => {
     await expect(reconcileDatasetSnapshotRollback({
       datasetId: 10,
-      refetchChains: () => success([{ id: 71, state: 'running' }]),
+      fetchActiveChains: () => Promise.resolve([{ id: 71, state: 'rollbacking' }]),
+      refetchChains: () => success(Array.from({ length: 10 }, (_, index) => ({
+        id: 90 - index,
+        state: 'done',
+      }))),
       refetchDataset: () => success({ id: 10 }),
       refetchSnapshots: () => success({ data: [{ id: 200 }] }),
     })).resolves.toBe('busy');
@@ -36,7 +41,8 @@ describe('reconcileDatasetSnapshotRollback', () => {
   it('clears only after all fresh state is readable and no chain is active', async () => {
     await expect(reconcileDatasetSnapshotRollback({
       datasetId: 10,
-      refetchChains: () => success([]),
+      fetchActiveChains: () => Promise.resolve([]),
+      refetchChains: () => success([{ id: 80, state: 'done' }]),
       refetchDataset: () => success({ data: [{ id: 10 }] }),
       refetchSnapshots: () => success({ data: [{ id: 200 }] }),
     })).resolves.toBe('clear');

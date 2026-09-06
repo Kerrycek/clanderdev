@@ -32,12 +32,14 @@ function readbackContainsDataset(value: unknown, datasetId: number): boolean {
  */
 export async function reconcileDatasetSnapshotRollback(args: {
   datasetId: number;
+  fetchActiveChains: () => Promise<unknown>;
   refetchChains: () => Promise<unknown>;
   refetchDataset: () => Promise<unknown>;
   refetchSnapshots: () => Promise<unknown>;
 }): Promise<DatasetSnapshotRollbackReconcileResult> {
   try {
-    const [chainsResult, datasetResult, snapshotsResult] = await Promise.all([
+    const [activeChains, chainsResult, datasetResult, snapshotsResult] = await Promise.all([
+      args.fetchActiveChains(),
       args.refetchChains(),
       args.refetchDataset(),
       args.refetchSnapshots(),
@@ -46,14 +48,15 @@ export async function reconcileDatasetSnapshotRollback(args: {
       || !isSuccessfulReadback(datasetResult)
       || !isSuccessfulReadback(snapshotsResult)) return 'error';
 
-    const chains = chainsResult.data;
+    const recentChains = chainsResult.data;
     const snapshotsEnvelope = snapshotsResult['data'];
-    if (!Array.isArray(chains)
+    if (!Array.isArray(activeChains)
+      || !Array.isArray(recentChains)
       || !readbackContainsDataset(datasetResult.data, args.datasetId)
       || !isRecord(snapshotsEnvelope)
       || !Array.isArray(snapshotsEnvelope['data'])) return 'error';
 
-    return hasActiveChains(chains as TransactionChain[]) ? 'busy' : 'clear';
+    return hasActiveChains(activeChains as TransactionChain[]) ? 'busy' : 'clear';
   } catch {
     return 'error';
   }

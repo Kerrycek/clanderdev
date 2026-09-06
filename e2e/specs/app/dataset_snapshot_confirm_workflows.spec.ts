@@ -283,8 +283,11 @@ test.describe('@smoke Dataset snapshots', () => {
 
         'POST datasets/10/snapshots/200/rollback': () => {
           rollbackCalls += 1;
-          return { ok: true };
+          return { _meta: { action_state_id: 720 } };
         },
+        'GET action_states/720': () => ({
+          action_state: { id: 720, finished: true, status: true, current: 1, total: 1 },
+        }),
       },
     });
 
@@ -304,7 +307,7 @@ test.describe('@smoke Dataset snapshots', () => {
     expect(rollbackCalls).toBe(1);
   });
 
-  test('an applied rollback with a lost response cannot be posted twice', async ({ page }) => {
+  test('an applied rollback outside recent history with a lost response cannot be posted twice', async ({ page }) => {
     let rollbackApplied = false;
     let rollbackCalls = 0;
     let datasetReadbacks = 0;
@@ -322,7 +325,6 @@ test.describe('@smoke Dataset snapshots', () => {
             id: 10,
             full_name: 'tank/vps/ds10',
             name: 'ds10',
-            snapshots_count: 1,
             object_state: 'active',
             vps: { id: 300, hostname: 'alpha.example' },
           };
@@ -339,12 +341,21 @@ test.describe('@smoke Dataset snapshots', () => {
             }],
           };
         },
-        'GET transaction_chains': () => {
-          if (rollbackApplied) chainReadbacks += 1;
+        'GET transaction_chains': ({ searchParams }) => {
+          const state = searchParams.get('transaction_chain[state]');
+          if (state) {
+            if (rollbackApplied) chainReadbacks += 1;
+            return {
+              transaction_chains: rollbackApplied && state === 'rollbacking'
+                ? [{ id: 801, state: 'rollbacking' }]
+                : [],
+            };
+          }
           return {
-            transaction_chains: rollbackApplied
-              ? [{ id: 801, state: 'running' }]
-              : [],
+            transaction_chains: Array.from({ length: 10 }, (_, index) => ({
+              id: 900 - index,
+              state: 'done',
+            })),
           };
         },
         'POST datasets/10/snapshots/200/rollback': () => {
@@ -383,6 +394,16 @@ test.describe('@smoke Dataset snapshots', () => {
       button.click();
     });
     await expect.poll(() => rollbackCalls).toBe(1);
+
+    await page.getByTestId('dataset.snapshots.rollback_confirm.cancel').click();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.open_tasks').click();
+    await expect(page.getByTestId('tasks.drawer')).toBeVisible();
+    await page.getByTestId('tasks.close-button').click();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain.error')).toContainText(
+      'still active',
+    );
+    await expect(visibleSnapshotAction(page, 200, 'rollback')).toHaveAttribute('aria-disabled', 'true');
   });
 
   test('delete snapshot uses a confirm dialog and removes the row', async ({ page }) => {
@@ -492,8 +513,11 @@ test.describe('@smoke Dataset snapshots', () => {
         }),
         'POST datasets/10/snapshots/200/rollback': () => {
           rollbackCalls += 1;
-          return { ok: true };
+          return { _meta: { action_state_id: 721 } };
         },
+        'GET action_states/721': () => ({
+          action_state: { id: 721, finished: true, status: true, current: 1, total: 1 },
+        }),
         'DELETE datasets/10/snapshots/200': () => {
           deleteCalls += 1;
           deleted = true;

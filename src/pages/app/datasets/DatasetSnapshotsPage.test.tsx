@@ -40,7 +40,7 @@ vi.mock('../../../components/layout/ChromeContext', () => ({
 }));
 
 vi.mock('../../../lib/api/transactions', () => ({
-  fetchTransactionChains: vi.fn(),
+  fetchActiveTransactionChains: vi.fn(),
 }));
 
 vi.mock('../../../lib/api/datasets', async (importOriginal) => {

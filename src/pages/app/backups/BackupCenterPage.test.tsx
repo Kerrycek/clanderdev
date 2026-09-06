@@ -83,8 +83,8 @@ describe('BackupCenterPage', () => {
     };
     datasetsMock.mockResolvedValue({
       data: [
-        { id: 10, name: 'root', snapshots_count: 2, vps: { id: 20, hostname: 'mail.example' } },
-        { id: 11, name: 'archive', snapshots_count: 0 },
+        { id: 10, name: 'root', vps: { id: 20, hostname: 'mail.example' } },
+        { id: 11, name: 'archive' },
       ],
       meta: { total_count: 2 },
     } as never);
@@ -146,9 +146,6 @@ describe('BackupCenterPage', () => {
     expect(screen.getByTestId('backups.restore.warning')).toBeVisible();
     expect(screen.getByTestId('backups.workspace.empty')).toHaveTextContent(
       'backups.restore.workspace.empty.title',
-    );
-    expect(screen.getByTestId('backups.snapshots.row.10.count')).toHaveTextContent(
-      'backups.workspace.datasets.snapshot_count',
     );
     expect(screen.queryByTestId('backups.workspace.snapshots')).not.toBeInTheDocument();
     expect(datasetsMock).toHaveBeenCalledTimes(1);
