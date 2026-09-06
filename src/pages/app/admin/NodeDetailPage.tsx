@@ -9,12 +9,14 @@ import {
   fetchNodes,
   fetchNodeStatuses,
   setNodeMaintenance,
+  setPoolMaintenance,
   type NodeEvacuateResult,
 } from '../../../lib/api/nodes';
 import { fetchActiveTransactionChains, fetchTransactions } from '../../../lib/api/transactions';
 import { fetchPublicNodeStatus } from '../../../lib/api/public';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
+import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
 import { DetailShell } from '../../../components/layout/DetailShell';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -59,6 +61,7 @@ import {
 
 export function NodeDetailPage() {
   const { mode, basePath } = useAppMode();
+  const auth = useAuth();
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const chrome = useChrome();
@@ -202,12 +205,21 @@ export function NodeDetailPage() {
     staleTime: 60000,
   });
 
+  const poolsQueryKey = ['nodes', 'pools', { nodeId, limit: 500 }] as const;
   const poolsQ = useQuery({
-    queryKey: ['nodes', 'pools', { nodeId, limit: 500 }],
+    queryKey: poolsQueryKey,
     queryFn: async () => (await fetchNodePools(nodeId, { limit: 500 })).data,
     enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'storage',
     refetchInterval: tierSlowRefetchMs,
   });
+
+  const refreshPoolsAfterMaintenance = async () => {
+    await queryClient.invalidateQueries({
+      queryKey: poolsQueryKey,
+      exact: true,
+      refetchType: 'active',
+    });
+  };
 
   const node = nodeQ.data;
   const title = node ? nodeTitle(node, nodeId) : `Node #${nodeId}`;
@@ -511,10 +523,13 @@ export function NodeDetailPage() {
                 t={t}
                 node={node}
                 pools={poolsQ.data ?? []}
+                canManageMaintenance={auth.role === 'admin'}
                 loading={poolsQ.isLoading}
                 fetching={poolsQ.isFetching}
                 error={poolsQ.error}
                 onRefresh={() => void poolsQ.refetch()}
+                onSetPoolMaintenance={setPoolMaintenance}
+                onPoolMaintenanceChanged={refreshPoolsAfterMaintenance}
               />
             </div>
           ) : null}

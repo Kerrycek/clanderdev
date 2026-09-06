@@ -23,6 +23,10 @@ vi.mock('../../../app/appMode', () => ({
   useAppMode: () => ({ mode: 'admin', basePath: '/admin' }),
 }));
 
+vi.mock('../../../app/auth', () => ({
+  useAuth: () => ({ role: 'admin' }),
+}));
+
 vi.mock('../../../app/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));

@@ -11,6 +11,7 @@ import {
   fetchNodePools,
   fetchNodes,
   NodeCreateIndeterminateError,
+  setPoolMaintenance,
 } from './nodes';
 
 function mockFetchOk(response: any) {
@@ -66,6 +67,30 @@ describe('nodes API wrappers', () => {
     expect(u.pathname).toBe('/v7.0/pools');
     expect(u.searchParams.get('pool[node]')).toBe('12');
     expect(u.searchParams.get('pool[limit]')).toBe('100');
+  });
+
+  test('setPoolMaintenance locks the selected pool with a reason', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({}));
+
+    await setPoolMaintenance(11, { lock: true, reason: 'Disk replacement' });
+
+    const [url, init] = lastFetchCall();
+    expect(new URL(String(url)).pathname).toBe('/v7.0/pools/11/set_maintenance');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      pool: { lock: true, reason: 'Disk replacement' },
+    });
+  });
+
+  test('setPoolMaintenance unlocks without sending a reason', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({}));
+
+    await setPoolMaintenance(12, { lock: false });
+
+    const [url, init] = lastFetchCall();
+    expect(new URL(String(url)).pathname).toBe('/v7.0/pools/12/set_maintenance');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ pool: { lock: false } });
   });
 
   test('marks an HTTP 5xx node create result indeterminate', async () => {

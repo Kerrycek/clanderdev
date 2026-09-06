@@ -119,6 +119,8 @@ export interface NodePool {
   used_space?: number;
   available_space?: number;
   checked_at?: string;
+  maintenance_lock?: 'no' | 'lock' | 'master_lock' | string;
+  maintenance_lock_reason?: string;
   [k: string]: unknown;
 }
 
@@ -354,6 +356,15 @@ export async function fetchNodePools(nodeId: number, opts?: { limit?: number }) 
   }
 
   return { ...res, data: expectArray<NodePool>(list, `nodes/${nodeId}/pools`) };
+}
+
+export async function setPoolMaintenance(poolId: number, opts: { lock: boolean; reason?: string }) {
+  return haveApiCall<void>({
+    method: 'POST',
+    path: `/pools/${poolId}/set_maintenance`,
+    namespace: 'pool',
+    params: { lock: opts.lock, reason: opts.reason },
+  });
 }
 
 export async function setNodeMaintenance(nodeId: number, opts: { lock: boolean; reason?: string }) {
