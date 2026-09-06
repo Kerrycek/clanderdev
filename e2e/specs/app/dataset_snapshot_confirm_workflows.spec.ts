@@ -293,7 +293,7 @@ test.describe('@smoke Dataset snapshots', () => {
     await expect(page.getByTestId('dataset.snapshots.list')).toBeVisible();
     await expect(page.getByTestId('dataset.snapshots.row.200')).toBeVisible();
 
-    await page.getByTestId('dataset.snapshots.row.200.rollback').click();
+    await visibleSnapshotAction(page, 200, 'rollback').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeVisible();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm.confirm')).toBeDisabled();
     await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('snap-200');
@@ -302,6 +302,87 @@ test.describe('@smoke Dataset snapshots', () => {
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
 
     expect(rollbackCalls).toBe(1);
+  });
+
+  test('an applied rollback with a lost response cannot be posted twice', async ({ page }) => {
+    let rollbackApplied = false;
+    let rollbackCalls = 0;
+    let datasetReadbacks = 0;
+    let snapshotReadbacks = 0;
+    let chainReadbacks = 0;
+
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 99 },
+      handlers: {
+        'GET datasets/10': () => {
+          if (rollbackApplied) datasetReadbacks += 1;
+          return {
+            id: 10,
+            full_name: 'tank/vps/ds10',
+            name: 'ds10',
+            snapshots_count: 1,
+            object_state: 'active',
+            vps: { id: 300, hostname: 'alpha.example' },
+          };
+        },
+        'GET datasets/10/snapshots': () => {
+          if (rollbackApplied) snapshotReadbacks += 1;
+          return {
+            snapshots: [{
+              id: 200,
+              dataset: 10,
+              name: 'snap-200',
+              label: 'snap-200',
+              created_at: '2026-01-26T00:00:00.000Z',
+            }],
+          };
+        },
+        'GET transaction_chains': () => {
+          if (rollbackApplied) chainReadbacks += 1;
+          return {
+            transaction_chains: rollbackApplied
+              ? [{ id: 801, state: 'running' }]
+              : [],
+          };
+        },
+        'POST datasets/10/snapshots/200/rollback': () => {
+          rollbackCalls += 1;
+          rollbackApplied = true;
+          return {
+            status: 503,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              status: false,
+              message: 'rollback response was lost',
+              response: null,
+            }),
+          };
+        },
+      },
+    });
+
+    await page.goto('/admin/datasets/10/snapshots');
+    await visibleSnapshotAction(page, 200, 'rollback').click();
+    await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('snap-200');
+    await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
+
+    const confirm = page.getByTestId('dataset.snapshots.rollback_confirm.confirm');
+    await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeVisible();
+    await expect(confirm).toBeDisabled();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await expect.poll(() => datasetReadbacks).toBeGreaterThan(0);
+    await expect.poll(() => snapshotReadbacks).toBeGreaterThan(0);
+    await expect.poll(() => chainReadbacks).toBeGreaterThan(0);
+
+    // Even a synthetic click cannot bypass the event-handler guard while the
+    // durable uncertainty marker is active.
+    await confirm.evaluate((button) => {
+      button.removeAttribute('disabled');
+      button.click();
+    });
+    await expect.poll(() => rollbackCalls).toBe(1);
   });
 
   test('delete snapshot uses a confirm dialog and removes the row', async ({ page }) => {

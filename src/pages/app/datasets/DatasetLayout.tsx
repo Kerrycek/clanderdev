@@ -151,7 +151,7 @@ export function DatasetLayout() {
     <DatasetContextProvider
       value={{
         dataset: ds,
-        refetch: () => void q.refetch(),
+        refetch: () => q.refetch(),
         section,
         listPath,
         detailPath,
@@ -163,7 +163,7 @@ export function DatasetLayout() {
         busyTransaction,
         chainsStale,
         activeChainIds,
-        refetchChains: () => void chainsQ.refetch(),
+        refetchChains: () => chainsQ.refetch(),
       }}
     >
       <DetailShell>

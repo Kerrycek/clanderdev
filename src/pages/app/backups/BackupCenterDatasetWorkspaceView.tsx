@@ -24,7 +24,7 @@ interface BackupCenterDatasetWorkspaceViewProps {
   restoreMode?: boolean;
   onSelect: (dataset: Dataset) => void;
   onClear: () => void;
-  onRefetch: () => void;
+  onRefetch: () => Promise<unknown>;
 }
 
 export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorkspaceViewProps) {

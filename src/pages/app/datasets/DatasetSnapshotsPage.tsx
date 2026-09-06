@@ -6,6 +6,10 @@ import { getRuntimeConfig } from '../../../app/config';
 import { useI18n } from '../../../app/i18n';
 
 import { useChrome } from '../../../components/layout/ChromeContext';
+import {
+  MutationUncertaintyPanel,
+  type MutationReconcileResult,
+} from '../../../components/layout/MutationUncertaintyPanel';
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 import { ActionButton } from '../../../components/ui/ActionButton';
@@ -18,7 +22,7 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { Modal } from '../../../components/ui/Modal';
 
 import { fetchTransactionChains } from '../../../lib/api/transactions';
-import { getMetaActionStateId } from '../../../lib/api/haveapi';
+import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   createDatasetSnapshot,
   createSnapshotDownload,
@@ -33,6 +37,7 @@ import { formatErrorMessage } from '../../../lib/errors';
 import { formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
+import type { ObjectRef } from '../../../lib/objectRef';
 import { hasActiveChains } from '../../../lib/taskStatus';
 
 import { useDatasetContext } from './DatasetContext';
@@ -51,9 +56,17 @@ import {
   DatasetSnapshotConfirmDialog,
   type DatasetSnapshotConfirmState,
 } from './DatasetSnapshotConfirmDialog';
+import { reconcileDatasetSnapshotRollback } from './DatasetSnapshotRollbackReconciliation';
 
 /** Empty prefix preserves the existing dataset-detail URL contract. */
 export type DatasetSnapshotsPageProps = { queryParamPrefix?: string };
+
+type RollbackSnapshotRequest = {
+  datasetId: number;
+  snapshotId: number;
+  lockRef: ObjectRef;
+  objectLabel: string;
+};
 
 export function datasetSnapshotQueryParamKeys(prefix = '') {
   return {
@@ -117,10 +130,10 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   }, [queryKeys.action, searchParams, setSearchParams]);
 
   const [createdDownload, setCreatedDownload] = useState<SnapshotDownload | null>(null);
-
   const [confirm, setConfirm] = useState<DatasetSnapshotConfirmState>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [rollbackOutcomeUncertain, setRollbackOutcomeUncertain] = useState(false);
 
   const snapsQ = useQuery({
     queryKey: ['datasets', dataset.id, 'snapshots', { limit: pagination.limit, fromId: pagination.fromId, q: qstr.trim() }],
@@ -128,8 +141,20 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
       fetchDatasetSnapshots(dataset.id, { limit: pagination.limit, fromId: pagination.fromId, q: qstr.trim() || undefined }),
   });
 
-  async function preflightDatasetNotBusy() {
-    const chainsRes = await fetchTransactionChains({ className: 'Dataset', rowId: dataset.id, limit: 10 });
+  const rollbackUncertainLock = (chrome.localLocks ?? []).find((lock) =>
+    lock.kind === datasetRef.kind && lock.id === datasetRef.id && lock.uncertain === true
+  );
+
+  const reconcileRollbackOutcome = (): Promise<MutationReconcileResult> =>
+    reconcileDatasetSnapshotRollback({
+      datasetId: dataset.id,
+      refetchChains,
+      refetchDataset,
+      refetchSnapshots: snapsQ.refetch,
+    });
+
+  async function preflightDatasetNotBusy(targetDatasetId = dataset.id) {
+    const chainsRes = await fetchTransactionChains({ className: 'Dataset', rowId: targetDatasetId, limit: 10 });
     if (hasActiveChains(chainsRes.data)) {
       const err: any = new Error(t('toast.action_blocked.body'));
       err.code = 'BUSY';
@@ -174,32 +199,38 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   });
 
   const rollbackSnap = useMutation({
-    mutationFn: async (snapshotId: number) => {
-      await preflightDatasetNotBusy();
-      return rollbackDatasetSnapshot(dataset.id, snapshotId);
+    mutationFn: async (request: RollbackSnapshotRequest) => {
+      await preflightDatasetNotBusy(request.datasetId);
+      return rollbackDatasetSnapshot(request.datasetId, request.snapshotId);
     },
-    onMutate: () => {
-      chrome.acquireLocalLock(datasetRef);
-    },
-    onSuccess: (r) => {
+    onMutate: async (request) => ({
+      lockRef: request.lockRef,
+      mutationGeneration: await chrome.acquireLocalLock(request.lockRef, { durable: true }),
+    }),
+    onSuccess: (r, request, context) => {
       const asId = getMetaActionStateId(r.meta);
       if (asId !== undefined)
         chrome.trackActionState(asId, {
           actionLabelKey: 'action.dataset.snapshot.rollback.label',
-          objectLabel: datasetLabelForToast,
-          object: datasetRef,
+          objectLabel: request.objectLabel,
+          object: context?.lockRef,
+          mutationGeneration: context?.mutationGeneration,
           progressTitleKey: 'modal.dataset.snapshot.rollback.title',
         });
 
+      setRollbackOutcomeUncertain(false);
       snapsQ.refetch();
       refetchDataset();
       refetchChains();
     },
-    onSettled: () => {
-      chrome.releaseLocalLock(datasetRef);
+    onSettled: (_data, error, _request, context) => {
+      if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
-    onError: (err: any) => {
+    onError: async (err: any) => {
       if (err?.code === 'BUSY') chrome.openTasks();
+      if (!isAmbiguousMutationError(err)) return;
+      setRollbackOutcomeUncertain(true);
+      await reconcileRollbackOutcome();
     },
   });
 
@@ -283,6 +314,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
 
   function openConfirm(next: NonNullable<DatasetSnapshotConfirmState>) {
     setConfirmError(null);
+    if (next.kind === 'rollback') setRollbackOutcomeUncertain(false);
     setConfirm(next);
   }
 
@@ -323,6 +355,12 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
 
   return (
     <div className="space-y-6" data-testid="dataset.snapshots.list">
+      <MutationUncertaintyPanel
+        object={datasetRef}
+        lock={rollbackUncertainLock}
+        reconcile={reconcileRollbackOutcome}
+        testIdPrefix="dataset.snapshots.rollback_uncertain"
+      />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-fg">{t('dataset.snapshots.title')}</h2>
@@ -642,22 +680,34 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
         confirm={confirm}
         gate={confirmGate}
         busy={confirmBusy}
+        blocked={confirm?.kind === 'rollback'
+          && (rollbackOutcomeUncertain || rollbackUncertainLock !== undefined)}
         error={confirmError}
         onCancel={() => {
           if (confirmBusy) return;
           setConfirm(null);
           setConfirmError(null);
           setConfirmBusy(false);
+          setRollbackOutcomeUncertain(false);
         }}
         onConfirm={async (nextConfirm) => {
           setConfirmBusy(true);
           setConfirmError(null);
           try {
-            if (nextConfirm.kind === 'rollback') await rollbackSnap.mutateAsync(nextConfirm.snapshot.id);
+            if (nextConfirm.kind === 'rollback') await rollbackSnap.mutateAsync({
+              datasetId: dataset.id,
+              snapshotId: nextConfirm.snapshot.id,
+              lockRef: datasetRef,
+              objectLabel: datasetLabelForToast,
+            });
             else await deleteSnap.mutateAsync(nextConfirm.snapshot.id);
             setConfirm(null);
           } catch (e) {
-            setConfirmError(formatErrorMessage(e));
+            const ambiguousRollback = nextConfirm.kind === 'rollback' && isAmbiguousMutationError(e);
+            setRollbackOutcomeUncertain(ambiguousRollback);
+            setConfirmError(ambiguousRollback
+              ? t('dataset.snapshots.confirm.rollback.uncertain')
+              : formatErrorMessage(e));
           } finally {
             setConfirmBusy(false);
           }

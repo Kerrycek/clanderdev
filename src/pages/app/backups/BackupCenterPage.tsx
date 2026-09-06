@@ -461,7 +461,7 @@ export function BackupCenterPage() {
                 restoreMode={tab === 'snapshots' && intent === 'restore'}
                 onSelect={selectDataset}
                 onClear={clearDatasetSelection}
-                onRefetch={() => void datasetsQ.refetch()}
+                onRefetch={() => datasetsQ.refetch()}
               />
             ) : (
               <EmptyState

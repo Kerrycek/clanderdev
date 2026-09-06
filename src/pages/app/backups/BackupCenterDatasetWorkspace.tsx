@@ -61,7 +61,7 @@ export function BackupCenterDatasetWorkspace(props: BackupCenterDatasetWorkspace
     <DatasetContextProvider
       value={{
         dataset: props.dataset,
-        refetch: () => void props.refetch(),
+        refetch: async () => props.refetch(),
         section,
         listPath,
         detailPath,
@@ -73,7 +73,7 @@ export function BackupCenterDatasetWorkspace(props: BackupCenterDatasetWorkspace
         busyTransaction: chainLock.busy,
         chainsStale: chainLock.stale,
         activeChainIds: chainLock.activeChainIds,
-        refetchChains: () => void chainsQ.refetch(),
+        refetchChains: () => chainsQ.refetch(),
       }}
     >
       <div className="space-y-4">

@@ -25,6 +25,7 @@ export function DatasetSnapshotConfirmDialog(props: {
   confirm: DatasetSnapshotConfirmState;
   gate: GateDecision | null;
   busy: boolean;
+  blocked?: boolean;
   error: string | null;
   onCancel: () => void;
   onConfirm: (confirm: Exclude<DatasetSnapshotConfirmState, null>) => void;
@@ -61,11 +62,12 @@ export function DatasetSnapshotConfirmDialog(props: {
       confirmLabel={props.confirm?.kind === 'rollback' ? t('common.rollback') : t('common.delete')}
       danger
       confirmLoading={props.busy}
-      confirmDisabled={props.busy || !confirmationMatches || (props.gate ? !props.gate.allowed : false)}
+      confirmDisabled={props.busy || props.blocked || !confirmationMatches || (props.gate ? !props.gate.allowed : false)}
       cancelDisabled={props.busy}
       onCancel={props.onCancel}
       onConfirm={() => {
-        if (!props.confirm || props.busy || !confirmationMatches || (props.gate && !props.gate.allowed)) return;
+        if (!props.confirm || props.busy || props.blocked || !confirmationMatches
+          || (props.gate && !props.gate.allowed)) return;
         props.onConfirm(props.confirm);
       }}
     >
@@ -76,7 +78,7 @@ export function DatasetSnapshotConfirmDialog(props: {
           value={rollbackConfirmation}
           onChange={(event) => setRollbackConfirmation(event.target.value)}
           autoComplete="off"
-          disabled={props.busy}
+          disabled={props.busy || props.blocked}
           testId="dataset.snapshots.rollback_confirm.input"
         />
       ) : null}
