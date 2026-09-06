@@ -1,6 +1,13 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { fetchTransaction, fetchTransactionChain, fetchTransactionChains, fetchTransactions } from './transactions';
+import {
+  fetchDatasetSnapshotRollbackChains,
+  fetchLatestDatasetTransactionChains,
+  fetchTransaction,
+  fetchTransactionChain,
+  fetchTransactionChains,
+  fetchTransactions,
+} from './transactions';
 
 function mockFetchOk(response: any) {
   return vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: true, response }) });
@@ -41,6 +48,43 @@ describe('transactions API wrappers', () => {
     expect(u.searchParams.get('transaction_chain[user]')).toBe('7');
     expect(u.searchParams.get('transaction_chain[user_session]')).toBe('44');
     expect(u.searchParams.get('_meta[count]')).toBe('true');
+  });
+
+  test('reads both dataset snapshot rollback chain names in the Dataset scope', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({
+        status: true,
+        response: { transaction_chain: [{ id: 81, name: 'rollback', state: 'done' }] },
+      }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({
+        status: true,
+        response: { transaction_chain: [{ id: 82, name: 'restore', state: 'done' }] },
+      }) });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await expect(fetchDatasetSnapshotRollbackChains(123)).resolves.toEqual({
+      rollback: [{ id: 81, name: 'rollback', state: 'done' }],
+      restore: [{ id: 82, name: 'restore', state: 'done' }],
+    });
+    const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url)));
+    expect(urls.map((url) => url.searchParams.get('transaction_chain[name]')).sort())
+      .toEqual(['restore', 'rollback']);
+    for (const url of urls) {
+      expect(url.searchParams.get('transaction_chain[class_name]')).toBe('Dataset');
+      expect(url.searchParams.get('transaction_chain[row_id]')).toBe('123');
+      expect(url.searchParams.get('transaction_chain[limit]')).toBe('100');
+    }
+  });
+
+  test('reads one latest Dataset chain as a global rollback high-water mark', async () => {
+    globalThis.fetch = mockFetchOk({ transaction_chain: [{ id: 83, state: 'done' }] }) as typeof fetch;
+
+    await expect(fetchLatestDatasetTransactionChains(123)).resolves.toEqual([{ id: 83, state: 'done' }]);
+    const url = lastFetchUrl();
+    expect(url.searchParams.get('transaction_chain[limit]')).toBe('1');
+    expect(url.searchParams.get('transaction_chain[class_name]')).toBe('Dataset');
+    expect(url.searchParams.get('transaction_chain[row_id]')).toBe('123');
+    expect(url.searchParams.get('transaction_chain[name]')).toBeNull();
   });
 
   test('fetchTransactions forwards transaction-chain debug filters', async () => {

@@ -245,12 +245,14 @@ test.describe('Backup center', () => {
     expect(rollbackCalls).toBe(1);
   });
 
-  test('@pr-smoke @pr-smoke-mobile fails closed when embedded rollback omits its action-state proof', async ({ page }, testInfo) => {
+  test('@pr-smoke @pr-smoke-mobile reconciles delayed rollback visibility without a second POST', async ({ page }, testInfo) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     let rollbackApplied = false;
     let rollbackCalls = 0;
     let datasetReadbacks = 0;
     let snapshotReadbacks = 0;
+    let finishedEvidenceVisible = false;
+    let postSubmitMatchingReadbacks = 0;
     const activeStateReadbacks: string[] = [];
 
     await installHaveApiMock(page, {
@@ -272,18 +274,27 @@ test.describe('Backup center', () => {
           };
         },
         'GET transaction_chains': ({ searchParams }) => {
+          const name = searchParams.get('transaction_chain[name]');
           const state = searchParams.get('transaction_chain[state]');
-          if (state) {
-            if (rollbackApplied) activeStateReadbacks.push(state);
+          if (name === 'rollback' || name === 'restore') {
+            if (rollbackApplied) postSubmitMatchingReadbacks += 1;
+            const previous = name === 'rollback'
+              ? [{ id: 700, name: 'rollback', state: 'done' }]
+              : [{ id: 650, name: 'restore', state: 'done' }];
             return {
-              transaction_chains: rollbackApplied && state === 'rollbacking'
-                ? [{ id: 801, state: 'rollbacking' }]
-                : [],
+              transaction_chains: finishedEvidenceVisible && name === 'restore'
+                ? [{ id: 701, name: 'restore', state: 'done' }, ...previous]
+                : previous,
             };
           }
+          if (state) {
+            if (rollbackApplied) activeStateReadbacks.push(state);
+            return { transaction_chains: [] };
+          }
+          const limit = Number(searchParams.get('transaction_chain[limit]') ?? 10);
           return {
-            transaction_chains: Array.from({ length: 10 }, (_, index) => ({
-              id: 900 - index,
+            transaction_chains: Array.from({ length: limit }, (_, index) => ({
+              id: 700 - index,
               state: 'done',
             })),
           };
@@ -321,12 +332,45 @@ test.describe('Backup center', () => {
     await expect.poll(() => datasetReadbacks).toBeGreaterThan(0);
     await expect.poll(() => snapshotReadbacks).toBeGreaterThan(0);
     await expect.poll(() => activeStateReadbacks.includes('rollbacking')).toBe(true);
+    await expect.poll(() => postSubmitMatchingReadbacks).toBeGreaterThan(0);
 
     await confirm.evaluate((button) => {
       button.removeAttribute('disabled');
       button.click();
     });
     await expect.poll(() => rollbackCalls).toBe(1);
+
+    await page.getByTestId('dataset.snapshots.rollback_confirm.cancel').click();
+    const persistedIntent = await page.evaluate(() => {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key?.includes('.uncertain.Dataset%3A10.')) continue;
+        const raw = window.localStorage.getItem(key);
+        if (raw) return JSON.parse(raw).intent;
+      }
+      return null;
+    });
+    expect(persistedIntent).toEqual({
+      type: 'dataset-snapshot-rollback',
+      snapshotId: 31,
+      baselineTransactionChainId: 700,
+    });
+
+    await page.reload();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.open_tasks').click();
+    await expect(page.getByTestId('tasks.drawer')).toBeVisible();
+    await page.getByTestId('tasks.close-button').click();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain.error'))
+      .toContainText('could not be loaded');
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+
+    finishedEvidenceVisible = true;
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeHidden();
+    await expect(page.getByTestId(`dataset.snapshots.${layout}.31.rollback`)).toBeEnabled();
+    expect(rollbackCalls).toBe(1);
   });
 
   test('keeps an administrator My view on explicit owned dataset requests', async ({ page }) => {

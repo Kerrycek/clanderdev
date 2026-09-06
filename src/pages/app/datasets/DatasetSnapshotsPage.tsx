@@ -4,7 +4,6 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../../app/auth';
 import { getRuntimeConfig } from '../../../app/config';
 import { useI18n } from '../../../app/i18n';
-
 import { useChrome } from '../../../components/layout/ChromeContext';
 import {
   MutationUncertaintyPanel,
@@ -21,7 +20,11 @@ import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { Modal } from '../../../components/ui/Modal';
 
-import { fetchActiveTransactionChains } from '../../../lib/api/transactions';
+import {
+  fetchActiveTransactionChains,
+  fetchDatasetSnapshotRollbackChains,
+  fetchLatestDatasetTransactionChains,
+} from '../../../lib/api/transactions';
 import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   createDatasetSnapshot,
@@ -37,7 +40,6 @@ import { formatErrorMessage } from '../../../lib/errors';
 import { formatDateTime } from '../../../lib/format';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
-import type { ObjectRef } from '../../../lib/objectRef';
 import { hasActiveChains } from '../../../lib/taskStatus';
 
 import { useDatasetContext } from './DatasetContext';
@@ -56,17 +58,14 @@ import {
   DatasetSnapshotConfirmDialog,
   type DatasetSnapshotConfirmState,
 } from './DatasetSnapshotConfirmDialog';
-import { reconcileDatasetSnapshotRollback } from './DatasetSnapshotRollbackReconciliation';
+import {
+  prepareDatasetSnapshotRollbackIntent,
+  reconcileDatasetSnapshotRollback,
+  type DatasetSnapshotRollbackRequest,
+} from './DatasetSnapshotRollbackReconciliation';
 
 /** Empty prefix preserves the existing dataset-detail URL contract. */
 export type DatasetSnapshotsPageProps = { queryParamPrefix?: string };
-
-type RollbackSnapshotRequest = {
-  datasetId: number;
-  snapshotId: number;
-  lockRef: ObjectRef;
-  objectLabel: string;
-};
 
 export function datasetSnapshotQueryParamKeys(prefix = '') {
   return {
@@ -92,12 +91,9 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   const { t } = useI18n();
   const { role, user } = useAuth();
   const queryKeys = useMemo(() => datasetSnapshotQueryParamKeys(queryParamPrefix), [queryParamPrefix]);
-
   const datasetLabelForToast = String((dataset as any).label ?? (dataset as any).name ?? `Dataset #${dataset.id}`);
-
   const [searchParams, setSearchParams] = useSearchParams();
   const qstr = searchParams.get(queryKeys.search) ?? '';
-
   function changeQuery(nextQuery: string) {
     const next = new URLSearchParams(searchParams);
     const trimmed = nextQuery.trim();
@@ -105,7 +101,6 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
     else next.delete(queryKeys.search);
     if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
   }
-
   const pagination = useKeysetPagination({
     id: `dataset.snapshots.list${queryParamPrefix ? `.${queryParamPrefix}` : ''}`,
     filterKey: JSON.stringify({ datasetId: dataset.id, q: qstr.trim() }),
@@ -115,10 +110,8 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
     defaultLimit: 50,
     allowedLimits: [25, 50, 100],
   });
-
   const [createOpen, setCreateOpen] = useState(false);
   const [createLabel, setCreateLabel] = useState('');
-
   useEffect(() => {
     if (searchParams.get(queryKeys.action) !== 'create') return;
     setCreateOpen(true);
@@ -144,10 +137,12 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   const rollbackUncertainLock = (chrome.localLocks ?? []).find((lock) =>
     lock.kind === datasetRef.kind && lock.id === datasetRef.id && lock.uncertain === true
   );
-  const reconcileRollbackOutcome = (): Promise<MutationReconcileResult> =>
+  const reconcileRollbackOutcome = (intent = rollbackUncertainLock?.intent): Promise<MutationReconcileResult> =>
     reconcileDatasetSnapshotRollback({
       datasetId: dataset.id,
+      intent,
       fetchActiveChains: () => fetchActiveTransactionChains({ className: 'Dataset', rowId: dataset.id }),
+      fetchMatchingChains: () => fetchDatasetSnapshotRollbackChains(dataset.id),
       refetchChains,
       refetchDataset,
       refetchSnapshots: snapsQ.refetch,
@@ -197,16 +192,21 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
       if (err?.code === 'BUSY') chrome.openTasks();
     },
   });
-
   const rollbackSnap = useMutation({
-    mutationFn: async (request: RollbackSnapshotRequest) => {
-      await preflightDatasetNotBusy(request.datasetId);
-      return rollbackDatasetSnapshot(request.datasetId, request.snapshotId);
+    mutationFn: (request: DatasetSnapshotRollbackRequest) => rollbackDatasetSnapshot(request.datasetId, request.snapshotId),
+    onMutate: async (request) => {
+      const intent = await prepareDatasetSnapshotRollbackIntent({
+        snapshotId: request.snapshotId,
+        preflight: () => preflightDatasetNotBusy(request.datasetId),
+        fetchBaselineChains: () => fetchLatestDatasetTransactionChains(request.datasetId),
+        errorMessage: t('dataset.snapshots.confirm.rollback.baseline_failed'),
+      });
+      return {
+        lockRef: request.lockRef,
+        intent,
+        mutationGeneration: await chrome.acquireLocalLock(request.lockRef, { durable: true, intent }),
+      };
     },
-    onMutate: async (request) => ({
-      lockRef: request.lockRef,
-      mutationGeneration: await chrome.acquireLocalLock(request.lockRef, { durable: true }),
-    }),
     onSuccess: (r, request, context) => {
       const asId = getMetaActionStateId(r.meta);
       if (asId !== undefined)
@@ -226,11 +226,11 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
     onSettled: (_data, error, _request, context) => {
       if (context) chrome.settleLocalLock(context.lockRef, error, context.mutationGeneration);
     },
-    onError: async (err: any) => {
+    onError: async (err: any, _request, context) => {
       if (err?.code === 'BUSY') chrome.openTasks();
-      if (!isAmbiguousMutationError(err)) return;
+      if (!context || !isAmbiguousMutationError(err)) return;
       setRollbackOutcomeUncertain(true);
-      await reconcileRollbackOutcome();
+      await reconcileRollbackOutcome(context.intent);
     },
   });
 

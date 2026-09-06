@@ -35,6 +35,11 @@ export interface Transaction {
   [k: string]: unknown;
 }
 
+export type DatasetSnapshotRollbackChainReadback = {
+  rollback: TransactionChain[];
+  restore: TransactionChain[];
+};
+
 export async function fetchTransactionChains(opts?: {
   limit?: number;
   fromId?: number;
@@ -108,6 +113,29 @@ export async function fetchActiveTransactionChains(opts?: {
   }
 
   return [...byId.values()].sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+}
+
+/** Global Dataset chain high-water mark source used immediately before rollback. */
+export async function fetchLatestDatasetTransactionChains(datasetId: number) {
+  const res = await fetchTransactionChains({ limit: 1, className: 'Dataset', rowId: datasetId });
+  return res.data;
+}
+
+/**
+ * Read both chain classes created by the dataset snapshot rollback endpoint.
+ * VPS-backed datasets create `restore`; other datasets create `rollback`.
+ */
+export async function fetchDatasetSnapshotRollbackChains(
+  datasetId: number
+): Promise<DatasetSnapshotRollbackChainReadback> {
+  const read = (name: 'rollback' | 'restore') => fetchTransactionChains({
+    limit: 100,
+    name,
+    className: 'Dataset',
+    rowId: datasetId,
+  });
+  const [rollback, restore] = await Promise.all([read('rollback'), read('restore')]);
+  return { rollback: rollback.data, restore: restore.data };
 }
 
 export async function fetchTransactionChain(chainId: number) {

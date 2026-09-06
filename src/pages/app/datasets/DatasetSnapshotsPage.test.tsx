@@ -41,6 +41,8 @@ vi.mock('../../../components/layout/ChromeContext', () => ({
 
 vi.mock('../../../lib/api/transactions', () => ({
   fetchActiveTransactionChains: vi.fn(),
+  fetchDatasetSnapshotRollbackChains: vi.fn(),
+  fetchLatestDatasetTransactionChains: vi.fn(),
 }));
 
 vi.mock('../../../lib/api/datasets', async (importOriginal) => {

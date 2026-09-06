@@ -342,17 +342,26 @@ test.describe('@smoke Dataset snapshots', () => {
           };
         },
         'GET transaction_chains': ({ searchParams }) => {
+          const name = searchParams.get('transaction_chain[name]');
           const state = searchParams.get('transaction_chain[state]');
+          if (name === 'rollback' || name === 'restore') {
+            return {
+              transaction_chains: name === 'rollback'
+                ? [{ id: 700, name: 'rollback', state: 'done' }]
+                : [{ id: 650, name: 'restore', state: 'done' }],
+            };
+          }
           if (state) {
             if (rollbackApplied) chainReadbacks += 1;
             return {
               transaction_chains: rollbackApplied && state === 'rollbacking'
-                ? [{ id: 801, state: 'rollbacking' }]
+                ? [{ id: 901, state: 'rollbacking' }]
                 : [],
             };
           }
+          const limit = Number(searchParams.get('transaction_chain[limit]') ?? 10);
           return {
-            transaction_chains: Array.from({ length: 10 }, (_, index) => ({
+            transaction_chains: Array.from({ length: limit }, (_, index) => ({
               id: 900 - index,
               state: 'done',
             })),

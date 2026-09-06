@@ -202,6 +202,8 @@ export const enStorage = {
     "This rolls the target dataset back to {snapshot}. Data written after that snapshot can be lost.",
   "dataset.snapshots.confirm.rollback.uncertain":
     "The server may already have accepted this rollback. A status refresh was attempted, but retry remains blocked until you review Tasks and reconcile the saved safety lock.",
+  "dataset.snapshots.confirm.rollback.baseline_failed":
+    "Recent dataset task history could not be verified. The rollback was not sent; refresh and try again.",
   "dataset.snapshots.confirm.delete.title": "Delete snapshot?",
   "dataset.snapshots.confirm.delete.body":
     "This permanently deletes {snapshot}. Existing download links based on it may stop working.",

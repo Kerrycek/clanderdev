@@ -207,6 +207,8 @@ export const csStorage = {
     "Cílový dataset se vrátí do stavu {snapshot}. Data zapsaná po tomto snapshotu mohou být ztracena.",
   "dataset.snapshots.confirm.rollback.uncertain":
     "Server už mohl tento rollback přijmout. Proběhl pokus o nové načtení stavu, ale další pokus zůstává zablokovaný, dokud nezkontroluješ Úlohy a nevyřešíš uložený bezpečnostní zámek.",
+  "dataset.snapshots.confirm.rollback.baseline_failed":
+    "Nepodařilo se ověřit historii úloh datasetu. Rollback nebyl odeslán; obnov stránku a zkus to znovu.",
   "dataset.snapshots.confirm.delete.title": "Smazat snapshot?",
   "dataset.snapshots.confirm.delete.body":
     "Snapshot {snapshot} bude trvale smazán. Existující odkazy pro stažení z něj mohou přestat fungovat.",
