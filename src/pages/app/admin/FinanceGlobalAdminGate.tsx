@@ -17,7 +17,7 @@ export function FinanceGlobalAdminGate() {
   const auth = useAuth();
 
   if (!canViewGlobalFinance(auth.role)) {
-    return <Navigate to="/admin/payments/incoming" replace />;
+    return <Navigate to="/app/payments" replace />;
   }
 
   return <Outlet />;

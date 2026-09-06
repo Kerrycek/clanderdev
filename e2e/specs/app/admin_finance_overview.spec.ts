@@ -62,18 +62,37 @@ test('@pr-smoke @pr-smoke-mobile admin Finance overview uses a complete account 
 });
 
 test('@pr-smoke non-admin sessions cannot mount global Finance totals', async ({ page }) => {
+  const globalFinanceRequests: string[] = [];
   await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
   await installHaveApiMock(page, {
     user: { id: 2, login: 'member', level: 50 },
     handlers: {
-      'GET incoming_payments': () => ({ incoming_payments: [] }),
-      'GET system_configs': () => ({ system_configs: [] }),
+      'GET users': ({ relPath }) => {
+        globalFinanceRequests.push(relPath ?? 'users');
+        return { status: false, message: 'admin-only endpoint', response: null };
+      },
+      'GET incoming_payments': ({ relPath }) => {
+        globalFinanceRequests.push(relPath ?? 'incoming_payments');
+        return { status: false, message: 'admin-only endpoint', response: null };
+      },
+      'GET payment_stat/estimate_income': ({ relPath }) => {
+        globalFinanceRequests.push(relPath ?? 'payment_stat/estimate_income');
+        return { status: false, message: 'admin-only endpoint', response: null };
+      },
+      'GET system_configs': ({ relPath }) => {
+        globalFinanceRequests.push(relPath ?? 'system_configs');
+        return { status: false, message: 'admin-only endpoint', response: null };
+      },
+      'GET users/2/get_payment_instructions': () => ({ hash: { instructions: '' } }),
+      'GET user_payments': () => ({ user_payments: [] }),
     },
   });
 
   await page.goto('/admin/payments');
 
-  await expect(page).toHaveURL(/\/admin\/payments\/incoming$/);
-  await expect(page.getByTestId('admin.finance.tabs').getByRole('link')).toHaveCount(2);
-  await expect(page.getByTestId('admin.finance.tabs.overview')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/app\/payments$/);
+  await expect(page.getByTestId('payments.my.stat.payment_id')).toContainText('2');
+  await expect(page.getByTestId('admin.finance.tabs')).toHaveCount(0);
+  await page.waitForLoadState('networkidle');
+  expect(globalFinanceRequests).toEqual([]);
 });
