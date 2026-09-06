@@ -295,6 +295,8 @@ test.describe('@smoke Dataset snapshots', () => {
 
     await page.getByTestId('dataset.snapshots.row.200.rollback').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeVisible();
+    await expect(page.getByTestId('dataset.snapshots.rollback_confirm.confirm')).toBeDisabled();
+    await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('snap-200');
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm.confirm')).toBeEnabled();
     await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
@@ -438,6 +440,7 @@ test.describe('@smoke Dataset snapshots', () => {
     await page.getByTestId('dataset.snapshots.download.created.close').click();
     await expect(page.getByTestId('dataset.snapshots.row.200.rollback')).toBeEnabled();
     await page.getByTestId('dataset.snapshots.row.200.rollback').click();
+    await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('snap-200');
     await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
     expect(rollbackCalls).toBe(1);

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { Dataset, SnapshotDownload } from '../../../lib/api/datasets';
 import {
+  backupCenterCount,
   datasetBackupKind,
   datasetBackupPath,
   filterBackupDatasets,
+  parseBackupCenterIntent,
   parseBackupCenterTab,
   resolveSnapshotDownloadDataset,
   snapshotDownloadDatasetPath,
@@ -23,6 +25,18 @@ describe('BackupCenterModel', () => {
   it('keeps invalid tab values on the safe overview tab', () => {
     expect(parseBackupCenterTab('downloads')).toBe('downloads');
     expect(parseBackupCenterTab('other')).toBe('overview');
+  });
+
+  it('accepts only the supported restore workflow intent', () => {
+    expect(parseBackupCenterIntent('restore')).toBe('restore');
+    expect(parseBackupCenterIntent('delete')).toBeUndefined();
+    expect(parseBackupCenterIntent(null)).toBeUndefined();
+  });
+
+  it('marks incomplete overview counts without overstating their scope', () => {
+    expect(backupCenterCount(4, true)).toBe(4);
+    expect(backupCenterCount(4, false)).toBe('≥ 4');
+    expect(backupCenterCount(0, false)).toBe('—');
   });
 
   it('routes VPS and NAS datasets to their existing detail tools', () => {

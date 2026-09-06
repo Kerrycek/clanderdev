@@ -26,7 +26,9 @@ import {
 import { DatasetDownloadOpenButton, DatasetDownloadStateBadge } from '../datasets/DatasetDownloadStatusView';
 import {
   BACKUP_CENTER_TABS,
+  backupCenterCount,
   filterBackupDatasets,
+  parseBackupCenterIntent,
   parseBackupCenterTab,
   resourceLabel,
   resolveSnapshotDownloadDataset,
@@ -40,14 +42,11 @@ import {
   fetchOwnDatasetDownloads,
 } from './BackupCenterDownloads';
 import { BackupCenterDatasetWorkspaceView } from './BackupCenterDatasetWorkspaceView';
+import { BackupCenterQuickActions } from './BackupCenterQuickActions';
+import { BackupCenterRestoreGuide } from './BackupCenterRestoreGuide';
 
 const DATASET_LIMIT = 100;
 const DOWNLOAD_LIMIT = 100;
-
-function completeCount(value: number, complete: boolean): React.ReactNode {
-  if (complete) return value;
-  return value > 0 ? `≥ ${value}` : '—';
-}
 
 function BackupTabs(props: { active: BackupCenterTab; onChange: (tab: BackupCenterTab) => void }) {
   const { t } = useI18n();
@@ -179,6 +178,7 @@ export function BackupCenterPage() {
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = parseBackupCenterTab(searchParams.get('tab'));
+  const intent = parseBackupCenterIntent(searchParams.get('intent'));
   const query = searchParams.get('q') ?? '';
   const selectedDatasetParam = searchParams.get('dataset');
   const needsDatasetScopedDownloads = scope.mineUserId !== undefined;
@@ -246,6 +246,14 @@ export function BackupCenterPage() {
     const next = new URLSearchParams(searchParams);
     if (nextTab === 'overview') next.delete('tab');
     else next.set('tab', nextTab);
+    next.delete('intent');
+    setSearchParams(next, { replace: true });
+  }
+
+  function beginRestore() {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'snapshots');
+    next.set('intent', 'restore');
     setSearchParams(next, { replace: true });
   }
 
@@ -380,48 +388,39 @@ export function BackupCenterPage() {
                 title={t('backups.stats.datasets')}
                 value={datasetsQ.isPending
                   ? '…'
-                  : completeCount(datasetTotal ?? summary.datasets, datasetsComplete)}
+                  : backupCenterCount(datasetTotal ?? summary.datasets, datasetsComplete)}
                 subtitle={t('backups.stats.datasets.help')}
               />
               <StatCard
                 testId="backups.stats.downloads"
                 title={t('backups.stats.downloads')}
-                value={completeCount(downloadTotal ?? summary.downloads, downloadsComplete)}
+                value={backupCenterCount(downloadTotal ?? summary.downloads, downloadsComplete)}
                 subtitle={t('backups.stats.downloads.help')}
               />
               <StatCard
                 testId="backups.stats.ready"
                 title={t('backups.stats.ready')}
-                value={completeCount(summary.readyDownloads, downloadsComplete)}
+                value={backupCenterCount(summary.readyDownloads, downloadsComplete)}
                 subtitle={t('backups.stats.ready.help')}
               />
               <StatCard
                 testId="backups.stats.pending"
                 title={t('backups.stats.pending')}
-                value={completeCount(summary.pendingDownloads, downloadsComplete)}
+                value={backupCenterCount(summary.pendingDownloads, downloadsComplete)}
                 subtitle={t('backups.stats.pending.help')}
               />
               <StatCard
                 testId="backups.stats.unavailable"
                 title={t('backups.stats.unavailable')}
-                value={completeCount(summary.unavailableDownloads, downloadsComplete)}
+                value={backupCenterCount(summary.unavailableDownloads, downloadsComplete)}
                 subtitle={t('backups.stats.unavailable.help')}
               />
             </div>
-            <Card>
-              <CardHeader title={t('backups.quick.title')} subtitle={t('backups.quick.subtitle')} />
-              <CardBody className="grid gap-3 md:grid-cols-3">
-                <Button onClick={() => changeTab('snapshots')} variant="secondary">
-                  {t('backups.quick.snapshots')}
-                </Button>
-                <Button onClick={() => changeTab('downloads')} variant="secondary">
-                  {t('backups.quick.downloads')}
-                </Button>
-                <Button onClick={() => changeTab('plans')} variant="secondary">
-                  {t('backups.quick.plans')}
-                </Button>
-              </CardBody>
-            </Card>
+            <BackupCenterQuickActions
+              onRestore={beginRestore}
+              onDownloads={() => changeTab('downloads')}
+              onPlans={() => changeTab('plans')}
+            />
             <div>
               <h2 className="mb-3 text-base font-semibold">{t('backups.recent_downloads')}</h2>
               {downloads.length ? (
@@ -443,26 +442,35 @@ export function BackupCenterPage() {
 
         {!loading && !error && (tab === 'snapshots' || tab === 'plans') ? (
           <div className="space-y-4" data-testid={`backups.${tab}`}>
-            <Card>
-              <CardBody>
-                <div className="font-semibold">{t(`backups.${tab}.scope.title`)}</div>
-                <p className="mt-1 text-sm text-muted">{t(`backups.${tab}.scope.body`)}</p>
-              </CardBody>
-            </Card>
+            {tab === 'snapshots' && intent === 'restore' ? (
+              <BackupCenterRestoreGuide />
+            ) : (
+              <Card>
+                <CardBody>
+                  <div className="font-semibold">{t(`backups.${tab}.scope.title`)}</div>
+                  <p className="mt-1 text-sm text-muted">{t(`backups.${tab}.scope.body`)}</p>
+                </CardBody>
+              </Card>
+            )}
             {filteredDatasets.length || selectedDataset || invalidDatasetSelection ? (
               <BackupCenterDatasetWorkspaceView
                 datasets={filteredDatasets}
                 selectedDataset={selectedDataset}
                 invalidSelection={invalidDatasetSelection}
                 section={tab}
+                restoreMode={tab === 'snapshots' && intent === 'restore'}
                 onSelect={selectDataset}
                 onClear={clearDatasetSelection}
                 onRefetch={() => void datasetsQ.refetch()}
               />
             ) : (
               <EmptyState
-                title={t(`backups.${tab}.empty.title`)}
-                body={t(`backups.${tab}.empty.body`)}
+                title={t(tab === 'snapshots' && intent === 'restore'
+                  ? 'backups.restore.workspace.empty.title'
+                  : `backups.${tab}.empty.title`)}
+                body={t(tab === 'snapshots' && intent === 'restore'
+                  ? 'backups.restore.workspace.empty.body'
+                  : `backups.${tab}.empty.body`)}
               />
             )}
           </div>

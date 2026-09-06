@@ -83,8 +83,8 @@ describe('BackupCenterPage', () => {
     };
     datasetsMock.mockResolvedValue({
       data: [
-        { id: 10, name: 'root', vps: { id: 20, hostname: 'mail.example' } },
-        { id: 11, name: 'archive' },
+        { id: 10, name: 'root', snapshots_count: 2, vps: { id: 20, hostname: 'mail.example' } },
+        { id: 11, name: 'archive', snapshots_count: 0 },
       ],
       meta: { total_count: 2 },
     } as never);
@@ -133,6 +133,25 @@ describe('BackupCenterPage', () => {
     expect(await screen.findByTestId('backups.workspace.snapshots')).toHaveTextContent('backup_snapshot_');
     expect(screen.getByTestId('backups.snapshots.row.10')).toHaveAttribute('aria-pressed', 'true');
     await waitFor(() => expect(datasetsMock).toHaveBeenCalledTimes(1));
+    expect(downloadsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a guided restore workflow without loading every dataset snapshot list', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByTestId('backups.quick.restore'));
+
+    expect(await screen.findByTestId('backups.restore.guide')).toBeVisible();
+    expect(screen.getByTestId('backups.restore.warning')).toBeVisible();
+    expect(screen.getByTestId('backups.workspace.empty')).toHaveTextContent(
+      'backups.restore.workspace.empty.title',
+    );
+    expect(screen.getByTestId('backups.snapshots.row.10.count')).toHaveTextContent(
+      'backups.workspace.datasets.snapshot_count',
+    );
+    expect(screen.queryByTestId('backups.workspace.snapshots')).not.toBeInTheDocument();
+    expect(datasetsMock).toHaveBeenCalledTimes(1);
     expect(downloadsMock).toHaveBeenCalledTimes(1);
   });
 

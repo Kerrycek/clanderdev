@@ -11,7 +11,6 @@ import { Badge } from '../../../components/ui/Badge';
 import { ActionButton } from '../../../components/ui/ActionButton';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
-import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { ErrorState } from '../../../components/ui/ErrorState';
 import { Input } from '../../../components/ui/Input';
 import { KeysetPagination } from '../../../components/ui/KeysetPagination';
@@ -48,17 +47,10 @@ import {
   datasetDownloadStatusHelp,
 } from './DatasetDownloadStatusView';
 import { datasetSnapshotActionGates } from './DatasetSnapshotActionGates';
-
-function snapshotLabel(s: Snapshot): string {
-  return String(s.label ?? s.name ?? `#${s.id}`);
-}
-
-type ConfirmState =
-  | null
-  | {
-      kind: 'rollback' | 'delete';
-      snapshot: Snapshot;
-    };
+import {
+  DatasetSnapshotConfirmDialog,
+  type DatasetSnapshotConfirmState,
+} from './DatasetSnapshotConfirmDialog';
 
 /** Empty prefix preserves the existing dataset-detail URL contract. */
 export type DatasetSnapshotsPageProps = { queryParamPrefix?: string };
@@ -126,7 +118,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
 
   const [createdDownload, setCreatedDownload] = useState<SnapshotDownload | null>(null);
 
-  const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const [confirm, setConfirm] = useState<DatasetSnapshotConfirmState>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
@@ -289,7 +281,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
     createDl.mutate(s);
   }
 
-  function openConfirm(next: NonNullable<ConfirmState>) {
+  function openConfirm(next: NonNullable<DatasetSnapshotConfirmState>) {
     setConfirmError(null);
     setConfirm(next);
   }
@@ -302,12 +294,6 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   });
 
   const confirmGate = confirm?.kind === 'rollback' ? rollbackGate : confirm?.kind === 'delete' ? deleteGate : null;
-  const confirmTestId =
-    confirm?.kind === 'rollback'
-      ? 'dataset.snapshots.rollback_confirm'
-      : confirm?.kind === 'delete'
-        ? 'dataset.snapshots.delete_confirm'
-        : undefined;
 
   const cfg = useMemo(() => getRuntimeConfig(), []);
   const downloadHrefOptions = useMemo(
@@ -651,47 +637,24 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
         ) : null}
       </Modal>
 
-      <ConfirmDialog
-        open={confirm !== null}
-        testId={confirmTestId}
-        title={
-          confirm?.kind === 'rollback'
-            ? t('dataset.snapshots.confirm.rollback.title')
-            : confirm?.kind === 'delete'
-              ? t('dataset.snapshots.confirm.delete.title')
-              : ''
-        }
-        description={
-          confirm?.kind === 'rollback'
-            ? t('dataset.snapshots.confirm.rollback.body', {
-                snapshot: confirm ? snapshotLabel(confirm.snapshot) : t('common.na'),
-              })
-            : confirm?.kind === 'delete'
-              ? t('dataset.snapshots.confirm.delete.body', {
-                  snapshot: confirm ? snapshotLabel(confirm.snapshot) : t('common.na'),
-                })
-              : ''
-        }
-        confirmLabel={confirm?.kind === 'rollback' ? t('common.rollback') : t('common.delete')}
-        danger
-        confirmLoading={confirmBusy}
-        confirmDisabled={confirmBusy || (confirmGate ? !confirmGate.allowed : false)}
-        cancelDisabled={confirmBusy}
+      <DatasetSnapshotConfirmDialog
+        key={confirm ? `${confirm.kind}:${confirm.snapshot.id}` : 'closed'}
+        confirm={confirm}
+        gate={confirmGate}
+        busy={confirmBusy}
+        error={confirmError}
         onCancel={() => {
           if (confirmBusy) return;
           setConfirm(null);
           setConfirmError(null);
           setConfirmBusy(false);
         }}
-        onConfirm={async () => {
-          const c = confirm;
-          if (!c || confirmBusy) return;
-          if (confirmGate && !confirmGate.allowed) return;
+        onConfirm={async (nextConfirm) => {
           setConfirmBusy(true);
           setConfirmError(null);
           try {
-            if (c.kind === 'rollback') await rollbackSnap.mutateAsync(c.snapshot.id);
-            else await deleteSnap.mutateAsync(c.snapshot.id);
+            if (nextConfirm.kind === 'rollback') await rollbackSnap.mutateAsync(nextConfirm.snapshot.id);
+            else await deleteSnap.mutateAsync(nextConfirm.snapshot.id);
             setConfirm(null);
           } catch (e) {
             setConfirmError(formatErrorMessage(e));
@@ -699,19 +662,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
             setConfirmBusy(false);
           }
         }}
-      >
-        {confirmGate && !confirmGate.allowed && confirmGate.reason ? (
-          <Alert title={t(confirmGate.reason.titleKey)} variant="warn">
-            {confirmGate.reason.descriptionKey ? t(confirmGate.reason.descriptionKey) : null}
-          </Alert>
-        ) : null}
-
-        {confirmError ? (
-          <Alert title={t('common.action_failed')} variant="danger">
-            {confirmError}
-          </Alert>
-        ) : null}
-      </ConfirmDialog>
+      />
     </div>
   );
 }

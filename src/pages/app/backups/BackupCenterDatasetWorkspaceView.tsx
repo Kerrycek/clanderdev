@@ -21,6 +21,7 @@ interface BackupCenterDatasetWorkspaceViewProps {
   selectedDataset: Dataset | undefined;
   invalidSelection: boolean;
   section: 'snapshots' | 'plans';
+  restoreMode?: boolean;
   onSelect: (dataset: Dataset) => void;
   onClear: () => void;
   onRefetch: () => void;
@@ -47,6 +48,11 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
           ) : null}
           {props.datasets.map((dataset) => {
             const selected = props.selectedDataset?.id === dataset.id;
+            const snapshotCount = typeof dataset.snapshots_count === 'number'
+              && Number.isFinite(dataset.snapshots_count)
+              && dataset.snapshots_count >= 0
+              ? dataset.snapshots_count
+              : undefined;
             return (
               <button
                 key={dataset.id}
@@ -72,6 +78,14 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
                 {dataset.vps ? (
                   <div className="mt-2 truncate text-sm text-muted">
                     {t('backups.vps')}: {resourceLabel(dataset.vps)}
+                  </div>
+                ) : null}
+                {props.section === 'snapshots' && snapshotCount !== undefined ? (
+                  <div
+                    className="mt-2 text-xs font-medium text-muted"
+                    data-testid={`backups.snapshots.row.${dataset.id}.count`}
+                  >
+                    {t('backups.workspace.datasets.snapshot_count', { count: snapshotCount })}
                   </div>
                 ) : null}
               </button>
@@ -120,8 +134,12 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
         ) : (
           <EmptyState
             testId="backups.workspace.empty"
-            title={t(`backups.${props.section}.workspace.empty.title`)}
-            body={t(`backups.${props.section}.workspace.empty.body`)}
+            title={t(props.restoreMode
+              ? 'backups.restore.workspace.empty.title'
+              : `backups.${props.section}.workspace.empty.title`)}
+            body={t(props.restoreMode
+              ? 'backups.restore.workspace.empty.body'
+              : `backups.${props.section}.workspace.empty.body`)}
           />
         )}
       </div>

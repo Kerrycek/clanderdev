@@ -1,6 +1,7 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -178,6 +179,27 @@ describe('DatasetSnapshotsPage', () => {
 
     expect(await screen.findByTestId('dataset.snapshots.row.91.rollback')).toBeEnabled();
     expect(screen.getByTestId('dataset.snapshots.row.91.delete')).toBeEnabled();
+  });
+
+  it('requires the exact snapshot label before enabling rollback confirmation', async () => {
+    const user = userEvent.setup();
+    api.fetchDatasetSnapshots.mockResolvedValue({
+      data: [{ id: 91, name: 'snap-91', label: 'Before update', created_at: '2026-08-10T10:00:00Z' }],
+      meta: { total_count: 1 },
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByTestId('dataset.snapshots.row.91.rollback'));
+    const confirm = screen.getByTestId('dataset.snapshots.rollback_confirm.confirm');
+    const input = screen.getByTestId('dataset.snapshots.rollback_confirm.input');
+
+    expect(confirm).toBeDisabled();
+    await user.type(input, 'before update');
+    expect(confirm).toBeDisabled();
+    await user.clear(input);
+    await user.type(input, 'Before update');
+    expect(confirm).toBeEnabled();
   });
 
   it.each([
