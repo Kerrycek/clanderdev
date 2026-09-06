@@ -61,10 +61,10 @@ test('@pr-smoke @pr-smoke-mobile admin Finance overview uses a complete account 
   }
 });
 
-test('@pr-smoke restricted support sessions cannot mount global Finance totals', async ({ page }) => {
+test('@pr-smoke non-admin sessions cannot mount global Finance totals', async ({ page }) => {
   await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
   await installHaveApiMock(page, {
-    user: { id: 2, login: 'support', level: 50 },
+    user: { id: 2, login: 'member', level: 50 },
     handlers: {
       'GET incoming_payments': () => ({ incoming_payments: [] }),
       'GET system_configs': () => ({ system_configs: [] }),
