@@ -102,7 +102,10 @@ export function RequestReviewActions(props: {
   const chrome = useChrome();
   const qc = useQueryClient();
 
-  const actions = useMemo(() => requestReviewActions(props.request, props.isAdmin), [props.isAdmin, props.request]);
+  const actions = useMemo(
+    () => requestReviewActions(props.reqType, props.request, props.isAdmin),
+    [props.isAdmin, props.reqType, props.request],
+  );
   const [resolveOpen, setResolveOpen] = useState(false);
   const [resolveAction, setResolveAction] = useState<ResolveUserRequestAction>('approve');
   const [resolveReason, setResolveReason] = useState('');
