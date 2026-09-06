@@ -5,9 +5,9 @@ import {
   type LocalMutationIntent,
 } from '../../../lib/localLocks';
 import type { ObjectRef } from '../../../lib/objectRef';
-import { hasActiveChains, isFinishedChainState } from '../../../lib/taskStatus';
+import { hasActiveChains } from '../../../lib/taskStatus';
 
-export type DatasetSnapshotRollbackReconcileResult = 'clear' | 'busy' | 'error';
+export type DatasetSnapshotRollbackReconcileResult = 'manual' | 'busy' | 'error';
 
 type QueryReadback = {
   data?: unknown;
@@ -37,12 +37,6 @@ function positiveId(value: unknown): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
-function readMatchingChains(value: unknown): TransactionChain[] | null {
-  if (!isRecord(value) || !Array.isArray(value['rollback']) || !Array.isArray(value['restore'])) return null;
-  const chains = [...value['rollback'], ...value['restore']];
-  return chains.every((chain) => positiveId(chain) !== null) ? chains as TransactionChain[] : null;
-}
-
 function readChainList(value: unknown): TransactionChain[] | null {
   return Array.isArray(value) && value.every((chain) => positiveId(chain) !== null)
     ? value as TransactionChain[]
@@ -57,21 +51,21 @@ export type DatasetSnapshotRollbackIntent = Extract<
 export type DatasetSnapshotRollbackRequest = {
   datasetId: number;
   snapshotId: number;
+  snapshotLabel: string;
   lockRef: ObjectRef;
   objectLabel: string;
 };
 
 export function createDatasetSnapshotRollbackIntent(
   snapshotId: number,
-  baselineReadback: unknown
+  snapshotLabel: string
 ): DatasetSnapshotRollbackIntent | null {
-  const chains = readChainList(baselineReadback);
-  if (!Number.isSafeInteger(snapshotId) || snapshotId <= 0 || !chains) return null;
-  return {
+  const intent = normalizeLocalMutationIntent({
     type: 'dataset-snapshot-rollback',
     snapshotId,
-    baselineTransactionChainId: chains.reduce((max, chain) => Math.max(max, positiveId(chain)!), 0),
-  };
+    snapshotLabel,
+  });
+  return intent?.type === 'dataset-snapshot-rollback' ? intent : null;
 }
 
 export class DatasetSnapshotRollbackPreparationError extends Error {
@@ -83,44 +77,40 @@ export class DatasetSnapshotRollbackPreparationError extends Error {
   }
 }
 
-/** Preflight first, then capture the high-water mark so a fast foreign chain cannot become our proof. */
+/** No local guard or POST is created unless the direct active-chain preflight succeeds. */
 export async function prepareDatasetSnapshotRollbackIntent(args: {
   snapshotId: number;
+  snapshotLabel: string;
   preflight: () => Promise<void>;
-  fetchBaselineChains: () => Promise<unknown>;
   errorMessage: string;
 }): Promise<DatasetSnapshotRollbackIntent> {
   try {
     await args.preflight();
-    const intent = createDatasetSnapshotRollbackIntent(args.snapshotId, await args.fetchBaselineChains());
+    const intent = createDatasetSnapshotRollbackIntent(args.snapshotId, args.snapshotLabel);
     if (!intent) throw new Error(args.errorMessage);
     return intent;
   } catch (error) {
     if (isRecord(error) && error['code'] === 'BUSY') throw error;
-    throw new DatasetSnapshotRollbackPreparationError(
-      error instanceof Error ? error.message : args.errorMessage
-    );
+    throw new DatasetSnapshotRollbackPreparationError(args.errorMessage);
   }
 }
 
 /**
- * Re-reads every view of state used by snapshot rollback before an uncertain
- * durable lock can be acknowledged. Absence is never proof: clearing requires
- * a finished matching chain created after the persisted pre-submit baseline.
+ * Re-reads every state surface used by snapshot rollback before offering the
+ * explicit local-guard override. A finished Dataset chain cannot prove which
+ * snapshot it targeted, so an ambiguous outcome never clears automatically.
  */
 export async function reconcileDatasetSnapshotRollback(args: {
   datasetId: number;
   intent?: LocalMutationIntent;
   fetchActiveChains: () => Promise<unknown>;
-  fetchMatchingChains: () => Promise<unknown>;
   refetchChains: () => Promise<unknown>;
   refetchDataset: () => Promise<unknown>;
   refetchSnapshots: () => Promise<unknown>;
 }): Promise<DatasetSnapshotRollbackReconcileResult> {
   try {
-    const [activeReadback, matchingReadback, chainsResult, datasetResult, snapshotsResult] = await Promise.all([
+    const [activeReadback, chainsResult, datasetResult, snapshotsResult] = await Promise.all([
       args.fetchActiveChains(),
-      args.fetchMatchingChains(),
       args.refetchChains(),
       args.refetchDataset(),
       args.refetchSnapshots(),
@@ -131,23 +121,16 @@ export async function reconcileDatasetSnapshotRollback(args: {
 
     const intent = normalizeLocalMutationIntent(args.intent);
     const activeChains = readChainList(activeReadback);
-    const matchingChains = readMatchingChains(matchingReadback);
     const recentChains = readChainList(chainsResult.data);
     const snapshotsEnvelope = snapshotsResult['data'];
     if (intent?.type !== 'dataset-snapshot-rollback'
       || !activeChains
-      || !matchingChains
       || !recentChains
       || !readbackContainsDataset(datasetResult.data, args.datasetId)
       || !isRecord(snapshotsEnvelope)
       || !Array.isArray(snapshotsEnvelope['data'])) return 'error';
 
-    if (hasActiveChains([...activeChains, ...recentChains, ...matchingChains])) return 'busy';
-    const newMatchingChains = matchingChains.filter(
-      (chain) => positiveId(chain)! > intent.baselineTransactionChainId
-    );
-    if (newMatchingChains.length === 0) return 'error';
-    return newMatchingChains.every((chain) => isFinishedChainState(chain.state)) ? 'clear' : 'busy';
+    return hasActiveChains([...activeChains, ...recentChains]) ? 'busy' : 'manual';
   } catch {
     return 'error';
   }

@@ -33,7 +33,7 @@ describe('useLocalMutationLocks dataset rollback intent', () => {
     const intent = {
       type: 'dataset-snapshot-rollback' as const,
       snapshotId: 91,
-      baselineTransactionChainId: 812,
+      snapshotLabel: 'before-upgrade',
     };
     let generation!: LocalMutationGeneration;
 

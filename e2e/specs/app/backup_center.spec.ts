@@ -245,14 +245,12 @@ test.describe('Backup center', () => {
     expect(rollbackCalls).toBe(1);
   });
 
-  test('@pr-smoke @pr-smoke-mobile reconciles delayed rollback visibility without a second POST', async ({ page }, testInfo) => {
+  test('@pr-smoke @pr-smoke-mobile requires exact manual unlock after an ambiguous rollback', async ({ page }, testInfo) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     let rollbackApplied = false;
     let rollbackCalls = 0;
     let datasetReadbacks = 0;
     let snapshotReadbacks = 0;
-    let finishedEvidenceVisible = false;
-    let postSubmitMatchingReadbacks = 0;
     const activeStateReadbacks: string[] = [];
 
     await installHaveApiMock(page, {
@@ -274,29 +272,22 @@ test.describe('Backup center', () => {
           };
         },
         'GET transaction_chains': ({ searchParams }) => {
-          const name = searchParams.get('transaction_chain[name]');
           const state = searchParams.get('transaction_chain[state]');
-          if (name === 'rollback' || name === 'restore') {
-            if (rollbackApplied) postSubmitMatchingReadbacks += 1;
-            const previous = name === 'rollback'
-              ? [{ id: 700, name: 'rollback', state: 'done' }]
-              : [{ id: 650, name: 'restore', state: 'done' }];
-            return {
-              transaction_chains: finishedEvidenceVisible && name === 'restore'
-                ? [{ id: 701, name: 'restore', state: 'done' }, ...previous]
-                : previous,
-            };
-          }
           if (state) {
             if (rollbackApplied) activeStateReadbacks.push(state);
             return { transaction_chains: [] };
           }
           const limit = Number(searchParams.get('transaction_chain[limit]') ?? 10);
+          const oldChains = Array.from({ length: limit }, (_, index) => ({
+            id: 700 - index,
+            state: 'done',
+          }));
           return {
-            transaction_chains: Array.from({ length: limit }, (_, index) => ({
-              id: 700 - index,
-              state: 'done',
-            })),
+            // This newer terminal rollback targeted another snapshot. The UI
+            // must never treat it as exact proof for snapshot 31.
+            transaction_chains: rollbackApplied
+              ? [{ id: 701, name: 'rollback', state: 'done', snapshot_id: 32 }, ...oldChains]
+              : oldChains,
           };
         },
         'GET datasets/10/snapshots': () => {
@@ -332,7 +323,6 @@ test.describe('Backup center', () => {
     await expect.poll(() => datasetReadbacks).toBeGreaterThan(0);
     await expect.poll(() => snapshotReadbacks).toBeGreaterThan(0);
     await expect.poll(() => activeStateReadbacks.includes('rollbacking')).toBe(true);
-    await expect.poll(() => postSubmitMatchingReadbacks).toBeGreaterThan(0);
 
     await confirm.evaluate((button) => {
       button.removeAttribute('disabled');
@@ -353,7 +343,7 @@ test.describe('Backup center', () => {
     expect(persistedIntent).toEqual({
       type: 'dataset-snapshot-rollback',
       snapshotId: 31,
-      baselineTransactionChainId: 700,
+      snapshotLabel: 'Before upgrade',
     });
 
     await page.reload();
@@ -362,12 +352,20 @@ test.describe('Backup center', () => {
     await expect(page.getByTestId('tasks.drawer')).toBeVisible();
     await page.getByTestId('tasks.close-button').click();
     await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
-    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain.error'))
-      .toContainText('could not be loaded');
+    const guardConfirm = page.getByTestId('dataset.snapshots.rollback_guard.confirm');
+    await expect(guardConfirm).toBeVisible();
+    await expect(guardConfirm).toContainText('Before upgrade');
+    await expect(guardConfirm).toContainText('ID 31');
     await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await expect(page.getByTestId(`dataset.snapshots.${layout}.31.rollback`)).toBeDisabled();
 
-    finishedEvidenceVisible = true;
-    await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
+    const guardInput = page.getByTestId('dataset.snapshots.rollback_guard.input');
+    const guardUnlock = page.getByTestId('dataset.snapshots.rollback_guard.unlock');
+    await guardInput.fill('32');
+    await expect(guardUnlock).toBeDisabled();
+    await guardInput.fill('31');
+    await expect(guardUnlock).toBeEnabled();
+    await guardUnlock.click();
     await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeHidden();
     await expect(page.getByTestId(`dataset.snapshots.${layout}.31.rollback`)).toBeEnabled();
     expect(rollbackCalls).toBe(1);

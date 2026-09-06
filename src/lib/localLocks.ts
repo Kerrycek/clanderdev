@@ -4,7 +4,7 @@ export type LocalMutationIntent =
   | {
     type: 'dataset-snapshot-rollback';
     snapshotId: number;
-    baselineTransactionChainId: number;
+    snapshotLabel: string;
   }
   | {
     type: 'ip-route-assign';
@@ -88,7 +88,7 @@ export interface LocalLock {
   /** Unique generation of the persisted uncertainty marker. */
   uncertaintyId?: string;
 
-  /** Strict, allowlisted proof target used when reconciling an ambiguous mutation. */
+  /** Strict, allowlisted review target used when reconciling an ambiguous mutation. */
   intent?: LocalMutationIntent;
 }
 
@@ -144,8 +144,8 @@ function isNullablePositiveId(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0);
 }
 
-function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
@@ -159,14 +159,16 @@ export function normalizeLocalMutationIntent(raw: unknown): LocalMutationIntent 
   const value = raw as Record<string, unknown>;
 
   if (value['type'] === 'dataset-snapshot-rollback') {
-    if (!hasExactKeys(value, ['type', 'snapshotId', 'baselineTransactionChainId'])) return null;
-    if (!isNonNegativeInteger(value['snapshotId'])
-      || value['snapshotId'] === 0
-      || !isNonNegativeInteger(value['baselineTransactionChainId'])) return null;
+    if (!hasExactKeys(value, ['type', 'snapshotId', 'snapshotLabel'])) return null;
+    const snapshotLabel = typeof value['snapshotLabel'] === 'string' ? value['snapshotLabel'].trim() : '';
+    if (!isPositiveSafeInteger(value['snapshotId'])
+      || !snapshotLabel
+      || snapshotLabel !== value['snapshotLabel']
+      || snapshotLabel.length > 255) return null;
     return {
       type: value['type'],
       snapshotId: value['snapshotId'],
-      baselineTransactionChainId: value['baselineTransactionChainId'],
+      snapshotLabel,
     };
   }
 

@@ -38,7 +38,7 @@ describe('localLocks', () => {
     const intent = {
       type: 'dataset-snapshot-rollback' as const,
       snapshotId: 91,
-      baselineTransactionChainId: 812,
+      snapshotLabel: 'before-upgrade',
     };
     const lock = createLocalLock(objectRef('Dataset', 10), 1_000_000, {
       uncertain: true,
@@ -49,7 +49,7 @@ describe('localLocks', () => {
     expect(normalizeLocalMutationIntent(intent)).toEqual(intent);
     expect(normalizeLocalLock(JSON.parse(JSON.stringify(lock)))).toEqual(lock);
     expect(normalizeLocalMutationIntent({ ...intent, snapshotId: 0 })).toBeNull();
-    expect(normalizeLocalMutationIntent({ ...intent, baselineTransactionChainId: -1 })).toBeNull();
+    expect(normalizeLocalMutationIntent({ ...intent, snapshotLabel: ' ' })).toBeNull();
     expect(normalizeLocalMutationIntent({ ...intent, unexpected: true })).toBeNull();
     expect(normalizeLocalLock({ ...lock, kind: 'Vps', key: 'Vps:10' })).toBeNull();
   });

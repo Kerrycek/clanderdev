@@ -5,10 +5,7 @@ import { useAuth } from '../../../app/auth';
 import { getRuntimeConfig } from '../../../app/config';
 import { useI18n } from '../../../app/i18n';
 import { useChrome } from '../../../components/layout/ChromeContext';
-import {
-  MutationUncertaintyPanel,
-  type MutationReconcileResult,
-} from '../../../components/layout/MutationUncertaintyPanel';
+import type { ManualMutationReconcileResult } from '../../../components/layout/MutationUncertaintyPanel';
 import { Alert } from '../../../components/ui/Alert';
 import { Badge } from '../../../components/ui/Badge';
 import { ActionButton } from '../../../components/ui/ActionButton';
@@ -20,11 +17,7 @@ import { KeysetPagination } from '../../../components/ui/KeysetPagination';
 import { LoadingState } from '../../../components/ui/LoadingState';
 import { Modal } from '../../../components/ui/Modal';
 
-import {
-  fetchActiveTransactionChains,
-  fetchDatasetSnapshotRollbackChains,
-  fetchLatestDatasetTransactionChains,
-} from '../../../lib/api/transactions';
+import { fetchActiveTransactionChains } from '../../../lib/api/transactions';
 import { getMetaActionStateId, isAmbiguousMutationError } from '../../../lib/api/haveapi';
 import {
   createDatasetSnapshot,
@@ -56,6 +49,7 @@ import {
 import { datasetSnapshotActionGates } from './DatasetSnapshotActionGates';
 import {
   DatasetSnapshotConfirmDialog,
+  datasetSnapshotLabel,
   type DatasetSnapshotConfirmState,
 } from './DatasetSnapshotConfirmDialog';
 import {
@@ -63,6 +57,7 @@ import {
   reconcileDatasetSnapshotRollback,
   type DatasetSnapshotRollbackRequest,
 } from './DatasetSnapshotRollbackReconciliation';
+import { DatasetSnapshotRollbackUncertaintyPanel } from './DatasetSnapshotRollbackUncertaintyPanel';
 
 /** Empty prefix preserves the existing dataset-detail URL contract. */
 export type DatasetSnapshotsPageProps = { queryParamPrefix?: string };
@@ -137,12 +132,11 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
   const rollbackUncertainLock = (chrome.localLocks ?? []).find((lock) =>
     lock.kind === datasetRef.kind && lock.id === datasetRef.id && lock.uncertain === true
   );
-  const reconcileRollbackOutcome = (intent = rollbackUncertainLock?.intent): Promise<MutationReconcileResult> =>
+  const reconcileRollbackOutcome = (intent = rollbackUncertainLock?.intent): Promise<ManualMutationReconcileResult> =>
     reconcileDatasetSnapshotRollback({
       datasetId: dataset.id,
       intent,
       fetchActiveChains: () => fetchActiveTransactionChains({ className: 'Dataset', rowId: dataset.id }),
-      fetchMatchingChains: () => fetchDatasetSnapshotRollbackChains(dataset.id),
       refetchChains,
       refetchDataset,
       refetchSnapshots: snapsQ.refetch,
@@ -197,9 +191,9 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
     onMutate: async (request) => {
       const intent = await prepareDatasetSnapshotRollbackIntent({
         snapshotId: request.snapshotId,
+        snapshotLabel: request.snapshotLabel,
         preflight: () => preflightDatasetNotBusy(request.datasetId),
-        fetchBaselineChains: () => fetchLatestDatasetTransactionChains(request.datasetId),
-        errorMessage: t('dataset.snapshots.confirm.rollback.baseline_failed'),
+        errorMessage: t('dataset.snapshots.confirm.rollback.preflight_failed'),
       });
       return {
         lockRef: request.lockRef,
@@ -355,11 +349,10 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
 
   return (
     <div className="space-y-6" data-testid="dataset.snapshots.list">
-      <MutationUncertaintyPanel
+      <DatasetSnapshotRollbackUncertaintyPanel
         object={datasetRef}
         lock={rollbackUncertainLock}
         reconcile={reconcileRollbackOutcome}
-        testIdPrefix="dataset.snapshots.rollback_uncertain"
       />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -697,6 +690,7 @@ export function DatasetSnapshotsPage({ queryParamPrefix = '' }: DatasetSnapshots
             if (nextConfirm.kind === 'rollback') await rollbackSnap.mutateAsync({
               datasetId: dataset.id,
               snapshotId: nextConfirm.snapshot.id,
+              snapshotLabel: datasetSnapshotLabel(nextConfirm.snapshot),
               lockRef: datasetRef,
               objectLabel: datasetLabelForToast,
             });
