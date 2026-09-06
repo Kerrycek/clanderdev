@@ -5,9 +5,7 @@ import {
   estimateIncome,
   fetchIncomingPayments,
   fetchPaymentInstructions,
-  fetchUserPaymentIndexCapability,
   fetchUserPayments,
-  userPaymentIndexSupportsPeriod,
 } from './payments';
 
 function mockFetchOk(response: unknown): typeof globalThis.fetch {
@@ -66,17 +64,10 @@ describe('payments API wrappers', () => {
     expect(body).toEqual({ user_payment: { user: 7, incoming_payment: 15 } });
   });
 
-  test('fetchUserPayments forwards identity and inclusive creation-period filters', async () => {
+  test('fetchUserPayments forwards user and accounted_by filters', async () => {
     globalThis.fetch = mockFetchOk({ user_payments: [], _meta: { total_count: 0 } }) as any;
 
-    await fetchUserPayments({
-      limit: 10,
-      fromId: 55,
-      userId: 7,
-      accountedById: 2,
-      createdFrom: '2026-08-01T00:00:00.000Z',
-      createdTo: '2026-08-31T23:59:59.999Z',
-    });
+    await fetchUserPayments({ limit: 10, fromId: 55, userId: 7, accountedById: 2 });
 
     const [url] = lastFetchCall();
     const u = new URL(url);
@@ -86,26 +77,6 @@ describe('payments API wrappers', () => {
     expect(u.searchParams.get('user_payment[from_id]')).toBe('55');
     expect(u.searchParams.get('user_payment[user]')).toBe('7');
     expect(u.searchParams.get('user_payment[accounted_by]')).toBe('2');
-    expect(u.searchParams.get('user_payment[created_from]')).toBe('2026-08-01T00:00:00.000Z');
-    expect(u.searchParams.get('user_payment[created_to]')).toBe('2026-08-31T23:59:59.999Z');
-  });
-
-  test('checks the effective index contract before relying on creation-period filters', async () => {
-    const capability = {
-      input: { parameters: { created_from: {}, created_to: {}, limit: {} } },
-    };
-    globalThis.fetch = mockFetchOk(capability);
-
-    const result = await fetchUserPaymentIndexCapability();
-
-    const [url, init] = lastFetchCall();
-    const u = new URL(url);
-    expect(u.pathname).toBe('/v7.0/user_payments');
-    expect(u.searchParams.get('method')).toBe('GET');
-    expect((init as RequestInit).method).toBe('OPTIONS');
-    expect(userPaymentIndexSupportsPeriod(result.data)).toBe(true);
-    expect(userPaymentIndexSupportsPeriod({ input: { parameters: { created_from: {} } } })).toBe(false);
-    expect(userPaymentIndexSupportsPeriod(undefined)).toBe(false);
   });
 
   test('fetchPaymentInstructions uses user subresource path', async () => {

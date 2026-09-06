@@ -3,8 +3,6 @@ import { describe, expect, test } from 'vitest';
 import {
   classifyFinanceAccount,
   isFinanceAccountInScope,
-  normalizeFinancePeriodFilters,
-  parseFinancePeriodFilters,
   summarizeFinanceAccounts,
 } from './FinanceOverviewModel';
 
@@ -60,20 +58,4 @@ describe('FinanceOverviewModel', () => {
       excludedAccountCount: 5,
     });
   });
-
-  test('normalizes URL period values and canonicalizes reversed bounds', () => {
-    expect(parseFinancePeriodFilters(new URLSearchParams('from=2026-08-01&to=2026-08-31'))).toEqual({
-      from: '2026-08-01',
-      to: '2026-08-31',
-    });
-    expect(normalizeFinancePeriodFilters({ from: ' 2026-09-30 ', to: '2026-09-01' })).toEqual({
-      from: '2026-09-01',
-      to: '2026-09-30',
-    });
-    expect(normalizeFinancePeriodFilters({ from: '2026-02-30', to: 'yesterday' })).toEqual({
-      from: '',
-      to: '',
-    });
-  });
-
 });

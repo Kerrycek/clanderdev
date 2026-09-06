@@ -374,47 +374,6 @@ describe('searchUsers', () => {
     expect(res.data.map((u) => u.id)).toEqual([10, 11, 12]);
     expect(fetchMock).toHaveBeenCalledTimes(5);
   });
-
-  it('scopes direct and cluster user results for global accounting filters', async () => {
-    installApiFixture();
-
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
-      const url = new URL(String(input));
-      if (url.pathname === '/v7.0/users') {
-        const state = url.searchParams.get('user[object_state]');
-        const isLoginSearch = url.searchParams.has('user[login]');
-        if (state === 'suspended' && isLoginSearch) {
-          return makeUsersResponse([{ id: 44, login: 'suspended-alice', level: 1, object_state: 'suspended' }]);
-        }
-        return makeUsersResponse([]);
-      }
-      if (url.pathname === '/v7.0/cluster/search') {
-        return makeOkResponse({ status: true, response: { cluster: [
-          { resource: 'User', id: 45, value: 'alice-deleted', attribute: 'login' },
-        ] } });
-      }
-      if (url.pathname === '/v7.0/users/45') {
-        return makeOkResponse({ status: true, response: {
-          user: { id: 45, login: 'alice-deleted', level: 1, object_state: 'soft_delete' },
-        } });
-      }
-      throw new Error(`unexpected fetch ${url.pathname}`);
-    });
-
-    const res = await searchUsers({
-      q: 'alice',
-      limit: 8,
-      objectStates: ['active', 'suspended'],
-    });
-
-    expect(res.data.map((user) => user.id)).toEqual([44]);
-    const userRequests = fetchMock.mock.calls
-      .map(([input]) => new URL(String(input)))
-      .filter((url) => url.pathname === '/v7.0/users');
-    expect(userRequests).toHaveLength(6);
-    expect(userRequests.map((url) => url.searchParams.get('user[object_state]')))
-      .toEqual(['active', 'active', 'active', 'suspended', 'suspended', 'suspended']);
-  });
 });
 
 describe('admin user mutations', () => {

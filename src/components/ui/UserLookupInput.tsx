@@ -28,8 +28,6 @@ export function UserLookupInput(props: {
 
   /** Suggestion count limit. */
   limit?: number;
-  /** Optional explicit lifecycle scopes for admin searches. */
-  objectStates?: string[];
 
   loadingLabel?: string;
   noResultsLabel?: string;
@@ -51,13 +49,9 @@ export function UserLookupInput(props: {
   const searchEnabled = open && !props.disabled && needle.length >= 2 && !numeric;
 
   const q = useQuery({
-    queryKey: ['users', 'search', { q: debouncedNeedle, limit, objectStates: props.objectStates }],
+    queryKey: ['users', 'search', { q: debouncedNeedle, limit }],
     enabled: searchEnabled,
-    queryFn: async () => (await searchUsers({
-      q: debouncedNeedle,
-      limit,
-      objectStates: props.objectStates,
-    })).data,
+    queryFn: async () => (await searchUsers({ q: debouncedNeedle, limit })).data,
     staleTime: 10_000,
   });
 

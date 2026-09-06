@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarClock, CreditCard, RefreshCw, TrendingUp, UsersRound } from 'lucide-react';
+import { AlertTriangle, CalendarClock, RefreshCw, TrendingUp, UsersRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useAppMode } from '../../../app/appMode';
@@ -69,7 +69,7 @@ export function FinanceOverviewPage() {
     queryKey: ['finance', 'account_snapshot'],
     queryFn: async ({ signal }) => ({
       snapshot: await fetchFinanceUsersSnapshot({ signal }),
-      capturedAt: new Date().toISOString(),
+      loadedAt: new Date().toISOString(),
     }),
     retry: false,
     staleTime: 60_000,
@@ -133,22 +133,16 @@ export function FinanceOverviewPage() {
             title={t('finance.overview.title')}
             description={t('finance.overview.description')}
             actions={(
-              <>
-                <Button to={`${basePath}/payments/history`} variant="secondary" size="sm" testId="admin.finance.overview.open_history">
-                  <CreditCard size={16} aria-hidden="true" />
-                  {t('finance.overview.open_history')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={snapshotQ.isFetching || configsQ.isFetching}
-                  onClick={refresh}
-                  testId="admin.finance.overview.refresh"
-                >
-                  <RefreshCw size={16} aria-hidden="true" />
-                  {t('finance.overview.refresh')}
-                </Button>
-              </>
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={snapshotQ.isFetching || configsQ.isFetching}
+                onClick={refresh}
+                testId="admin.finance.overview.refresh"
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+                {t('finance.overview.refresh')}
+              </Button>
             )}
           />
           <AdminFinanceTabs />
@@ -181,7 +175,9 @@ export function FinanceOverviewPage() {
             description={t('finance.overview.scope.body', {
               count: summary.accountCount,
               excluded: summary.excludedAccountCount,
-              time: formatDateTime(snapshotQ.data?.capturedAt),
+              scanned: snapshot?.scannedRows ?? 0,
+              batches: snapshot?.batches ?? 0,
+              time: formatDateTime(snapshotQ.data?.loadedAt),
             })}
             testId="admin.finance.overview.scope"
           />

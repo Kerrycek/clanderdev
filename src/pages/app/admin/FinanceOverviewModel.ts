@@ -27,13 +27,6 @@ export interface FinanceOverviewSummary {
   excludedAccountCount: number;
 }
 
-export interface FinancePeriodFilters {
-  /** Inclusive UTC calendar date in YYYY-MM-DD format, or an empty string. */
-  from: string;
-  /** Inclusive UTC calendar date in YYYY-MM-DD format, or an empty string. */
-  to: string;
-}
-
 const DAY_MS = 86_400_000;
 
 function positiveFiniteMonthlyPayment(value: unknown): number | null {
@@ -131,34 +124,4 @@ export function summarizeFinanceAccounts(
   }
 
   return summary;
-}
-
-function normalizeDateOnly(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  const candidate = value.trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(candidate)) return '';
-
-  const timestamp = Date.parse(`${candidate}T00:00:00.000Z`);
-  if (!Number.isFinite(timestamp)) return '';
-  return new Date(timestamp).toISOString().slice(0, 10) === candidate ? candidate : '';
-}
-
-/** Normalize individual URL values and canonicalize a reversed range. */
-export function normalizeFinancePeriodFilters(
-  input: Partial<Record<keyof FinancePeriodFilters, unknown>>,
-): FinancePeriodFilters {
-  const from = normalizeDateOnly(input.from);
-  const to = normalizeDateOnly(input.to);
-
-  if (from && to && from > to) return { from: to, to: from };
-  return { from, to };
-}
-
-export function parseFinancePeriodFilters(
-  searchParams: Pick<URLSearchParams, 'get'>,
-): FinancePeriodFilters {
-  return normalizeFinancePeriodFilters({
-    from: searchParams.get('from'),
-    to: searchParams.get('to'),
-  });
 }

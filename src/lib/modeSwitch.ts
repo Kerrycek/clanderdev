@@ -88,10 +88,7 @@ export function computeOtherModeUrl(opts: {
 
   if (opts.mode === 'admin') {
     const targetRest = rewriteAdminPathForUserScope(rest);
-    // Admin Finance routes collapse into the personal payment page. Their
-    // user/date/keyset parameters have different semantics there, so never
-    // carry them across scopes.
-    const safeSearch = targetRest && !matchesPathPrefix(rest, '/payments') ? search : '';
+    const safeSearch = targetRest ? search : '';
     return `/app${targetRest}${safeSearch}${hash}`;
   }
 

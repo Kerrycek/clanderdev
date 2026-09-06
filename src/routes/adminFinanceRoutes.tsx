@@ -11,10 +11,6 @@ const FinanceOverviewPage = lazyRoute(
   () => import('../pages/app/admin/FinanceOverviewPage'),
   'FinanceOverviewPage',
 );
-const PaymentHistoryPage = lazyRoute(
-  () => import('../pages/app/admin/PaymentHistoryPage'),
-  'PaymentHistoryPage',
-);
 const IncomingPaymentDetailPage = lazyRoute(
   () => import('../pages/app/admin/IncomingPaymentDetailPage'),
   'IncomingPaymentDetailPage',
@@ -39,7 +35,6 @@ export const adminFinanceRoutes = [
     element: <FinanceGlobalAdminGate />,
     children: [
       { path: 'payments', element: <FinanceOverviewPage /> },
-      { path: 'payments/history', element: <PaymentHistoryPage /> },
     ],
   },
 ];

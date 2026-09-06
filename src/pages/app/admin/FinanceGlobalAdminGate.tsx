@@ -9,9 +9,9 @@ export function canViewGlobalFinance(role: UserRole): boolean {
 }
 
 /**
- * The payment API restricts support accounts to their own user and payments.
- * Keep global totals/history behind an administrator boundary so a restricted
- * response can never be presented as a complete organization-wide result.
+ * Ordinary users can read only their own payment-related data. Keep global
+ * totals behind an administrator boundary so a user-scoped response can never
+ * be presented as a complete organization-wide result.
  */
 export function FinanceGlobalAdminGate() {
   const auth = useAuth();

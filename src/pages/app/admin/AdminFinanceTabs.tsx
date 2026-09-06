@@ -28,12 +28,6 @@ export function AdminFinanceTabs() {
           end: true,
           testId: 'admin.finance.tabs.incoming',
         },
-        ...(canViewGlobal ? [{
-          to: `${basePath}/payments/history`,
-          label: t('finance.tabs.history'),
-          end: true,
-          testId: 'admin.finance.tabs.history',
-        }] : []),
         {
           to: `${basePath}/payments/forecast`,
           label: t('finance.tabs.forecast'),
