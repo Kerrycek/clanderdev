@@ -138,7 +138,7 @@ test('@pr-smoke @pr-smoke-mobile admin locks and unlocks a real pool, while inhe
   expect(nodeReads).toBe(1);
 });
 
-test('a failed pool lock is guarded against duplicate submits and can be retried with its reason', async ({
+test('a definitively rejected pool lock is guarded against duplicate submits and can be retried with its reason', async ({
   page,
 }) => {
   const pools = [pool(11, { label: 'Retry pool' })];
@@ -155,7 +155,7 @@ test('a failed pool lock is guarded against duplicate submits and can be retried
       if (payloads.length === 1) {
         await firstResponse;
         return {
-          status: 503,
+          status: 409,
           contentType: 'application/json',
           body: JSON.stringify({
             status: false,
@@ -196,6 +196,319 @@ test('a failed pool lock is guarded against duplicate submits and can be retried
     { pool: { lock: true, reason: 'Keep this reason' } },
   ]);
   await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+});
+
+test('a pending pool mutation stays guarded across a stale list response and Storage remount', async ({ page }) => {
+  const pools = [pool(11, { label: 'Pending pool' })];
+  let poolReads = 0;
+  let mutations = 0;
+  let releaseStaleList: (() => void) | undefined;
+  let releaseMutation: (() => void) | undefined;
+  const staleListGate = new Promise<void>((resolve) => {
+    releaseStaleList = resolve;
+  });
+  const mutationGate = new Promise<void>((resolve) => {
+    releaseMutation = resolve;
+  });
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': async () => {
+      poolReads += 1;
+      if (poolReads === 1) return { pools };
+      await staleListGate;
+      return { pools: [pool(11, { label: 'Pending pool' })] };
+    },
+    'POST pools/11/set_maintenance': async () => {
+      mutations += 1;
+      await mutationGate;
+      return {
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: false, message: 'definitively rejected', response: null }),
+      };
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId('admin.node.storage.refresh').click();
+  await expect.poll(() => poolReads).toBe(2);
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+  await expect.poll(() => mutations).toBe(1);
+
+  releaseStaleList?.();
+  await expect(page.getByTestId('admin.node.storage.refresh')).toBeEnabled();
+  await page.getByTestId('admin.node.tab.overview').evaluate((button: HTMLButtonElement) => button.click());
+  await page.getByTestId('admin.node.tab.storage').evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+
+  releaseMutation?.();
+  await expect(page.getByTestId(`${control}.lock`)).toBeEnabled();
+  expect(mutations).toBe(1);
+});
+
+test('@pr-smoke @pr-smoke-mobile an applied 503 pool lock is reconciled by exact read-back without a second POST', async ({
+  page,
+}) => {
+  const pools = [pool(11, { label: 'Ambiguous pool' })];
+  const payloads: unknown[] = [];
+  let poolReads = 0;
+  let readbacks = 0;
+  let releaseStaleList: (() => void) | undefined;
+  let releaseReadback: (() => void) | undefined;
+  const staleListGate = new Promise<void>((resolve) => {
+    releaseStaleList = resolve;
+  });
+  const readbackGate = new Promise<void>((resolve) => {
+    releaseReadback = resolve;
+  });
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': async () => {
+      poolReads += 1;
+      if (poolReads === 1) return { pools };
+      const stalePools = [pool(11, { label: 'Ambiguous pool' })];
+      await staleListGate;
+      return { pools: stalePools };
+    },
+    'GET pools/11': async () => {
+      readbacks += 1;
+      await readbackGate;
+      return { pool: pools[0] };
+    },
+    'POST pools/11/set_maintenance': ({ reqJson }) => {
+      payloads.push(reqJson);
+      pools[0].maintenance_lock = 'lock';
+      pools[0].maintenance_lock_reason = 'Applied before 503';
+      return {
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: false,
+          message: 'response lost after apply',
+          response: null,
+        }),
+      };
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId('admin.node.storage.refresh').click();
+  await expect.poll(() => poolReads).toBe(2);
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.reason`).fill('Applied before 503');
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+
+  await expect.poll(() => payloads).toHaveLength(1);
+  await expect.poll(() => readbacks).toBe(1);
+  await expect(page.getByTestId(`${control}.lock_dialog.confirm`)).toBeDisabled();
+  await expect(page.getByTestId(`${control}.lock_dialog.cancel`)).toBeDisabled();
+  await page.getByTestId(`${control}.lock_dialog.confirm`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(payloads).toHaveLength(1);
+
+  releaseReadback?.();
+  await expect(page.getByTestId(`${control}.lock_dialog`)).toHaveCount(0);
+  await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.reason`)).toContainText('Applied before 503');
+  releaseStaleList?.();
+  await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.lock`)).toHaveCount(0);
+  expect(payloads).toHaveLength(1);
+  expect(readbacks).toBe(1);
+});
+
+test('a null reason in an exact non-applied read-back permits a safe retry', async ({ page }) => {
+  const pools = [pool(11, { label: 'Null reason pool', maintenance_lock_reason: null })];
+  let mutations = 0;
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': () => ({ pools }),
+    'GET pools/11': () => ({ pool: pools[0] }),
+    'POST pools/11/set_maintenance': () => {
+      mutations += 1;
+      if (mutations === 1) {
+        return {
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ status: false, message: 'unknown mutation outcome', response: null }),
+        };
+      }
+      pools[0].maintenance_lock = 'lock';
+      pools[0].maintenance_lock_reason = 'Retry after read-back';
+      return {};
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.reason`).fill('Retry after read-back');
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+
+  await expect.poll(() => mutations).toBe(1);
+  await expect(page.getByTestId(`${control}.lock_dialog`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.lock_dialog.confirm`)).toBeEnabled();
+  await expect(page.getByTestId(`${control}.reason`)).toHaveValue('Retry after read-back');
+
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+  await expect.poll(() => mutations).toBe(2);
+  await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+});
+
+test('an ambiguous pool mutation stays fail-closed when its exact read-back fails', async ({ page }) => {
+  const pools = [pool(11, { label: 'Unverified pool' })];
+  let mutations = 0;
+  let readbacks = 0;
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': () => ({ pools }),
+    'GET pools/11': () => {
+      readbacks += 1;
+      return {
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: false, message: 'read-back unavailable', response: null }),
+      };
+    },
+    'POST pools/11/set_maintenance': () => {
+      mutations += 1;
+      return {
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: false, message: 'unknown mutation outcome', response: null }),
+      };
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+
+  await expect(page.getByTestId(`${control}.verification_required`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.lock_dialog.confirm`)).toBeDisabled();
+  await expect(page.getByTestId('toast.viewport')).toContainText('read-back unavailable');
+  expect(mutations).toBe(1);
+  expect(readbacks).toBe(1);
+
+  await page.getByTestId(`${control}.lock_dialog.cancel`).click();
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+
+  await page.getByTestId('admin.node.tab.overview').click();
+  await page.getByTestId('admin.node.tab.storage').click();
+  await expect(page.getByTestId(`${control}.verification_required`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+});
+
+test('@pr-smoke @pr-smoke-mobile a successful pool lock keeps stale actions disabled until the exact list refetch finishes', async ({
+  page,
+}) => {
+  const pools = [pool(11, { label: 'Slow refresh pool' })];
+  let poolReads = 0;
+  let mutations = 0;
+  let releaseRefresh: (() => void) | undefined;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': async () => {
+      poolReads += 1;
+      if (poolReads > 1) await refreshGate;
+      return { pools };
+    },
+    'POST pools/11/set_maintenance': () => {
+      mutations += 1;
+      pools[0].maintenance_lock = 'lock';
+      pools[0].maintenance_lock_reason = 'Slow refresh';
+      return {};
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.reason`).fill('Slow refresh');
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+
+  await expect.poll(() => mutations).toBe(1);
+  await expect.poll(() => poolReads).toBeGreaterThan(1);
+  await expect(page.getByTestId(`${control}.lock_dialog`)).toHaveCount(0);
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await expect(page.getByTestId(`${control}.verification_required`)).toHaveCount(0);
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+
+  await page.getByTestId('admin.node.tab.overview').click();
+  await expect(page.getByTestId('admin.node.panel.overview')).toBeVisible();
+  await page.getByTestId('admin.node.tab.storage').click();
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+
+  releaseRefresh?.();
+  await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+  await expect(page.getByTestId(`${control}.unlock`)).toBeEnabled();
+  expect(mutations).toBe(1);
+});
+
+test('a successful mutation that finishes outside Storage forces a refresh before clearing its guard', async ({ page }) => {
+  const pools = [pool(11, { label: 'Inactive refresh pool' })];
+  let poolReads = 0;
+  let mutations = 0;
+  let releaseMutation: (() => void) | undefined;
+  let releaseRefresh: (() => void) | undefined;
+  const mutationGate = new Promise<void>((resolve) => {
+    releaseMutation = resolve;
+  });
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+
+  await installAdminNodeHandlers(page, {
+    'GET pools': async () => {
+      poolReads += 1;
+      if (poolReads > 1) await refreshGate;
+      return { pools };
+    },
+    'POST pools/11/set_maintenance': async () => {
+      mutations += 1;
+      await mutationGate;
+      pools[0].maintenance_lock = 'lock';
+      pools[0].maintenance_lock_reason = 'Finished outside Storage';
+      return {};
+    },
+  });
+
+  const control = 'admin.node.storage.pool.11.maintenance';
+  await page.goto('/admin/nodes/5?section=storage');
+  await page.getByTestId(`${control}.lock`).click();
+  await page.getByTestId(`${control}.reason`).fill('Finished outside Storage');
+  await page.getByTestId(`${control}.lock_dialog.confirm`).click();
+  await expect.poll(() => mutations).toBe(1);
+
+  await page.getByTestId('admin.node.tab.overview').evaluate((button: HTMLButtonElement) => button.click());
+  await expect(page.getByTestId('admin.node.panel.overview')).toBeVisible();
+  releaseMutation?.();
+  await expect.poll(() => poolReads).toBeGreaterThan(1);
+
+  await page.getByTestId('admin.node.tab.storage').click();
+  await expect(page.getByTestId(`${control}.lock`)).toBeDisabled();
+  await expect(page.getByTestId(`${control}.verification_required`)).toHaveCount(0);
+  await page.getByTestId(`${control}.lock`).evaluate((button: HTMLButtonElement) => button.click());
+  expect(mutations).toBe(1);
+
+  releaseRefresh?.();
+  await expect(page.getByTestId(`${control}.unlock`)).toBeVisible();
+  expect(mutations).toBe(1);
 });
 
 test('an ordinary user cannot reach pool maintenance controls or invoke the admin-only action', async ({

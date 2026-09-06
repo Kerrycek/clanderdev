@@ -13,6 +13,8 @@ import { formatErrorMessage } from '../../../../lib/errors';
 import {
   MaintenanceControl,
   parseMaintenanceState,
+  type MaintenanceChange,
+  type MaintenanceReadback,
 } from '../cluster/MaintenanceControl';
 import {
   extractNodePoolDevices,
@@ -27,6 +29,7 @@ import {
 
 type T = (key: any, params?: Record<string, unknown>) => string;
 type BadgeVariant = 'neutral' | 'ok' | 'warn' | 'danger' | 'info' | 'black';
+export type PoolMaintenanceGuardMap = Readonly<Record<string, 'settling' | 'unverified'>>;
 
 const STATE_VARIANTS: Record<string, BadgeVariant> = {
   online: 'ok',
@@ -78,15 +81,18 @@ function roleLabel(t: T, role: unknown): string {
   return labels[value] ?? t('admin.node.storage.role.unknown');
 }
 
-type PoolMaintenanceOptions = { lock: boolean; reason?: string };
-
 function PoolPanel(props: {
   pool: NodePool;
   t: T;
   aggregate?: boolean;
   canManageMaintenance?: boolean;
-  onSetMaintenance?: (opts: PoolMaintenanceOptions) => Promise<unknown>;
+  onSetMaintenance?: (opts: MaintenanceChange) => Promise<unknown>;
   onMaintenanceChanged?: () => Promise<unknown> | void;
+  onReadMaintenance?: () => Promise<MaintenanceReadback>;
+  verificationBlocked?: boolean;
+  settlingBlocked?: boolean;
+  onVerificationRequired?: () => void;
+  onSettlingChange?: (settling: boolean) => void;
 }) {
   const { pool, t } = props;
   const capacity = nodePoolCapacity(pool);
@@ -144,6 +150,11 @@ function PoolPanel(props: {
                 testId={maintenanceTestId}
                 setMaintenance={props.onSetMaintenance}
                 onChanged={props.onMaintenanceChanged}
+                readMaintenance={props.onReadMaintenance}
+                verificationBlocked={props.verificationBlocked}
+                settlingBlocked={props.settlingBlocked}
+                onVerificationRequired={props.onVerificationRequired}
+                onSettlingChange={props.onSettlingChange}
               />
             ) : (
               <Badge
@@ -274,8 +285,12 @@ export function NodeStorageCard(props: {
   fetching: boolean;
   error: unknown;
   onRefresh: () => void;
-  onSetPoolMaintenance: (poolId: number, opts: PoolMaintenanceOptions) => Promise<unknown>;
+  onSetPoolMaintenance: (poolId: number, opts: MaintenanceChange) => Promise<unknown>;
   onPoolMaintenanceChanged: () => Promise<unknown> | void;
+  onReadPoolMaintenance: (poolId: number) => Promise<MaintenanceReadback>;
+  poolMaintenanceGuards: PoolMaintenanceGuardMap;
+  onPoolMaintenanceVerificationRequired: (poolId: number) => void;
+  onPoolMaintenanceSettlingChange: (poolId: number, settling: boolean) => void;
 }) {
   const {
     t,
@@ -288,6 +303,10 @@ export function NodeStorageCard(props: {
     onRefresh,
     onSetPoolMaintenance,
     onPoolMaintenanceChanged,
+    onReadPoolMaintenance,
+    poolMaintenanceGuards,
+    onPoolMaintenanceVerificationRequired,
+    onPoolMaintenanceSettlingChange,
   } = props;
   const summary = useMemo(() => summarizeNodePools(pools), [pools]);
   const aggregate = useMemo(() => nodeAggregatePool(node), [node]);
@@ -361,6 +380,11 @@ export function NodeStorageCard(props: {
                 canManageMaintenance={canManageMaintenance}
                 onSetMaintenance={(opts) => onSetPoolMaintenance(pool.id, opts)}
                 onMaintenanceChanged={onPoolMaintenanceChanged}
+                onReadMaintenance={() => onReadPoolMaintenance(pool.id)}
+                verificationBlocked={poolMaintenanceGuards[String(pool.id)] === 'unverified'}
+                settlingBlocked={poolMaintenanceGuards[String(pool.id)] === 'settling'}
+                onVerificationRequired={() => onPoolMaintenanceVerificationRequired(pool.id)}
+                onSettlingChange={(settling) => onPoolMaintenanceSettlingChange(pool.id, settling)}
               />
             ))}
           </div>

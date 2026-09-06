@@ -5,12 +5,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   evacuateNode,
   fetchNode,
+  fetchPool,
   fetchNodePools,
   fetchNodes,
   fetchNodeStatuses,
   setNodeMaintenance,
   setPoolMaintenance,
   type NodeEvacuateResult,
+  type NodePool,
 } from '../../../lib/api/nodes';
 import { fetchActiveTransactionChains, fetchTransactions } from '../../../lib/api/transactions';
 import { fetchPublicNodeStatus } from '../../../lib/api/public';
@@ -39,7 +41,10 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { LockStateStaleAlert } from '../../../components/ui/LockStateStaleAlert';
 import { ObjectHeader } from '../../../components/ui/ObjectHeader';
 import { NodeDetailTabs, NodeMaintenanceSection, NodeOverviewSection } from './nodeDetail/NodeDetailSections';
-import { NodeStorageCard } from './nodeDetail/NodeStorageCard';
+import {
+  NodeStorageCard,
+  type PoolMaintenanceGuardMap,
+} from './nodeDetail/NodeStorageCard';
 import { NodeLifecycleHeaderActions } from './nodes/NodeLifecycleHeaderActions';
 import { AdminObjectMutationRecovery } from './AdminObjectMutationRecovery';
 import { parseNodeDetailSection, type NodeDetailSection } from './nodeDetail/NodeStorageModel';
@@ -208,17 +213,86 @@ export function NodeDetailPage() {
   const poolsQueryKey = ['nodes', 'pools', { nodeId, limit: 500 }] as const;
   const poolsQ = useQuery({
     queryKey: poolsQueryKey,
-    queryFn: async () => (await fetchNodePools(nodeId, { limit: 500 })).data,
+    queryFn: async ({ signal }) => (await fetchNodePools(nodeId, { limit: 500, signal })).data,
     enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'storage',
     refetchInterval: tierSlowRefetchMs,
   });
+  const poolMaintenanceGuardsKey = ['nodes', 'pools', 'maintenance-guards', { nodeId }] as const;
+  const poolMaintenanceGuardsQ = useQuery<PoolMaintenanceGuardMap>({
+    queryKey: poolMaintenanceGuardsKey,
+    queryFn: async () => ({}),
+    enabled: false,
+    initialData: {},
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+  const cancelStalePoolList = () => queryClient.cancelQueries(
+    { queryKey: poolsQueryKey, exact: true },
+    { silent: true, revert: false },
+  );
 
   const refreshPoolsAfterMaintenance = async () => {
-    await queryClient.invalidateQueries({
+    await cancelStalePoolList();
+    await queryClient.fetchQuery({
       queryKey: poolsQueryKey,
-      exact: true,
-      refetchType: 'active',
+      queryFn: async ({ signal }) => (await fetchNodePools(nodeId, { limit: 500, signal })).data,
+      staleTime: 0,
     });
+  };
+
+  const setPoolMaintenanceGuard = (
+    poolId: number,
+    guard: PoolMaintenanceGuardMap[string] | null,
+  ) => {
+    queryClient.setQueryData<PoolMaintenanceGuardMap>(poolMaintenanceGuardsKey, (current = {}) => {
+      if (guard) return { ...current, [poolId]: guard };
+      const { [poolId]: _removed, ...rest } = current;
+      return rest;
+    });
+  };
+
+  const readPoolMaintenance = async (poolId: number) => {
+    await cancelStalePoolList();
+    try {
+      const latest = (await fetchPool(poolId)).data;
+      const latestNodeId = typeof latest.node === 'number' ? latest.node : latest.node?.id;
+      if (!Number.isSafeInteger(latestNodeId) || latestNodeId !== nodeId) {
+        throw new TypeError(`pools/${poolId}: response node does not match requested node`);
+      }
+
+      const maintenanceState = typeof latest.maintenance_lock === 'string'
+        ? latest.maintenance_lock.trim().toLowerCase()
+        : '';
+      if (!['no', 'lock', 'master_lock'].includes(maintenanceState)) {
+        throw new TypeError(`pools/${poolId}: invalid maintenance state in read-back`);
+      }
+
+      const rawReason = latest.maintenance_lock_reason;
+      if (rawReason !== undefined && rawReason !== null && typeof rawReason !== 'string') {
+        throw new TypeError(`pools/${poolId}: invalid maintenance reason in read-back`);
+      }
+      const maintenanceReason = typeof rawReason === 'string' ? rawReason.trim() : '';
+      const reconciledPool: NodePool = {
+        ...latest,
+        maintenance_lock: maintenanceState,
+        maintenance_lock_reason: maintenanceReason,
+      };
+
+      // Prevent a list request that started before the mutation from publishing
+      // stale state after this exact read-back has established the outcome.
+      await cancelStalePoolList();
+      queryClient.setQueryData<NodePool[]>(poolsQueryKey, (current) => (
+        current?.map((pool) => pool.id === poolId ? reconciledPool : pool)
+      ));
+
+      return { value: maintenanceState, reason: maintenanceReason };
+    } catch (error) {
+      // Validation failures are as untrusted as transport failures: make sure
+      // no older list response can erase the persistent verification guard.
+      await cancelStalePoolList();
+      throw error;
+    }
   };
 
   const node = nodeQ.data;
@@ -530,6 +604,12 @@ export function NodeDetailPage() {
                 onRefresh={() => void poolsQ.refetch()}
                 onSetPoolMaintenance={setPoolMaintenance}
                 onPoolMaintenanceChanged={refreshPoolsAfterMaintenance}
+                onReadPoolMaintenance={readPoolMaintenance}
+                poolMaintenanceGuards={poolMaintenanceGuardsQ.data}
+                onPoolMaintenanceVerificationRequired={(poolId) => setPoolMaintenanceGuard(poolId, 'unverified')}
+                onPoolMaintenanceSettlingChange={(poolId, settling) => (
+                  setPoolMaintenanceGuard(poolId, settling ? 'settling' : null)
+                )}
               />
             </div>
           ) : null}
