@@ -8,10 +8,26 @@ import {
 export const BACKUP_CENTER_TABS = ['overview', 'snapshots', 'downloads', 'plans'] as const;
 export type BackupCenterTab = (typeof BACKUP_CENTER_TABS)[number];
 
+export const BACKUP_CENTER_INTENTS = ['restore'] as const;
+export type BackupCenterIntent = (typeof BACKUP_CENTER_INTENTS)[number];
+
 export function parseBackupCenterTab(value: string | null | undefined): BackupCenterTab {
   return BACKUP_CENTER_TABS.includes(value as BackupCenterTab)
     ? (value as BackupCenterTab)
     : 'overview';
+}
+
+export function parseBackupCenterIntent(
+  value: string | null | undefined,
+): BackupCenterIntent | undefined {
+  return BACKUP_CENTER_INTENTS.includes(value as BackupCenterIntent)
+    ? (value as BackupCenterIntent)
+    : undefined;
+}
+
+export function backupCenterCount(value: number, complete: boolean): number | string {
+  if (complete) return value;
+  return value > 0 ? `≥ ${value}` : '—';
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

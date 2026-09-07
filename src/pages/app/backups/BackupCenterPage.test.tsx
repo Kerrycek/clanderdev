@@ -136,6 +136,22 @@ describe('BackupCenterPage', () => {
     expect(downloadsMock).toHaveBeenCalledTimes(1);
   });
 
+  it('opens a guided restore workflow without loading every dataset snapshot list', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByTestId('backups.quick.restore'));
+
+    expect(await screen.findByTestId('backups.restore.guide')).toBeVisible();
+    expect(screen.getByTestId('backups.restore.warning')).toBeVisible();
+    expect(screen.getByTestId('backups.workspace.empty')).toHaveTextContent(
+      'backups.restore.workspace.empty.title',
+    );
+    expect(screen.queryByTestId('backups.workspace.snapshots')).not.toBeInTheDocument();
+    expect(datasetsMock).toHaveBeenCalledTimes(1);
+    expect(downloadsMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not render tools for a dataset outside the loaded account scope', async () => {
     renderPage('/app/backups?tab=snapshots&dataset=999');
 

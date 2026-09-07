@@ -205,6 +205,17 @@ export const csStorage = {
   "dataset.snapshots.confirm.rollback.title": "Obnovit snapshot?",
   "dataset.snapshots.confirm.rollback.body":
     "Cílový dataset se vrátí do stavu {snapshot}. Data zapsaná po tomto snapshotu mohou být ztracena.",
+  "dataset.snapshots.confirm.rollback.uncertain":
+    "Server už mohl tento rollback přijmout. Proběhl pokus o nové načtení stavu, ale další pokus zůstává zablokovaný, dokud nezkontroluješ Úlohy a nevyřešíš uložený bezpečnostní zámek.",
+  "dataset.snapshots.confirm.rollback.preflight_failed":
+    "Nepodařilo se ověřit aktivní úlohy datasetu. Rollback nebyl odeslán; obnov stránku a zkus to znovu.",
+  "dataset.snapshots.rollback_guard.title": "Odemknout místní pojistku rollbacku?",
+  "dataset.snapshots.rollback_guard.body":
+    "Kontroluješ nejistý rollback na snapshot {label} (ID {id}). Pojistku odemkni až po ověření v Úlohách a datasetu, zda se provedl právě tento rollback.",
+  "dataset.snapshots.rollback_guard.risk_title": "Tímto neověřuješ výsledek serveru",
+  "dataset.snapshots.rollback_guard.risk_body":
+    "Odstraní se pouze místní bezpečnostní zámek v tomto prohlížeči. Serverová operace se nezruší, nezopakuje ani nezmění. Další rollback bez ověření může dataset vrátit znovu.",
+  "dataset.snapshots.rollback_guard.unlock": "Odemknout místní pojistku",
   "dataset.snapshots.confirm.delete.title": "Smazat snapshot?",
   "dataset.snapshots.confirm.delete.body":
     "Snapshot {snapshot} bude trvale smazán. Existující odkazy pro stažení z něj mohou přestat fungovat.",

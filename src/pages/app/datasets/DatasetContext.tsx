@@ -6,7 +6,7 @@ import type { ObjectRef } from '../../../lib/objectRef';
 
 export interface DatasetContextValue {
   dataset: Dataset;
-  refetch: () => void;
+  refetch: () => Promise<unknown>;
 
   section: 'datasets' | 'nas';
   listPath: string;
@@ -29,7 +29,7 @@ export interface DatasetContextValue {
   chainsStale: boolean;
   activeChainIds: number[];
 
-  refetchChains: () => void;
+  refetchChains: () => Promise<unknown>;
 }
 
 const DatasetContext = createContext<DatasetContextValue | null>(null);

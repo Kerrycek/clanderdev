@@ -34,6 +34,26 @@ describe('localLocks', () => {
     expect(normalizeLocalLock(JSON.parse(JSON.stringify(lock)))).toEqual(lock);
   });
 
+  it('round-trips a dataset snapshot rollback proof only for its Dataset scope', () => {
+    const intent = {
+      type: 'dataset-snapshot-rollback' as const,
+      snapshotId: 91,
+      snapshotLabel: 'before-upgrade',
+    };
+    const lock = createLocalLock(objectRef('Dataset', 10), 1_000_000, {
+      uncertain: true,
+      uncertaintyId: 'rollback-generation-1',
+      intent,
+    });
+
+    expect(normalizeLocalMutationIntent(intent)).toEqual(intent);
+    expect(normalizeLocalLock(JSON.parse(JSON.stringify(lock)))).toEqual(lock);
+    expect(normalizeLocalMutationIntent({ ...intent, snapshotId: 0 })).toBeNull();
+    expect(normalizeLocalMutationIntent({ ...intent, snapshotLabel: ' ' })).toBeNull();
+    expect(normalizeLocalMutationIntent({ ...intent, unexpected: true })).toBeNull();
+    expect(normalizeLocalLock({ ...lock, kind: 'Vps', key: 'Vps:10' })).toBeNull();
+  });
+
   it('rejects unknown, corrupt and wrongly scoped mutation intents', () => {
     const base = {
       key: 'IpAddress:10',

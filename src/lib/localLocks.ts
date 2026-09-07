@@ -2,6 +2,11 @@ import { normalizeObjectRef, objectRefKey, type ObjectRef } from './objectRef';
 
 export type LocalMutationIntent =
   | {
+    type: 'dataset-snapshot-rollback';
+    snapshotId: number;
+    snapshotLabel: string;
+  }
+  | {
     type: 'ip-route-assign';
     previousNetworkInterfaceId: null;
     expectedNetworkInterfaceId: number;
@@ -83,7 +88,7 @@ export interface LocalLock {
   /** Unique generation of the persisted uncertainty marker. */
   uncertaintyId?: string;
 
-  /** Strict, allowlisted proof target used when reconciling an ambiguous mutation. */
+  /** Strict, allowlisted review target used when reconciling an ambiguous mutation. */
   intent?: LocalMutationIntent;
 }
 
@@ -139,6 +144,10 @@ function isNullablePositiveId(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0);
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
 function hasExactKeys(value: Record<string, unknown>, expected: string[]): boolean {
   const keys = Object.keys(value).sort();
   return keys.length === expected.length
@@ -148,6 +157,20 @@ function hasExactKeys(value: Record<string, unknown>, expected: string[]): boole
 export function normalizeLocalMutationIntent(raw: unknown): LocalMutationIntent | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
+
+  if (value['type'] === 'dataset-snapshot-rollback') {
+    if (!hasExactKeys(value, ['type', 'snapshotId', 'snapshotLabel'])) return null;
+    const snapshotLabel = typeof value['snapshotLabel'] === 'string' ? value['snapshotLabel'].trim() : '';
+    if (!isPositiveSafeInteger(value['snapshotId'])
+      || !snapshotLabel
+      || snapshotLabel !== value['snapshotLabel']
+      || snapshotLabel.length > 255) return null;
+    return {
+      type: value['type'],
+      snapshotId: value['snapshotId'],
+      snapshotLabel,
+    };
+  }
 
   if (value['type'] === 'ip-route-assign') {
     if (!hasExactKeys(value, [
@@ -272,7 +295,8 @@ export function normalizeLocalLock(raw: unknown): LocalLock | null {
     : undefined;
   const hasIntent = Object.prototype.hasOwnProperty.call(anyRaw, 'intent');
   const normalizedIntent = hasIntent ? normalizeLocalMutationIntent(anyRaw.intent) : null;
-  if (hasIntent && (!normalizedIntent || ref.kind !== 'IpAddress')) return null;
+  const expectedIntentKind = normalizedIntent?.type === 'dataset-snapshot-rollback' ? 'Dataset' : 'IpAddress';
+  if (hasIntent && (!normalizedIntent || ref.kind !== expectedIntentKind)) return null;
   const intent = normalizedIntent ?? undefined;
 
   return {

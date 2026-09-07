@@ -169,6 +169,208 @@ test.describe('Backup center', () => {
     await expect(page.getByTestId('dataset.plans.assign.modal')).toBeHidden();
   });
 
+  test('@pr-smoke @pr-smoke-mobile guides an owner through a guarded restore workflow', async ({ page }, testInfo) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    let rollbackCalls = 0;
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'backup-user', level: 1 },
+      handlers: {
+        'GET datasets': () => ({
+          datasets: [
+            {
+              id: 10,
+              name: 'root',
+              full_name: 'mail.example/root',
+              object_state: 'active',
+              vps: { id: 20, hostname: 'mail.example' },
+              environment: { id: 7, label: 'Production' },
+              user: { id: 1, login: 'backup-user' },
+            },
+          ],
+          _meta: { total_count: 1 },
+        }),
+        'GET snapshot_downloads': () => ({
+          snapshot_downloads: [],
+          _meta: { total_count: 0 },
+        }),
+        'GET transaction_chains': () => ({
+          transaction_chains: [],
+          _meta: { total_count: 0 },
+        }),
+        'GET datasets/10/snapshots': () => ({
+          snapshots: [
+            {
+              id: 31,
+              name: 'before-upgrade',
+              label: 'Before upgrade',
+              created_at: '2026-08-10T09:00:00Z',
+            },
+          ],
+          _meta: { total_count: 1 },
+        }),
+        'POST datasets/10/snapshots/31/rollback': () => {
+          rollbackCalls += 1;
+          return { _meta: { action_state_id: 731 } };
+        },
+        'GET action_states/731': () => ({
+          action_state: { id: 731, finished: true, status: true, current: 1, total: 1 },
+        }),
+      },
+    });
+
+    await page.goto('/app/backups');
+    await page.getByTestId('backups.quick.restore').click();
+
+    await expect(page).toHaveURL(/(?=.*[?&]tab=snapshots)(?=.*[?&]intent=restore)/);
+    await expect(page.getByTestId('backups.restore.guide')).toBeVisible();
+    await expect(page.getByTestId('backups.restore.warning')).toBeVisible();
+    await page.getByTestId('backups.snapshots.row.10').click();
+    const layout = testInfo.project.name === 'mobile-chrome' ? 'card' : 'row';
+    const rollback = page.getByTestId(`dataset.snapshots.${layout}.31.rollback`);
+    await expect(rollback).toBeVisible();
+    await expect(rollback).toBeEnabled();
+    await rollback.click();
+
+    const confirm = page.getByTestId('dataset.snapshots.rollback_confirm.confirm');
+    const input = page.getByTestId('dataset.snapshots.rollback_confirm.input');
+    await expect(confirm).toBeDisabled();
+    await input.fill('before upgrade');
+    await expect(confirm).toBeDisabled();
+    await input.fill('Before upgrade');
+    await expect(confirm).toBeEnabled();
+    await confirm.click();
+
+    await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
+    expect(rollbackCalls).toBe(1);
+  });
+
+  test('@pr-smoke @pr-smoke-mobile requires exact manual unlock after an ambiguous rollback', async ({ page }, testInfo) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    let rollbackApplied = false;
+    let rollbackCalls = 0;
+    let datasetReadbacks = 0;
+    let snapshotReadbacks = 0;
+    const activeStateReadbacks: string[] = [];
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'backup-user', level: 1 },
+      handlers: {
+        'GET datasets': () => {
+          if (rollbackApplied) datasetReadbacks += 1;
+          return {
+            datasets: [{
+              id: 10,
+              name: 'root',
+              full_name: 'mail.example/root',
+              object_state: 'active',
+              vps: { id: 20, hostname: 'mail.example' },
+              environment: { id: 7, label: 'Production' },
+              user: { id: 1, login: 'backup-user' },
+            }],
+            _meta: { total_count: 1 },
+          };
+        },
+        'GET transaction_chains': ({ searchParams }) => {
+          const state = searchParams.get('transaction_chain[state]');
+          if (state) {
+            if (rollbackApplied) activeStateReadbacks.push(state);
+            return { transaction_chains: [] };
+          }
+          const limit = Number(searchParams.get('transaction_chain[limit]') ?? 10);
+          const oldChains = Array.from({ length: limit }, (_, index) => ({
+            id: 700 - index,
+            state: 'done',
+          }));
+          return {
+            // This newer terminal rollback targeted another snapshot. The UI
+            // must never treat it as exact proof for snapshot 31.
+            transaction_chains: rollbackApplied
+              ? [{ id: 701, name: 'rollback', state: 'done', snapshot_id: 32 }, ...oldChains]
+              : oldChains,
+          };
+        },
+        'GET datasets/10/snapshots': () => {
+          if (rollbackApplied) snapshotReadbacks += 1;
+          return {
+            snapshots: [{
+              id: 31,
+              name: 'before-upgrade',
+              label: 'Before upgrade',
+              created_at: '2026-08-10T09:00:00Z',
+            }],
+            _meta: { total_count: 1 },
+          };
+        },
+        'POST datasets/10/snapshots/31/rollback': () => {
+          rollbackApplied = true;
+          rollbackCalls += 1;
+          return { ok: true };
+        },
+      },
+    });
+
+    await page.goto('/app/backups?tab=snapshots&intent=restore&dataset=10');
+    const layout = testInfo.project.name === 'mobile-chrome' ? 'card' : 'row';
+    await page.getByTestId(`dataset.snapshots.${layout}.31.rollback`).click();
+    await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('Before upgrade');
+    await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
+
+    const confirm = page.getByTestId('dataset.snapshots.rollback_confirm.confirm');
+    await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeVisible();
+    await expect(confirm).toBeDisabled();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await expect.poll(() => datasetReadbacks).toBeGreaterThan(0);
+    await expect.poll(() => snapshotReadbacks).toBeGreaterThan(0);
+    await expect.poll(() => activeStateReadbacks.includes('rollbacking')).toBe(true);
+
+    await confirm.evaluate((button) => {
+      button.removeAttribute('disabled');
+      button.click();
+    });
+    await expect.poll(() => rollbackCalls).toBe(1);
+
+    await page.getByTestId('dataset.snapshots.rollback_confirm.cancel').click();
+    const persistedIntent = await page.evaluate(() => {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key?.includes('.uncertain.Dataset%3A10.')) continue;
+        const raw = window.localStorage.getItem(key);
+        if (raw) return JSON.parse(raw).intent;
+      }
+      return null;
+    });
+    expect(persistedIntent).toEqual({
+      type: 'dataset-snapshot-rollback',
+      snapshotId: 31,
+      snapshotLabel: 'Before upgrade',
+    });
+
+    await page.reload();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.open_tasks').click();
+    await expect(page.getByTestId('tasks.drawer')).toBeVisible();
+    await page.getByTestId('tasks.close-button').click();
+    await page.getByTestId('dataset.snapshots.rollback_uncertain.acknowledge').click();
+    const guardConfirm = page.getByTestId('dataset.snapshots.rollback_guard.confirm');
+    await expect(guardConfirm).toBeVisible();
+    await expect(guardConfirm).toContainText('Before upgrade');
+    await expect(guardConfirm).toContainText('ID 31');
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeVisible();
+    await expect(page.getByTestId(`dataset.snapshots.${layout}.31.rollback`)).toBeDisabled();
+
+    const guardInput = page.getByTestId('dataset.snapshots.rollback_guard.input');
+    const guardUnlock = page.getByTestId('dataset.snapshots.rollback_guard.unlock');
+    await guardInput.fill('32');
+    await expect(guardUnlock).toBeDisabled();
+    await guardInput.fill('31');
+    await expect(guardUnlock).toBeEnabled();
+    await guardUnlock.click();
+    await expect(page.getByTestId('dataset.snapshots.rollback_uncertain')).toBeHidden();
+    await expect(page.getByTestId(`dataset.snapshots.${layout}.31.rollback`)).toBeEnabled();
+    expect(rollbackCalls).toBe(1);
+  });
+
   test('keeps an administrator My view on explicit owned dataset requests', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
     const requestedDatasetIds: Array<string | null> = [];

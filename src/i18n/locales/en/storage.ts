@@ -200,6 +200,17 @@ export const enStorage = {
   "dataset.snapshots.confirm.rollback.title": "Rollback snapshot?",
   "dataset.snapshots.confirm.rollback.body":
     "This rolls the target dataset back to {snapshot}. Data written after that snapshot can be lost.",
+  "dataset.snapshots.confirm.rollback.uncertain":
+    "The server may already have accepted this rollback. A status refresh was attempted, but retry remains blocked until you review Tasks and reconcile the saved safety lock.",
+  "dataset.snapshots.confirm.rollback.preflight_failed":
+    "Active dataset tasks could not be checked. The rollback was not sent; refresh and try again.",
+  "dataset.snapshots.rollback_guard.title": "Unlock the local rollback guard?",
+  "dataset.snapshots.rollback_guard.body":
+    "You are reviewing the uncertain rollback to snapshot {label} (ID {id}). Unlock only after checking Tasks and the dataset to determine whether that exact rollback was applied.",
+  "dataset.snapshots.rollback_guard.risk_title": "This does not verify the server outcome",
+  "dataset.snapshots.rollback_guard.risk_body":
+    "This removes only this browser's local safety guard. It does not cancel, retry, or change the server operation. Retrying without verification could roll the dataset back again.",
+  "dataset.snapshots.rollback_guard.unlock": "Unlock local safety guard",
   "dataset.snapshots.confirm.delete.title": "Delete snapshot?",
   "dataset.snapshots.confirm.delete.body":
     "This permanently deletes {snapshot}. Existing download links based on it may stop working.",

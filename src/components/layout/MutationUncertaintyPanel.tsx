@@ -8,22 +8,30 @@ import { Button } from '../ui/Button';
 import { useChrome } from './ChromeContext';
 
 export type MutationReconcileResult = 'clear' | 'busy' | 'error';
+export type ManualMutationReconcileResult = MutationReconcileResult | 'manual';
 
-export function MutationUncertaintyPanel(props: {
+type MutationUncertaintyPanelProps = {
   object: ObjectRef;
   lock?: LocalLock;
-  reconcile: () => Promise<MutationReconcileResult>;
   testIdPrefix?: string;
-}) {
+} & ({
+  reconcile: () => Promise<ManualMutationReconcileResult>;
+  onManualConfirm: () => void;
+} | {
+  reconcile: () => Promise<MutationReconcileResult>;
+  onManualConfirm?: undefined;
+});
+
+export function MutationUncertaintyPanel(props: MutationUncertaintyPanelProps) {
   const { t } = useI18n();
   const chrome = useChrome();
-  const [reviewStarted, setReviewStarted] = useState(false);
+  const [reviewedGeneration, setReviewedGeneration] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [errorKey, setErrorKey] = useState<'refresh_failed' | 'still_busy' | null>(null);
   const testIdPrefix = props.testIdPrefix ?? 'vps.mutation.uncertain';
 
   useEffect(() => {
-    setReviewStarted(false);
+    setReviewedGeneration(null);
     setPending(false);
     setErrorKey(null);
   }, [props.lock?.uncertaintyId, props.object.id]);
@@ -31,18 +39,25 @@ export function MutationUncertaintyPanel(props: {
   if (!props.lock) return null;
 
   const acknowledge = async () => {
-    if (!reviewStarted || pending) return;
+    const generation = props.lock?.uncertaintyId;
+    if (!generation || reviewedGeneration !== generation || pending) return;
     setPending(true);
     setErrorKey(null);
     const result = await props.reconcile();
+    if (result === 'manual') {
+      setPending(false);
+      if (props.onManualConfirm) props.onManualConfirm();
+      else setErrorKey('refresh_failed');
+      return;
+    }
     if (result !== 'clear') {
       setErrorKey(result === 'busy' ? 'still_busy' : 'refresh_failed');
       setPending(false);
       if (result === 'busy') chrome.openTasks();
       return;
     }
-    chrome.acknowledgeUncertainLocalLock(props.object, props.lock?.uncertaintyId);
-    setReviewStarted(false);
+    chrome.acknowledgeUncertainLocalLock(props.object, generation);
+    setReviewedGeneration(null);
     setPending(false);
   };
 
@@ -60,7 +75,7 @@ export function MutationUncertaintyPanel(props: {
           size="sm"
           variant="secondary"
           onClick={() => {
-            setReviewStarted(true);
+            setReviewedGeneration(props.lock?.uncertaintyId ?? null);
             chrome.openTasks();
           }}
         >
@@ -70,7 +85,9 @@ export function MutationUncertaintyPanel(props: {
           testId={`${testIdPrefix}.acknowledge`}
           size="sm"
           variant="secondary"
-          disabled={!reviewStarted || pending}
+          disabled={!props.lock?.uncertaintyId
+            || reviewedGeneration !== props.lock.uncertaintyId
+            || pending}
           onClick={() => void acknowledge()}
         >
           {pending ? t('common.loading') : t('vps.mutation.uncertain.acknowledge')}

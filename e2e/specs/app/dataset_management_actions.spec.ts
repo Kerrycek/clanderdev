@@ -27,6 +27,38 @@ function ownedDataset(overrides: Record<string, unknown> = {}) {
 }
 
 test.describe('Dataset management actions', () => {
+  test('keeps completed and failed recent transaction chains on the overview', async ({ page }) => {
+    await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
+    const requestedStates: Array<string | null> = [];
+
+    await installHaveApiMock(page, {
+      user: { id: 1, login: 'admin', level: 99 },
+      handlers: {
+        'GET datasets/10': () => ownedDataset(),
+        'GET transaction_chains': ({ searchParams }) => {
+          const className = searchParams.get('transaction_chain[class_name]');
+          const rowId = searchParams.get('transaction_chain[row_id]');
+          const state = searchParams.get('transaction_chain[state]');
+          if (className !== 'Dataset' || rowId !== '10') return { transaction_chains: [] };
+          requestedStates.push(state);
+          return {
+            transaction_chains: state ? [] : [
+              { id: 912, label: 'Completed snapshot task', state: 'done' },
+              { id: 911, label: 'Failed snapshot task', state: 'failed' },
+            ],
+          };
+        },
+      },
+    });
+
+    await page.goto('/admin/datasets/10');
+
+    const history = page.getByTestId('dataset.overview.transactions');
+    await expect(history).toContainText('Completed snapshot task');
+    await expect(history).toContainText('Failed snapshot task');
+    expect(requestedStates).toContain(null);
+  });
+
   test('creates, edits, and deletes a dataset from the overview', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 

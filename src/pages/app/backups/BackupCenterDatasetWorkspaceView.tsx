@@ -21,9 +21,10 @@ interface BackupCenterDatasetWorkspaceViewProps {
   selectedDataset: Dataset | undefined;
   invalidSelection: boolean;
   section: 'snapshots' | 'plans';
+  restoreMode?: boolean;
   onSelect: (dataset: Dataset) => void;
   onClear: () => void;
-  onRefetch: () => void;
+  onRefetch: () => Promise<unknown>;
 }
 
 export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorkspaceViewProps) {
@@ -120,8 +121,12 @@ export function BackupCenterDatasetWorkspaceView(props: BackupCenterDatasetWorks
         ) : (
           <EmptyState
             testId="backups.workspace.empty"
-            title={t(`backups.${props.section}.workspace.empty.title`)}
-            body={t(`backups.${props.section}.workspace.empty.body`)}
+            title={t(props.restoreMode
+              ? 'backups.restore.workspace.empty.title'
+              : `backups.${props.section}.workspace.empty.title`)}
+            body={t(props.restoreMode
+              ? 'backups.restore.workspace.empty.body'
+              : `backups.${props.section}.workspace.empty.body`)}
           />
         )}
       </div>
