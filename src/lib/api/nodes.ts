@@ -119,6 +119,8 @@ export interface NodePool {
   used_space?: number;
   available_space?: number;
   checked_at?: string;
+  maintenance_lock?: 'no' | 'lock' | 'master_lock' | string;
+  maintenance_lock_reason?: string | null;
   [k: string]: unknown;
 }
 
@@ -335,7 +337,7 @@ export async function updateNode(nodeId: number, payload: NodeUpdateInput) {
   });
 }
 
-export async function fetchNodePools(nodeId: number, opts?: { limit?: number }) {
+export async function fetchNodePools(nodeId: number, opts?: { limit?: number; signal?: AbortSignal }) {
   const params: Record<string, number> = { node: nodeId };
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
 
@@ -344,6 +346,7 @@ export async function fetchNodePools(nodeId: number, opts?: { limit?: number }) 
     path: '/pools',
     namespace: 'pool',
     params,
+    signal: opts?.signal,
   });
 
   const raw = res.data as unknown;
@@ -354,6 +357,35 @@ export async function fetchNodePools(nodeId: number, opts?: { limit?: number }) 
   }
 
   return { ...res, data: expectArray<NodePool>(list, `nodes/${nodeId}/pools`) };
+}
+
+export async function fetchPool(poolId: number, opts?: { signal?: AbortSignal }) {
+  const res = await haveApiCall<unknown>({
+    method: 'GET',
+    path: `/pools/${poolId}`,
+    signal: opts?.signal,
+  });
+  const raw = res.data;
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new TypeError(`pools/${poolId}: expected object`);
+  }
+
+  const pool = raw as NodePool;
+  if (!Number.isSafeInteger(pool.id) || pool.id !== poolId) {
+    throw new TypeError(`pools/${poolId}: response id does not match requested pool`);
+  }
+
+  return { ...res, data: pool };
+}
+
+export async function setPoolMaintenance(poolId: number, opts: { lock: boolean; reason?: string }) {
+  return haveApiCall<void>({
+    method: 'POST',
+    path: `/pools/${poolId}/set_maintenance`,
+    namespace: 'pool',
+    params: { lock: opts.lock, reason: opts.reason },
+  });
 }
 
 export async function setNodeMaintenance(nodeId: number, opts: { lock: boolean; reason?: string }) {

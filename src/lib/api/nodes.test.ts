@@ -8,9 +8,11 @@ import {
 } from './nodeCreateReconciliation';
 import {
   createNode,
+  fetchPool,
   fetchNodePools,
   fetchNodes,
   NodeCreateIndeterminateError,
+  setPoolMaintenance,
 } from './nodes';
 
 function mockFetchOk(response: any) {
@@ -55,17 +57,62 @@ describe('nodes API wrappers', () => {
 
   test('fetchNodePools limits pools to the selected node', async () => {
     globalThis.fetch = mockFetchOk({ pools: [{ id: 7, name: 'tank' }] }) as typeof fetch;
+    const controller = new AbortController();
 
-    const res = await fetchNodePools(12, { limit: 100 });
+    const res = await fetchNodePools(12, { limit: 100, signal: controller.signal });
 
     expect(res.data).toEqual([{ id: 7, name: 'tank' }]);
 
-    const [url] = lastFetchCall();
+    const [url, init] = lastFetchCall();
     const u = new URL(String(url));
 
     expect(u.pathname).toBe('/v7.0/pools');
     expect(u.searchParams.get('pool[node]')).toBe('12');
     expect(u.searchParams.get('pool[limit]')).toBe('100');
+    expect(init?.signal).toBe(controller.signal);
+  });
+
+  test('fetchPool reads back the exact selected pool', async () => {
+    globalThis.fetch = mockFetchOk({
+      pool: { id: 11, node: { id: 5 }, maintenance_lock: 'lock', maintenance_lock_reason: 'Disk replacement' },
+    }) as typeof fetch;
+
+    const res = await fetchPool(11);
+
+    expect(res.data).toMatchObject({ id: 11, maintenance_lock: 'lock' });
+    const [url, init] = lastFetchCall();
+    expect(new URL(String(url)).pathname).toBe('/v7.0/pools/11');
+    expect(init?.method).toBe('GET');
+  });
+
+  test('fetchPool rejects a mismatched read-back identity', async () => {
+    globalThis.fetch = mockFetchOk({ pool: { id: 12, node: 5, maintenance_lock: 'no' } }) as typeof fetch;
+
+    await expect(fetchPool(11)).rejects.toThrow('response id does not match requested pool');
+  });
+
+  test('setPoolMaintenance locks the selected pool with a reason', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({}));
+
+    await setPoolMaintenance(11, { lock: true, reason: 'Disk replacement' });
+
+    const [url, init] = lastFetchCall();
+    expect(new URL(String(url)).pathname).toBe('/v7.0/pools/11/set_maintenance');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      pool: { lock: true, reason: 'Disk replacement' },
+    });
+  });
+
+  test('setPoolMaintenance unlocks without sending a reason', async () => {
+    vi.stubGlobal('fetch', mockFetchOk({}));
+
+    await setPoolMaintenance(12, { lock: false });
+
+    const [url, init] = lastFetchCall();
+    expect(new URL(String(url)).pathname).toBe('/v7.0/pools/12/set_maintenance');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ pool: { lock: false } });
   });
 
   test('marks an HTTP 5xx node create result indeterminate', async () => {

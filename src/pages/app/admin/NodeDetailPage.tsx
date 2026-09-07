@@ -5,16 +5,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   evacuateNode,
   fetchNode,
+  fetchPool,
   fetchNodePools,
   fetchNodes,
   fetchNodeStatuses,
   setNodeMaintenance,
+  setPoolMaintenance,
   type NodeEvacuateResult,
+  type NodePool,
 } from '../../../lib/api/nodes';
 import { fetchActiveTransactionChains, fetchTransactions } from '../../../lib/api/transactions';
 import { fetchPublicNodeStatus } from '../../../lib/api/public';
 import { getMetaActionStateId } from '../../../lib/api/haveapi';
 import { useAppMode } from '../../../app/appMode';
+import { useAuth } from '../../../app/auth';
 import { useI18n } from '../../../app/i18n';
 import { DetailShell } from '../../../components/layout/DetailShell';
 import { useChrome } from '../../../components/layout/ChromeContext';
@@ -37,7 +41,10 @@ import { LoadingState } from '../../../components/ui/LoadingState';
 import { LockStateStaleAlert } from '../../../components/ui/LockStateStaleAlert';
 import { ObjectHeader } from '../../../components/ui/ObjectHeader';
 import { NodeDetailTabs, NodeMaintenanceSection, NodeOverviewSection } from './nodeDetail/NodeDetailSections';
-import { NodeStorageCard } from './nodeDetail/NodeStorageCard';
+import {
+  NodeStorageCard,
+  type PoolMaintenanceGuardMap,
+} from './nodeDetail/NodeStorageCard';
 import { NodeLifecycleHeaderActions } from './nodes/NodeLifecycleHeaderActions';
 import { AdminObjectMutationRecovery } from './AdminObjectMutationRecovery';
 import { parseNodeDetailSection, type NodeDetailSection } from './nodeDetail/NodeStorageModel';
@@ -59,6 +66,7 @@ import {
 
 export function NodeDetailPage() {
   const { mode, basePath } = useAppMode();
+  const auth = useAuth();
   const { t } = useI18n();
   const queryClient = useQueryClient();
   const chrome = useChrome();
@@ -202,12 +210,90 @@ export function NodeDetailPage() {
     staleTime: 60000,
   });
 
+  const poolsQueryKey = ['nodes', 'pools', { nodeId, limit: 500 }] as const;
   const poolsQ = useQuery({
-    queryKey: ['nodes', 'pools', { nodeId, limit: 500 }],
-    queryFn: async () => (await fetchNodePools(nodeId, { limit: 500 })).data,
+    queryKey: poolsQueryKey,
+    queryFn: async ({ signal }) => (await fetchNodePools(nodeId, { limit: 500, signal })).data,
     enabled: Number.isFinite(nodeId) && nodeId > 0 && activeSection === 'storage',
     refetchInterval: tierSlowRefetchMs,
   });
+  const poolMaintenanceGuardsKey = ['nodes', 'pools', 'maintenance-guards', { nodeId }] as const;
+  const poolMaintenanceGuardsQ = useQuery<PoolMaintenanceGuardMap>({
+    queryKey: poolMaintenanceGuardsKey,
+    queryFn: async () => ({}),
+    enabled: false,
+    initialData: {},
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+  const cancelStalePoolList = () => queryClient.cancelQueries(
+    { queryKey: poolsQueryKey, exact: true },
+    { silent: true, revert: false },
+  );
+
+  const refreshPoolsAfterMaintenance = async () => {
+    await cancelStalePoolList();
+    await queryClient.fetchQuery({
+      queryKey: poolsQueryKey,
+      queryFn: async ({ signal }) => (await fetchNodePools(nodeId, { limit: 500, signal })).data,
+      staleTime: 0,
+    });
+  };
+
+  const setPoolMaintenanceGuard = (
+    poolId: number,
+    guard: PoolMaintenanceGuardMap[string] | null,
+  ) => {
+    queryClient.setQueryData<PoolMaintenanceGuardMap>(poolMaintenanceGuardsKey, (current = {}) => {
+      if (guard) return { ...current, [poolId]: guard };
+      const { [poolId]: _removed, ...rest } = current;
+      return rest;
+    });
+  };
+
+  const readPoolMaintenance = async (poolId: number) => {
+    await cancelStalePoolList();
+    try {
+      const latest = (await fetchPool(poolId)).data;
+      const latestNodeId = typeof latest.node === 'number' ? latest.node : latest.node?.id;
+      if (!Number.isSafeInteger(latestNodeId) || latestNodeId !== nodeId) {
+        throw new TypeError(`pools/${poolId}: response node does not match requested node`);
+      }
+
+      const maintenanceState = typeof latest.maintenance_lock === 'string'
+        ? latest.maintenance_lock.trim().toLowerCase()
+        : '';
+      if (!['no', 'lock', 'master_lock'].includes(maintenanceState)) {
+        throw new TypeError(`pools/${poolId}: invalid maintenance state in read-back`);
+      }
+
+      const rawReason = latest.maintenance_lock_reason;
+      if (rawReason !== undefined && rawReason !== null && typeof rawReason !== 'string') {
+        throw new TypeError(`pools/${poolId}: invalid maintenance reason in read-back`);
+      }
+      const maintenanceReason = typeof rawReason === 'string' ? rawReason.trim() : '';
+      const reconciledPool: NodePool = {
+        ...latest,
+        maintenance_lock: maintenanceState,
+        maintenance_lock_reason: maintenanceReason,
+      };
+
+      // Prevent a list request that started before the mutation from publishing
+      // stale state after this exact read-back has established the outcome.
+      await cancelStalePoolList();
+      queryClient.setQueryData<NodePool[]>(poolsQueryKey, (current) => (
+        current?.map((pool) => pool.id === poolId ? reconciledPool : pool)
+      ));
+
+      return { value: maintenanceState, reason: maintenanceReason };
+    } catch (error) {
+      // Validation failures are as untrusted as transport failures: make sure
+      // no older list response can erase the persistent verification guard.
+      await cancelStalePoolList();
+      throw error;
+    }
+  };
 
   const node = nodeQ.data;
   const title = node ? nodeTitle(node, nodeId) : `Node #${nodeId}`;
@@ -511,10 +597,19 @@ export function NodeDetailPage() {
                 t={t}
                 node={node}
                 pools={poolsQ.data ?? []}
+                canManageMaintenance={auth.role === 'admin'}
                 loading={poolsQ.isLoading}
                 fetching={poolsQ.isFetching}
                 error={poolsQ.error}
                 onRefresh={() => void poolsQ.refetch()}
+                onSetPoolMaintenance={setPoolMaintenance}
+                onPoolMaintenanceChanged={refreshPoolsAfterMaintenance}
+                onReadPoolMaintenance={readPoolMaintenance}
+                poolMaintenanceGuards={poolMaintenanceGuardsQ.data}
+                onPoolMaintenanceVerificationRequired={(poolId) => setPoolMaintenanceGuard(poolId, 'unverified')}
+                onPoolMaintenanceSettlingChange={(poolId, settling) => (
+                  setPoolMaintenanceGuard(poolId, settling ? 'settling' : null)
+                )}
               />
             </div>
           ) : null}

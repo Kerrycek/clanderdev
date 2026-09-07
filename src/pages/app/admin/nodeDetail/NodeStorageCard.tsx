@@ -11,6 +11,12 @@ import { StackedBar } from '../../../../components/ui/StackedBar';
 import { UsageBar } from '../../../../components/ui/UsageBar';
 import { formatErrorMessage } from '../../../../lib/errors';
 import {
+  MaintenanceControl,
+  parseMaintenanceState,
+  type MaintenanceChange,
+  type MaintenanceReadback,
+} from '../cluster/MaintenanceControl';
+import {
   extractNodePoolDevices,
   nodeAggregatePool,
   nodePoolCapacity,
@@ -23,6 +29,7 @@ import {
 
 type T = (key: any, params?: Record<string, unknown>) => string;
 type BadgeVariant = 'neutral' | 'ok' | 'warn' | 'danger' | 'info' | 'black';
+export type PoolMaintenanceGuardMap = Readonly<Record<string, 'settling' | 'unverified'>>;
 
 const STATE_VARIANTS: Record<string, BadgeVariant> = {
   online: 'ok',
@@ -74,7 +81,19 @@ function roleLabel(t: T, role: unknown): string {
   return labels[value] ?? t('admin.node.storage.role.unknown');
 }
 
-function PoolPanel(props: { pool: NodePool; t: T; aggregate?: boolean }) {
+function PoolPanel(props: {
+  pool: NodePool;
+  t: T;
+  aggregate?: boolean;
+  canManageMaintenance?: boolean;
+  onSetMaintenance?: (opts: MaintenanceChange) => Promise<unknown>;
+  onMaintenanceChanged?: () => Promise<unknown> | void;
+  onReadMaintenance?: () => Promise<MaintenanceReadback>;
+  verificationBlocked?: boolean;
+  settlingBlocked?: boolean;
+  onVerificationRequired?: () => void;
+  onSettlingChange?: (settling: boolean) => void;
+}) {
   const { pool, t } = props;
   const capacity = nodePoolCapacity(pool);
   const devices = extractNodePoolDevices(pool);
@@ -85,6 +104,11 @@ function PoolPanel(props: { pool: NodePool; t: T; aggregate?: boolean }) {
   const scanPercentRaw = typeof pool.scan_percent === 'number' && Number.isFinite(pool.scan_percent) ? pool.scan_percent : undefined;
   const scanPercent = scanPercentRaw === undefined ? undefined : Math.max(0, Math.min(100, scanPercentRaw));
   const scanActive = scan === 'scrub' || scan === 'resilver';
+  const maintenanceState = parseMaintenanceState(pool.maintenance_lock);
+  const maintenanceReason = typeof pool.maintenance_lock_reason === 'string'
+    ? pool.maintenance_lock_reason.trim()
+    : '';
+  const maintenanceTestId = `admin.node.storage.pool.${pool.id}.maintenance`;
 
   return (
     <div
@@ -113,6 +137,52 @@ function PoolPanel(props: { pool: NodePool; t: T; aggregate?: boolean }) {
           {t('admin.node.storage.checked_at')}: {formatDateTime(pool.checked_at)}
         </div>
       </div>
+
+      {!props.aggregate ? (
+        <div className="mt-4 border-t border-border pt-3" data-testid={`${maintenanceTestId}.section`}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium">{t('admin.node.storage.maintenance.title')}</span>
+            {props.canManageMaintenance && props.onSetMaintenance && props.onMaintenanceChanged ? (
+              <MaintenanceControl
+                value={maintenanceState}
+                reason={maintenanceReason}
+                label={nodePoolTitle(pool)}
+                testId={maintenanceTestId}
+                setMaintenance={props.onSetMaintenance}
+                onChanged={props.onMaintenanceChanged}
+                readMaintenance={props.onReadMaintenance}
+                verificationBlocked={props.verificationBlocked}
+                settlingBlocked={props.settlingBlocked}
+                onVerificationRequired={props.onVerificationRequired}
+                onSettlingChange={props.onSettlingChange}
+              />
+            ) : (
+              <Badge
+                variant={maintenanceState === 'no' ? 'ok' : 'warn'}
+                testId={`${maintenanceTestId}.state`}
+              >
+                {t(`admin.cluster.maintenance.state.${maintenanceState}`)}
+              </Badge>
+            )}
+          </div>
+          {maintenanceState !== 'no' ? (
+            <div className="mt-2 space-y-1 text-xs text-muted" data-testid={`${maintenanceTestId}.details`}>
+              <p>
+                {t(
+                  maintenanceState === 'master_lock'
+                    ? 'admin.node.storage.maintenance.inherited'
+                    : 'admin.node.storage.maintenance.direct'
+                )}
+              </p>
+              {maintenanceReason ? (
+                <p data-testid={`${maintenanceTestId}.reason`}>
+                  {t('admin.node.storage.maintenance.reason', { reason: maintenanceReason })}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {!props.aggregate ? (
         <div className="mt-4">
@@ -210,12 +280,34 @@ export function NodeStorageCard(props: {
   t: T;
   node: Node;
   pools: NodePool[];
+  canManageMaintenance: boolean;
   loading: boolean;
   fetching: boolean;
   error: unknown;
   onRefresh: () => void;
+  onSetPoolMaintenance: (poolId: number, opts: MaintenanceChange) => Promise<unknown>;
+  onPoolMaintenanceChanged: () => Promise<unknown> | void;
+  onReadPoolMaintenance: (poolId: number) => Promise<MaintenanceReadback>;
+  poolMaintenanceGuards: PoolMaintenanceGuardMap;
+  onPoolMaintenanceVerificationRequired: (poolId: number) => void;
+  onPoolMaintenanceSettlingChange: (poolId: number, settling: boolean) => void;
 }) {
-  const { t, node, pools, loading, fetching, error, onRefresh } = props;
+  const {
+    t,
+    node,
+    pools,
+    canManageMaintenance,
+    loading,
+    fetching,
+    error,
+    onRefresh,
+    onSetPoolMaintenance,
+    onPoolMaintenanceChanged,
+    onReadPoolMaintenance,
+    poolMaintenanceGuards,
+    onPoolMaintenanceVerificationRequired,
+    onPoolMaintenanceSettlingChange,
+  } = props;
   const summary = useMemo(() => summarizeNodePools(pools), [pools]);
   const aggregate = useMemo(() => nodeAggregatePool(node), [node]);
   const summaryComplete = !loading && !error && pools.length > 0 && summary.measuredPools === pools.length;
@@ -281,7 +373,19 @@ export function NodeStorageCard(props: {
         ) : (
           <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2" data-testid="admin.node.storage.pools">
             {pools.map((pool) => (
-              <PoolPanel key={pool.id} pool={pool} t={t} />
+              <PoolPanel
+                key={pool.id}
+                pool={pool}
+                t={t}
+                canManageMaintenance={canManageMaintenance}
+                onSetMaintenance={(opts) => onSetPoolMaintenance(pool.id, opts)}
+                onMaintenanceChanged={onPoolMaintenanceChanged}
+                onReadMaintenance={() => onReadPoolMaintenance(pool.id)}
+                verificationBlocked={poolMaintenanceGuards[String(pool.id)] === 'unverified'}
+                settlingBlocked={poolMaintenanceGuards[String(pool.id)] === 'settling'}
+                onVerificationRequired={() => onPoolMaintenanceVerificationRequired(pool.id)}
+                onSettlingChange={(settling) => onPoolMaintenanceSettlingChange(pool.id, settling)}
+              />
             ))}
           </div>
         )}
