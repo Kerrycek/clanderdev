@@ -36,7 +36,7 @@ describe('modeSwitch', () => {
         pathname: '/app/payments',
         search: '?year=2026',
       })
-    ).toBe('/admin/payments/incoming?year=2026');
+    ).toBe('/admin/payments?year=2026');
 
     expect(
       computeOtherModeUrl({

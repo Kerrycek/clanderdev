@@ -41,6 +41,9 @@ export async function fetchCurrentUser() {
 export interface FetchUsersOpts {
   limit?: number;
   fromId?: number;
+  signal?: AbortSignal;
+  /** Explicit lifecycle scope; omitted requests default to active users. */
+  objectState?: string;
   /** Request an exact total for filters supported directly by HaveAPI. */
   count?: boolean;
 
@@ -78,6 +81,8 @@ export interface FetchUsersOpts {
 interface RawFetchUsersOpts {
   limit?: number;
   fromId?: number;
+  signal?: AbortSignal;
+  objectState?: string;
   count?: boolean;
   level?: number;
   mailerEnabled?: boolean;
@@ -201,6 +206,7 @@ async function rawFetchUsers(opts?: RawFetchUsersOpts): Promise<UserListResult> 
 
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
+  if (opts?.objectState !== undefined) params['object_state'] = opts.objectState;
   if (opts?.level !== undefined) params['level'] = opts.level;
   if (opts?.mailerEnabled !== undefined) params['mailer_enabled'] = opts.mailerEnabled;
   if (opts?.adminOnly) params['admin'] = true;
@@ -218,6 +224,7 @@ async function rawFetchUsers(opts?: RawFetchUsersOpts): Promise<UserListResult> 
     namespace: 'user',
     params,
     meta: opts?.count ? { count: true } : undefined,
+    signal: opts?.signal,
   });
 
   return { ...res, data: expectArray<User>(res.data, 'users') };
@@ -228,6 +235,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
   const safeOpts: FetchUsersOpts = {
     limit,
     fromId: opts?.fromId,
+    signal: opts?.signal,
+    objectState: opts?.objectState,
     count: opts?.count,
     q: normalizeQueryNeedle(opts?.q),
     role: opts?.role,
@@ -247,6 +256,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     return rawFetchUsers({
       limit,
       fromId: safeOpts.fromId,
+      signal: safeOpts.signal,
+      objectState: safeOpts.objectState,
       count: safeOpts.count,
       level: safeOpts.level,
       mailerEnabled: safeOpts.mailerEnabled,
@@ -271,6 +282,8 @@ export async function fetchUsers(opts?: FetchUsersOpts): Promise<UserListResult>
     const batch = await rawFetchUsers({
       limit: batchLimit,
       fromId: cursor,
+      signal: safeOpts.signal,
+      objectState: safeOpts.objectState,
       level: safeOpts.level,
       mailerEnabled: safeOpts.mailerEnabled,
       adminOnly: safeOpts.role === 'admin',

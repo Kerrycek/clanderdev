@@ -42,7 +42,7 @@ export const enCommon_navigation = {
   'nav.my_requests': 'My requests',
   'nav.mailer': 'Mailer',
   'nav.content': 'Content',
-  'nav.incoming_payments': 'Incoming payments',
+  'nav.finance': 'Finance',
   'nav.cluster': 'Cluster',
   'nav.payments': 'Payments',
   'nav.nodes': 'Nodes',

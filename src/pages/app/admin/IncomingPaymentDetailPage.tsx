@@ -244,7 +244,8 @@ export function IncomingPaymentDetailPage() {
       setStateEdit('');
 
       await q.refetch();
-      qc.invalidateQueries({ queryKey: ['incoming_payments', 'index'] });
+      void qc.invalidateQueries({ queryKey: ['incoming_payments', 'index'] });
+      void qc.invalidateQueries({ predicate: (query) => ['user_payments', 'finance', 'payment_stats'].includes(String(query.queryKey[0])) });
     } catch (e: unknown) {
       toasts.pushToast({
         variant: 'danger',

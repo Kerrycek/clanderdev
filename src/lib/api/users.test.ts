@@ -43,6 +43,7 @@ describe('fetchUsers', () => {
       limit: 25,
       fromId: 150,
       count: true,
+      objectState: 'suspended',
       role: 'admin',
       level: 90,
       mailerEnabled: false,
@@ -56,6 +57,7 @@ describe('fetchUsers', () => {
 
     expect(parsed.searchParams.get('user[limit]')).toBe('25');
     expect(parsed.searchParams.get('user[from_id]')).toBe('150');
+    expect(parsed.searchParams.get('user[object_state]')).toBe('suspended');
     expect(parsed.searchParams.get('user[level]')).toBe('90');
     expect(parsed.searchParams.get('user[mailer_enabled]')).toBe('false');
     expect(parsed.searchParams.get('user[admin]')).toBe('true');
