@@ -50,22 +50,24 @@ function renderPage(initialEntry = '/?session=expired') {
   });
 
   render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <>
-                <LocationProbe />
-                <OverviewPage />
-              </>
-            }
-          />
-          <Route path="/outages" element={<div data-testid="outages.route" />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <>
+                  <LocationProbe />
+                  <OverviewPage />
+                </>
+              }
+            />
+            <Route path="/outages" element={<div data-testid="outages.route" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </React.StrictMode>,
   );
 }
 
@@ -110,7 +112,7 @@ describe('OverviewPage session expiry notice', () => {
     expect(screen.queryByTestId('auth.session-expired.notice')).not.toBeInTheDocument();
   });
 
-  it('shows the warning when the current tab just marked the session as expired', async () => {
+  it('keeps a fresh session-expired warning visible under StrictMode', async () => {
     installOverviewMocks();
     markSessionExpiredNotice();
 

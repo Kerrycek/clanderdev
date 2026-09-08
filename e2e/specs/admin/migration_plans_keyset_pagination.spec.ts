@@ -49,11 +49,21 @@ test('admin migration plans: keyset pagination (from_id)', async ({ page }) => {
 
   await page.getByTestId('admin.migration_plans.pagination.desktop.next').click();
   await expect(page.getByTestId('admin.migration_plans.row.250')).toBeVisible();
+  await expect(page).toHaveURL((url) =>
+    url.pathname === '/admin/migration-plans'
+    && url.searchParams.get('page') === '2'
+    && url.searchParams.get('from_id') === '251'
+  );
 
   const prev = page.getByTestId('admin.migration_plans.pagination.desktop.prev');
   await expect(prev).toBeEnabled();
-  await prev.click({ force: true });
-  await expect(page).toHaveURL(/page=1/, { timeout: 30_000 });
+  await prev.click();
+  await expect(page).toHaveURL((url) =>
+    url.pathname === '/admin/migration-plans'
+    && url.searchParams.get('page') === '1'
+    && !url.searchParams.has('from_id'),
+    { timeout: 30_000 },
+  );
   await expect(page.getByTestId('admin.migration_plans.row.300')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('admin.migration_plans.row.300')).toHaveAttribute('data-row-variant', 'ok');
   await expect(page.getByTestId('admin.migration_plans.row.300.dot')).toBeVisible();

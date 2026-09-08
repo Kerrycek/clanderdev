@@ -36,7 +36,7 @@ test.describe('@smoke Sync indicator', () => {
     await expect(indicator).toBeHidden();
   });
 
-  test('treats expired background sessions as logged out instead of sync errors', async ({ page }) => {
+  test('treats expired background sessions as logged out with a notice instead of sync errors', async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem(
         'vpsadmin.uiSettings.v1',
@@ -77,7 +77,7 @@ test.describe('@smoke Sync indicator', () => {
 
     await expect(page).toHaveURL(/\/(?:\?session=expired)?$/);
     await expect(page.getByTestId('public.overview.page')).toBeVisible();
-    await expect(page.getByTestId('auth.session-expired.notice')).toBeHidden();
+    await expect(page.getByTestId('auth.session-expired.notice')).toBeVisible();
     await expect(page.getByTestId('shell.sync-indicator')).toBeHidden();
   });
 });

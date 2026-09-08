@@ -16,7 +16,7 @@ function visibleSnapshotAction(page: Page, id: number, action: string) {
   ].join(', '));
 }
 
-test.describe('@smoke Dataset snapshots', () => {
+test.describe('@smoke @smoke-mobile Dataset snapshots', () => {
   test('create snapshot deep link opens the create workflow', async ({ page }) => {
     await bootstrapVpsAdminWindow(page, { sessionToken: 'TEST' });
 
@@ -238,7 +238,7 @@ test.describe('@smoke Dataset snapshots', () => {
 
     await page.goto('/app/datasets/10/snapshots');
 
-    await page.getByTestId('dataset.snapshots.row.200.download').click();
+    await visibleSnapshotAction(page, 200, 'download').click();
 
     const modal = page.getByTestId('dataset.snapshots.download.created');
     await expect(modal).toBeVisible();
@@ -294,7 +294,7 @@ test.describe('@smoke Dataset snapshots', () => {
     await page.goto('/admin/datasets/10/snapshots');
 
     await expect(page.getByTestId('dataset.snapshots.list')).toBeVisible();
-    await expect(page.getByTestId('dataset.snapshots.row.200')).toBeVisible();
+    await expect(visibleSnapshot(page, 200)).toBeVisible();
 
     await visibleSnapshotAction(page, 200, 'rollback').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeVisible();
@@ -413,6 +413,7 @@ test.describe('@smoke Dataset snapshots', () => {
       'still active',
     );
     await expect(visibleSnapshotAction(page, 200, 'rollback')).toHaveAttribute('aria-disabled', 'true');
+    expect(rollbackCalls).toBe(1);
   });
 
   test('delete snapshot uses a confirm dialog and removes the row', async ({ page }) => {
@@ -465,15 +466,15 @@ test.describe('@smoke Dataset snapshots', () => {
     await page.goto('/admin/datasets/10/snapshots');
 
     await expect(page.getByTestId('dataset.snapshots.list')).toBeVisible();
-    await expect(page.getByTestId('dataset.snapshots.row.200')).toBeVisible();
+    await expect(visibleSnapshot(page, 200)).toBeVisible();
 
-    await page.getByTestId('dataset.snapshots.row.200.delete').click();
+    await visibleSnapshotAction(page, 200, 'delete').click();
     await expect(page.getByTestId('dataset.snapshots.delete_confirm')).toBeVisible();
     await expect(page.getByTestId('dataset.snapshots.delete_confirm.confirm')).toBeEnabled();
     await page.getByTestId('dataset.snapshots.delete_confirm.confirm').click();
     await expect(page.getByTestId('dataset.snapshots.delete_confirm')).toBeHidden();
 
-    await expect(page.getByTestId('dataset.snapshots.row.200')).toHaveCount(0);
+    await expect(visibleSnapshot(page, 200)).toHaveCount(0);
     expect(deleteCalls).toBe(1);
   });
 
@@ -537,11 +538,11 @@ test.describe('@smoke Dataset snapshots', () => {
 
     await page.goto('/app/datasets/10/snapshots');
 
-    await expect(page.getByTestId('dataset.snapshots.row.200.download')).toBeVisible();
+    await expect(visibleSnapshotAction(page, 200, 'download')).toBeVisible();
     const downloadReq = page.waitForRequest(
       (r) => r.method() === 'POST' && r.url().includes('/api/v7.0/snapshot_downloads')
     );
-    await page.getByTestId('dataset.snapshots.row.200.download').click();
+    await visibleSnapshotAction(page, 200, 'download').click();
     expect((await downloadReq).postDataJSON()).toEqual({
       snapshot_download: {
         snapshot: 200,
@@ -552,17 +553,17 @@ test.describe('@smoke Dataset snapshots', () => {
     await expect(page.getByTestId('dataset.snapshots.download.created')).toBeVisible();
     await expect(page.getByTestId('dataset.snapshots.download.created.open')).toHaveAttribute('href', /\/generated\/snap-200\.tar\.gz$/);
     await page.getByTestId('dataset.snapshots.download.created.close').click();
-    await expect(page.getByTestId('dataset.snapshots.row.200.rollback')).toBeEnabled();
-    await page.getByTestId('dataset.snapshots.row.200.rollback').click();
+    await expect(visibleSnapshotAction(page, 200, 'rollback')).toBeEnabled();
+    await visibleSnapshotAction(page, 200, 'rollback').click();
     await page.getByTestId('dataset.snapshots.rollback_confirm.input').fill('snap-200');
     await page.getByTestId('dataset.snapshots.rollback_confirm.confirm').click();
     await expect(page.getByTestId('dataset.snapshots.rollback_confirm')).toBeHidden();
     expect(rollbackCalls).toBe(1);
 
-    await expect(page.getByTestId('dataset.snapshots.row.200.delete')).toBeEnabled();
-    await page.getByTestId('dataset.snapshots.row.200.delete').click();
+    await expect(visibleSnapshotAction(page, 200, 'delete')).toBeEnabled();
+    await visibleSnapshotAction(page, 200, 'delete').click();
     await page.getByTestId('dataset.snapshots.delete_confirm.confirm').click();
-    await expect(page.getByTestId('dataset.snapshots.row.200')).toHaveCount(0);
+    await expect(visibleSnapshot(page, 200)).toHaveCount(0);
     expect(deleteCalls).toBe(1);
   });
 });

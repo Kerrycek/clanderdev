@@ -90,7 +90,7 @@ test('@pr-smoke non-admin sessions cannot mount global Finance totals', async ({
 
   await page.goto('/admin/payments');
 
-  await expect(page).toHaveURL(/\/app\/payments$/);
+  await expect(page).toHaveURL((url) => url.pathname === '/app/payments' && url.hash === '');
   await expect(page.getByTestId('payments.my.stat.payment_id')).toContainText('2');
   await expect(page.getByTestId('admin.finance.tabs')).toHaveCount(0);
   await page.waitForLoadState('networkidle');
