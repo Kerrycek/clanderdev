@@ -84,6 +84,19 @@ test('@pr-smoke @pr-smoke-mobile @smoke @smoke-mobile public overview shows key 
   await expect(brnoPanel).toContainText('node-brq');
   await expect(brnoPanel).not.toContainText('node-prg');
 
+  for (const panel of [prahaPanel, brnoPanel]) {
+    const summary = panel.locator('[data-testid$=".summary"]');
+    await expect.poll(() => summary.evaluate((badge) => {
+      const badgeRect = badge.getBoundingClientRect();
+      const panelRect = badge.closest('[data-cluster-location]')?.getBoundingClientRect();
+      return Boolean(
+        panelRect
+        && badgeRect.left >= panelRect.left
+        && badgeRect.right <= panelRect.right + 1
+      );
+    })).toBe(true);
+  }
+
   const clusterProofScreenshot = process.env['E2E_CLUSTER_PUBLIC_PROOF_SCREENSHOT']?.trim();
   if (clusterProofScreenshot) {
     await page.screenshot({ path: clusterProofScreenshot, fullPage: true });

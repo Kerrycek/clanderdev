@@ -60,6 +60,11 @@ describe('OverviewNodesSection', () => {
     expect(screen.getAllByText('Up: 1 · Down: 0 · Total: 1')).toHaveLength(2);
     expect(screen.getAllByText('Up: 0 · Down: 1 · Total: 1')).toHaveLength(2);
 
+    for (const badge of screen.getAllByTestId(/public\.nodes\.location\..+\.summary/)) {
+      expect(badge).toHaveClass('max-w-full', 'whitespace-normal', 'sm:whitespace-nowrap');
+      expect(badge.parentElement).toHaveClass('grid', 'min-w-0', 'sm:flex');
+    }
+
     for (const panel of [...praguePanels, ...brnoPanels]) {
       expect(panel).toHaveAttribute('data-cluster-location-layout', 'panel');
       expect(panel).toHaveClass('rounded-lg', 'border-info-border', 'bg-surface', 'shadow-card');

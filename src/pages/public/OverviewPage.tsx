@@ -40,6 +40,8 @@ export function OverviewPage() {
       return;
     }
 
+    if (consumedExpiredParamRef.current) return;
+
     consumedExpiredParamRef.current = true;
     setShowSessionExpired(consumeSessionExpiredNotice());
 
