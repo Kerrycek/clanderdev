@@ -1030,7 +1030,6 @@ See also:
 - `admin.ip_addresses.filter.vps`
 - `admin.ip_addresses.filter.version`
 - `admin.ip_addresses.filter.network`
-- `admin.ip_addresses.filter.q`
 - `admin.ip_addresses.filter.assigned_to_interface`
 - `admin.ip_addresses.filter.clear`
 - `admin.ip_addresses.table`

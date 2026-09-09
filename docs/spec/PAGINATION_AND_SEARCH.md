@@ -244,8 +244,7 @@ Admin pages follow the same keyset pagination rules (`from_id`, `limit`, numeric
 
 - **IP addresses** (`/admin/ip-addresses`)
   - Index: `IpAddress.Index` (`GET /api/v7.0/ip_addresses`) with `ip_address[from_id]`, `ip_address[limit]`.
-  - Search + filters: **server-side**.
-    - `q` (`ip_address[q]`) – full text search across address, network, VPS hostname and user login
+  - Filters are applied **server-side**. The smart input resolves an exact user login to its ID before requesting the list; `IpAddress.Index` itself has no full-text `q` parameter.
     - `addr` (`ip_address[addr]`) – exact IP address match
     - `prefix` (`ip_address[prefix]`) – exact prefix length
     - `vps` (`ip_address[vps]`) – VPS id

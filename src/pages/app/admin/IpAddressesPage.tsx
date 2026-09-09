@@ -1,17 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 
 import { useAppMode } from '../../../app/appMode';
 import { useI18n } from '../../../app/i18n';
-import { useToasts } from '../../../app/toasts';
 
 import { fetchIpAddresses } from '../../../lib/api/ipAddresses';
 import { fetchLocations, type Location as InfraLocation } from '../../../lib/api/infra';
 import { cursorFromDescendingPage } from '../../../lib/lockIndex';
 import { useKeysetPagination } from '../../../lib/hooks/useKeysetPagination';
-import { parseNonNegativeInt, parsePositiveInt } from '../../../lib/parse';
-import { parseNumericToken, splitKeyValueToken, tokenizeSmartInput, unquoteSmartValue } from '../../../lib/smartFilter';
 
 import { ListShell } from '../../../components/layout/ListShell';
 import { PageHeader } from '../../../components/layout/PageHeader';
@@ -21,35 +18,27 @@ import { Alert } from '../../../components/ui/Alert';
 import { Button } from '../../../components/ui/Button';
 import { FilterChip } from '../../../components/ui/FilterChip';
 import { LoadingState } from '../../../components/ui/LoadingState';
-import type { SmartFilterSuggestion } from '../../../components/ui/SmartFilterInput';
 
 import { IpAddressesFilters } from './ipAddresses/IpAddressesFilters';
 import { IpAddressesListMobile } from './ipAddresses/IpAddressesListMobile';
 import { IpAddressesListTable } from './ipAddresses/IpAddressesListTable';
-import {
-  canonicalKey,
-  isDefaultHiddenLegacyNetwork,
-  looksLikeIpish,
-  parseBoolToken,
-  resolveOrderValue,
-  resolveVersionValue,
-} from './ipAddresses/ipAddressListSemantics';
+import { isDefaultHiddenLegacyNetwork } from './ipAddresses/ipAddressListSemantics';
 import { selectSuggestedIpLocations } from './ipAddresses/suggestedFreeIps';
 import { ipDetailBasePath as resolveIpDetailBasePath, useIpAddressListParams } from './ipAddresses/useIpAddressListParams';
+import { useIpAddressSmartSearch } from './ipAddresses/useIpAddressSmartSearch';
 import { useProgressiveSuggestedIpQueries } from './ipAddresses/useProgressiveSuggestedIpQueries';
 import { configuredLegacyIpAddressesUrl } from './ipAddresses/legacyIpAddressesUrl';
 
 export function IpAddressesPage() {
   const { basePath } = useAppMode();
   const { t } = useI18n();
-  const toasts = useToasts();
   const navigate = useNavigate();
   const location = useLocation();
   const legacyFallbackUrl = configuredLegacyIpAddressesUrl();
   const {
     searchParams: sp,
     setSearchParams: setSp,
-    qText,
+    legacyQuery,
     addr,
     prefixNum,
     vpsId,
@@ -63,6 +52,7 @@ export function IpAddressesPage() {
     order,
     setTextParam,
     setIntParam,
+    setResolvedUserFilter,
     setBoolParamInUrl,
     setAddressFilter,
     clearUrlFilters,
@@ -73,12 +63,32 @@ export function IpAddressesPage() {
   const na = t('common.na');
 
   const ipDetailBasePath = resolveIpDetailBasePath(basePath, location.pathname);
+  const openIp = (ipId: number) => navigate(`${ipDetailBasePath}/${ipId}`);
 
-  const [smart, setSmart] = useState('');
-  const [smartErrors, setSmartErrors] = useState<string[]>([]);
-  const smartNeedle = smart.trim();
-  const smartInputRef = useRef<HTMLInputElement>(null);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const {
+    smart,
+    setSmart,
+    smartErrors,
+    clearSmartErrors,
+    dismissSmartErrors,
+    smartNeedle,
+    smartInputRef,
+    helpOpen,
+    setHelpOpen,
+    smartResolving,
+    smartSearchBlocked,
+    clearFilters,
+    applySmartText,
+    smartSuggestions,
+  } = useIpAddressSmartSearch({
+    searchParams: sp,
+    setSearchParams: setSp,
+    legacyQuery,
+    openIp,
+    setAddressFilter,
+    clearUrlFilters,
+  });
+
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [userLookup, setUserLookup] = useState('');
 
@@ -87,20 +97,9 @@ export function IpAddressesPage() {
     setUserLookup(userId !== undefined ? String(userId) : '');
   }, [advancedOpen, userId]);
 
-  useEffect(() => {
-    if (smartNeedle === '?') setHelpOpen(true);
-  }, [smartNeedle]);
-
-  const clearFilters = () => {
-    setSmart('');
-    setSmartErrors([]);
-    clearUrlFilters();
-  };
-
   const pagination = useKeysetPagination({
     id: 'admin.ip_addresses.list',
     filterKey: JSON.stringify({
-      q: qText.trim(),
       addr: addr.trim(),
       prefixNum,
       vpsId,
@@ -132,7 +131,7 @@ export function IpAddressesPage() {
     () => selectSuggestedIpLocations(environmentLocations),
     [environmentLocations]
   );
-  const showingSuggestedFreeIps = !filtersActive && suggestedLocations.length > 0;
+  const showingSuggestedFreeIps = !filtersActive && !smartSearchBlocked && suggestedLocations.length > 0;
   const suggested = useProgressiveSuggestedIpQueries(
     suggestedLocations,
     showingSuggestedFreeIps
@@ -145,7 +144,6 @@ export function IpAddressesPage() {
       {
         limit: pagination.limit,
         fromId: pagination.fromId,
-        q: qText.trim() || undefined,
         addr: addr.trim() || undefined,
         prefix: prefixNum,
         vps: vpsId,
@@ -164,7 +162,6 @@ export function IpAddressesPage() {
         await fetchIpAddresses({
           limit: pagination.limit,
           fromId: pagination.fromId,
-          q: qText.trim() || undefined,
           addr: addr.trim() || undefined,
           prefix: prefixNum,
           vps: vpsId,
@@ -180,17 +177,30 @@ export function IpAddressesPage() {
         })
       ).data,
     staleTime: 10_000,
-    enabled: !locationsQ.isLoading && !showingSuggestedFreeIps,
+    enabled:
+      !locationsQ.isLoading &&
+      !showingSuggestedFreeIps &&
+      !legacyQuery &&
+      !smartResolving &&
+      !smartSearchBlocked,
   });
 
-  const rawPageData = showingSuggestedFreeIps ? suggested.data : (listQ.data ?? []);
-  const activeListLoading = showingSuggestedFreeIps
+  const loadedPageData = showingSuggestedFreeIps ? suggested.data : (listQ.data ?? []);
+  const rawPageData = smartSearchBlocked ? [] : loadedPageData;
+  const activeListLoading = smartResolving || (showingSuggestedFreeIps
     ? suggested.isLoading
-    : listQ.isLoading;
+    : listQ.isLoading);
   const activeListError = showingSuggestedFreeIps
     ? suggested.error
     : listQ.error;
-  const hideLegacyNetworksByDefault = networkId === undefined && !qText.trim() && !addr.trim() && prefixNum === undefined && versionNum === undefined;
+  const hideLegacyNetworksByDefault =
+    networkId === undefined &&
+    vpsId === undefined &&
+    userId === undefined &&
+    ifaceId === undefined &&
+    !addr.trim() &&
+    prefixNum === undefined &&
+    versionNum === undefined;
   const pageData = useMemo(
     () => (hideLegacyNetworksByDefault ? rawPageData.filter((ip) => !isDefaultHiddenLegacyNetwork(ip)) : rawPageData),
     [hideLegacyNetworksByDefault, rawPageData]
@@ -204,202 +214,8 @@ export function IpAddressesPage() {
   const canNext = pagination.hasForward || (hasMore && pageCursor !== null);
   const canPaginate = !showingSuggestedFreeIps && (pagination.stack.length > 1 || rawPageData.length > 0);
 
-  const openIp = (ipId: number) => navigate(`${ipDetailBasePath}/${ipId}`);
-
-  const applySmartText = (raw: string) => {
-    const input = String(raw ?? '').trim();
-    if (!input) return;
-
-    if (input === '?') {
-      setHelpOpen(true);
-      return;
-    }
-
-    const tokens = tokenizeSmartInput(input);
-
-    if (tokens.length === 1) {
-      const num = parseNumericToken(tokens[0] ?? '');
-      if (num) {
-        openIp(num);
-        setSmart('');
-        setSmartErrors([]);
-        return;
-      }
-    }
-
-    const plain: string[] = [];
-    const errors: string[] = [];
-
-    tokens.forEach((token) => {
-      const kv = splitKeyValueToken(token);
-      if (!kv) {
-        plain.push(unquoteSmartValue(token));
-        return;
-      }
-
-      const key = canonicalKey(kv.rawKey);
-      if (!key) {
-        plain.push(unquoteSmartValue(token));
-        return;
-      }
-
-      const valueRaw = unquoteSmartValue(kv.rawValue);
-      if (!valueRaw.trim()) {
-        errors.push(t('filters.smart.error.missing_value', { key: kv.rawKey.trim() }));
-        return;
-      }
-
-      switch (key) {
-        case 'id': {
-          const id = parseNumericToken(valueRaw);
-          if (!id) errors.push(t('admin.ip_addresses.smart.error.id', { value: valueRaw }));
-          else openIp(id);
-          return;
-        }
-        case 'q':
-          setTextParam('q', valueRaw);
-          return;
-        case 'addr': {
-          const match = valueRaw.trim().match(/^(.+?)\/(\d+)$/);
-          if (match && match[1] && match[2]) {
-            setAddressFilter(match[1], match[2]);
-          } else {
-            setAddressFilter(valueRaw.trim());
-          }
-          return;
-        }
-        case 'prefix': {
-          const prefix = parseNonNegativeInt(valueRaw);
-          if (prefix === undefined || prefix < 0 || prefix > 128) errors.push(t('admin.ip_addresses.smart.error.prefix', { value: valueRaw }));
-          else setTextParam('prefix', String(prefix));
-          return;
-        }
-        case 'vps':
-        case 'user':
-        case 'network':
-        case 'iface':
-        case 'location': {
-          const id = parsePositiveInt(valueRaw);
-          if (!id) {
-            errors.push(t('admin.ip_addresses.smart.error.int', { key, value: valueRaw }));
-            return;
-          }
-          const targetKey = key === 'iface' ? 'network_interface' : key;
-          setIntParam(targetKey, id);
-          return;
-        }
-        case 'version': {
-          const version = resolveVersionValue(valueRaw);
-          if (!version) errors.push(t('admin.ip_addresses.smart.error.version', { value: valueRaw }));
-          else setTextParam('version', String(version));
-          return;
-        }
-        case 'assigned': {
-          const parsed = parseBoolToken(valueRaw);
-          if (parsed === null) errors.push(t('admin.ip_addresses.smart.error.bool', { key: 'assigned', value: valueRaw }));
-          else setBoolParamInUrl('assigned_to_interface', parsed);
-          return;
-        }
-        case 'order': {
-          const parsed = resolveOrderValue(valueRaw);
-          if (!parsed) errors.push(t('admin.ip_addresses.smart.error.order', { value: valueRaw }));
-          else setTextParam('order', parsed === 'desc' ? undefined : parsed);
-          return;
-        }
-      }
-    });
-
-    const qPlain = plain.join(' ').trim();
-    if (qPlain) {
-      const match = qPlain.match(/^(.+?)\/(\d+)$/);
-      if (match && match[1] && (match[1].includes('.') || match[1].includes(':'))) setTextParam('q', match[1]);
-      else setTextParam('q', qPlain);
-    }
-
-    setSmart('');
-    setSmartErrors(errors);
-    if (errors.length > 0) {
-      toasts.pushToast({ variant: 'danger', title: errors[0] ?? t('common.unknown_error') });
-    }
-  };
-
-  const smartSuggestions: SmartFilterSuggestion[] = useMemo(() => {
-    const suggestions: SmartFilterSuggestion[] = [];
-    if (!smartNeedle) return suggestions;
-
-    if (smartNeedle === '?') {
-      suggestions.push({
-        id: 'help',
-        primary: t('filters.help.open'),
-        secondary: t('filters.help.suggestion.secondary'),
-        onPick: () => setHelpOpen(true),
-        testId: 'admin.ip_addresses.smart.suggest.help',
-      });
-      return suggestions;
-    }
-
-    const tokens = tokenizeSmartInput(smartNeedle);
-    if (tokens.length === 1) {
-      const kv = splitKeyValueToken(tokens[0] ?? '');
-      if (kv && canonicalKey(kv.rawKey)) return suggestions;
-    }
-
-    const num = parseNumericToken(smartNeedle);
-    if (num) {
-      suggestions.push({
-        id: 'open',
-        primary: t('admin.ip_addresses.smart.suggest.open', { id: num }),
-        secondary: t('admin.ip_addresses.smart.suggest.open.secondary'),
-        onPick: () => {
-          openIp(num);
-          setSmart('');
-          setSmartErrors([]);
-        },
-        testId: 'admin.ip_addresses.smart.suggest.open',
-      });
-    }
-
-    if (looksLikeIpish(smartNeedle)) {
-      const match = smartNeedle.match(/^(.+?)\/(\d+)$/);
-      const q = match && match[1] ? match[1] : smartNeedle;
-      const prefix = match && match[2] ? match[2] : null;
-
-      suggestions.push({
-        id: 'search',
-        primary: t('admin.ip_addresses.smart.suggest.search', { q }),
-        secondary: t('admin.ip_addresses.smart.suggest.search.secondary'),
-        onPick: () => {
-          setTextParam('q', q);
-          setSmart('');
-          setSmartErrors([]);
-        },
-        testId: 'admin.ip_addresses.smart.suggest.search',
-      });
-
-      suggestions.push({
-        id: 'addr',
-        primary: prefix
-          ? t('admin.ip_addresses.smart.suggest.addr_prefix', { addr: q, prefix })
-          : t('admin.ip_addresses.smart.suggest.addr', { addr: q }),
-        secondary: t('admin.ip_addresses.smart.suggest.addr.secondary'),
-        onPick: () => {
-          setTextParam('addr', q);
-          setTextParam('prefix', prefix || undefined);
-          setSmart('');
-          setSmartErrors([]);
-        },
-        testId: 'admin.ip_addresses.smart.suggest.addr',
-      });
-    }
-
-    return suggestions;
-  }, [openIp, setTextParam, smartNeedle, t]);
-
   const activeFilterChips = useMemo(() => {
     const chips: React.ReactNode[] = [];
-    if (qText.trim()) {
-      chips.push(<FilterChip key="q" label={`q:${qText.trim()}`} onRemove={() => setTextParam('q', undefined)} testId="admin.ip_addresses.chip.q" />);
-    }
     if (addr.trim()) {
       const label = prefixNum !== undefined ? `addr:${addr.trim()}/${prefixNum}` : `addr:${addr.trim()}`;
       chips.push(
@@ -454,16 +270,17 @@ export function IpAddressesPage() {
           key={`err.${idx}`}
           label={error}
           tone="danger"
-          onRemove={() => setSmartErrors([])}
+          onRemove={dismissSmartErrors}
           testId={`admin.ip_addresses.chip.error.${idx}`}
         />
       );
     });
 
     return chips;
-  }, [addr, assignedFilterExplicit, assignedToInterface, ifaceId, locationId, networkId, prefixNum, qText, setBoolParamInUrl, setIntParam, setTextParam, smartErrors, t, userId, versionNum, vpsId]);
+  }, [addr, assignedFilterExplicit, assignedToInterface, dismissSmartErrors, ifaceId, locationId, networkId, prefixNum, setBoolParamInUrl, setIntParam, setTextParam, smartErrors, t, userId, versionNum, vpsId]);
 
   const shareUrl = useMemo(() => (typeof window !== 'undefined' ? window.location.href : ''), [sp]);
+  const hasActiveFilters = filtersActive || smartSearchBlocked;
 
   return (
     <ListShell
@@ -475,7 +292,7 @@ export function IpAddressesPage() {
           meta={
             showingSuggestedFreeIps
               ? <span className="text-xs text-faint">{t('admin.ip_addresses.suggested_free')}</span>
-              : filtersActive ? <span className="text-xs text-faint">{t('admin.ip_addresses.filter_hint')}</span> : null
+              : hasActiveFilters ? <span className="text-xs text-faint">{t('admin.ip_addresses.filter_hint')}</span> : null
           }
           testId="admin.ip_addresses.list.header"
         />
@@ -485,7 +302,7 @@ export function IpAddressesPage() {
           smart={smart}
           setSmart={setSmart}
           smartErrors={smartErrors}
-          clearSmartErrors={() => setSmartErrors([])}
+          clearSmartErrors={clearSmartErrors}
           smartInputRef={smartInputRef}
           smartNeedle={smartNeedle}
           helpOpen={helpOpen}
@@ -495,10 +312,9 @@ export function IpAddressesPage() {
           activeFilterChips={activeFilterChips}
           smartSuggestions={smartSuggestions}
           applySmartText={applySmartText}
-          filtersActive={filtersActive}
+          filtersActive={hasActiveFilters}
           shareUrl={shareUrl}
           clearFilters={clearFilters}
-          qText={qText}
           addr={addr}
           prefixNum={prefixNum}
           vpsId={vpsId}
@@ -513,6 +329,7 @@ export function IpAddressesPage() {
           order={order}
           setTextParam={setTextParam}
           setIntParam={setIntParam}
+          setResolvedUserFilter={setResolvedUserFilter}
           setBoolParamInUrl={setBoolParamInUrl}
         />
       }
@@ -546,10 +363,10 @@ export function IpAddressesPage() {
       ) : pageData.length === 0 ? (
         <EmptyState
           testId="admin.ip_addresses.empty"
-          title={filtersActive ? t('empty.list.no_matches.title') : t('admin.ip_addresses.empty')}
-          body={filtersActive ? t('empty.list.no_matches.body') : undefined}
-          actionLabel={filtersActive ? t('common.clear_filters') : undefined}
-          onAction={filtersActive ? clearFilters : undefined}
+          title={hasActiveFilters ? t('empty.list.no_matches.title') : t('admin.ip_addresses.empty')}
+          body={hasActiveFilters ? t('empty.list.no_matches.body') : undefined}
+          actionLabel={hasActiveFilters ? t('common.clear_filters') : undefined}
+          onAction={hasActiveFilters ? clearFilters : undefined}
         />
       ) : (
         <>

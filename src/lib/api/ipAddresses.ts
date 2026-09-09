@@ -40,9 +40,6 @@ export async function fetchIpAddresses(opts?: {
   fromId?: number;
   includes?: string;
 
-  /** Full text search (address, VPS, user, network…) */
-  q?: string;
-
   location?: number;
   network?: number;
   version?: number;
@@ -61,8 +58,6 @@ export async function fetchIpAddresses(opts?: {
 
   if (opts?.limit !== undefined) params['limit'] = opts.limit;
   if (opts?.fromId !== undefined) params['from_id'] = opts.fromId;
-
-  if (opts?.q) params['q'] = opts.q;
 
   if (opts?.location !== undefined) params['location'] = opts.location;
   if (opts?.network !== undefined) params['network'] = opts.network;
