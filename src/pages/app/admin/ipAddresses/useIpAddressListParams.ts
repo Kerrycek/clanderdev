@@ -4,6 +4,23 @@ import { useSearchParams } from 'react-router-dom';
 import { parseBoolParam, parseNonNegativeInt, parsePositiveInt } from '../../../../lib/parse';
 import type { IpListOrder } from './ipAddressListSemantics';
 
+export function hasIpAddressRelationFilter(filters: {
+  vpsId?: number;
+  userId?: number;
+  ifaceId?: number;
+}): boolean {
+  return filters.vpsId !== undefined || filters.userId !== undefined || filters.ifaceId !== undefined;
+}
+
+export function resolveAssignedToInterfaceFilter(
+  explicit: boolean | undefined,
+  occupancyExplicitlyAny: boolean,
+  relationFilterActive: boolean
+): boolean | undefined {
+  if (explicit !== undefined) return explicit;
+  return occupancyExplicitlyAny || relationFilterActive ? undefined : false;
+}
+
 export function ipDetailBasePath(basePath: string, pathname: string): string {
   const networkingPrefix = `${basePath}/networking/ip-addresses`;
   return pathname.startsWith(networkingPrefix) ? networkingPrefix : `${basePath}/ip-addresses`;
@@ -11,7 +28,7 @@ export function ipDetailBasePath(basePath: string, pathname: string): string {
 
 export function useIpAddressListParams() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const qText = useMemo(() => String(searchParams.get('q') ?? ''), [searchParams]);
+  const legacyQuery = useMemo(() => String(searchParams.get('q') ?? '').trim(), [searchParams]);
   const addr = useMemo(() => String(searchParams.get('addr') ?? ''), [searchParams]);
   const prefixNum = useMemo(() => {
     const parsed = parseNonNegativeInt(searchParams.get('prefix'));
@@ -30,10 +47,15 @@ export function useIpAddressListParams() {
     return undefined;
   }, [searchParams]);
   const occupancyExplicitlyAny = searchParams.get('occupancy') === 'any';
+  const relationFilterImpliesAnyOccupancy = hasIpAddressRelationFilter({ vpsId, userId, ifaceId });
   const assignedToInterface = useMemo(() => {
     const selected = parseBoolParam(searchParams.get('assigned_to_interface'));
-    return selected ?? (occupancyExplicitlyAny ? undefined : false);
-  }, [occupancyExplicitlyAny, searchParams]);
+    return resolveAssignedToInterfaceFilter(
+      selected,
+      occupancyExplicitlyAny,
+      relationFilterImpliesAnyOccupancy
+    );
+  }, [occupancyExplicitlyAny, relationFilterImpliesAnyOccupancy, searchParams]);
   const order = useMemo<IpListOrder>(() => {
     const value = String(searchParams.get('order') ?? '').trim().toLowerCase();
     if (value === 'asc' || value === 'interface' || value === 'desc') return value;
@@ -58,6 +80,24 @@ export function useIpAddressListParams() {
       } else {
         next.delete(key);
       }
+      return next;
+    });
+  };
+
+  const setResolvedUserFilter = (value: number | undefined | null) => {
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        next.set('user', String(Math.floor(value)));
+      } else {
+        next.delete('user');
+      }
+
+      // `q` was emitted by an older UI even though IpAddress.Index does not
+      // support it. Never combine a resolved owner with that stale no-op.
+      next.delete('q');
+      next.delete('from_id');
+      next.delete('page');
       return next;
     });
   };
@@ -115,7 +155,7 @@ export function useIpAddressListParams() {
 
   const assignedFilterExplicit = searchParams.has('assigned_to_interface') || occupancyExplicitlyAny;
   const filtersActive = Boolean(
-    qText.trim() ||
+    legacyQuery ||
       addr.trim() ||
       prefixNum !== undefined ||
       vpsId !== undefined ||
@@ -130,7 +170,7 @@ export function useIpAddressListParams() {
   return {
     searchParams,
     setSearchParams,
-    qText,
+    legacyQuery,
     addr,
     prefixNum,
     vpsId,
@@ -144,6 +184,7 @@ export function useIpAddressListParams() {
     order,
     setTextParam,
     setIntParam,
+    setResolvedUserFilter,
     setBoolParamInUrl,
     setAddressFilter,
     clearUrlFilters,

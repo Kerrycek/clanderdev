@@ -34,7 +34,6 @@ export function IpAddressesFilters({
   filtersActive,
   shareUrl,
   clearFilters,
-  qText,
   addr,
   prefixNum,
   vpsId,
@@ -49,6 +48,7 @@ export function IpAddressesFilters({
   order,
   setTextParam,
   setIntParam,
+  setResolvedUserFilter,
   setBoolParamInUrl,
 }: IpAddressesFiltersProps) {
   const { t } = useI18n();
@@ -68,7 +68,9 @@ export function IpAddressesFilters({
             ariaLabel={t('admin.ip_addresses.search.placeholder')}
             testId="admin.ip_addresses.smart_filter.input"
             suggestions={smartSuggestions}
-            onSubmit={() => applySmartText(smart)}
+            onSubmit={() => {
+              void applySmartText(smart);
+            }}
             suffix={
               <Button
                 variant="ghost"
@@ -215,7 +217,7 @@ export function IpAddressesFilters({
         examples={[
           { example: '?', description: t('admin.ip_addresses.smart_help.examples.help') },
           { example: '123', description: t('admin.ip_addresses.smart_help.examples.open_id') },
-          { example: '10.0.0', description: t('admin.ip_addresses.smart_help.examples.search') },
+          { example: '192.0.2.10', description: t('admin.ip_addresses.smart_help.examples.search') },
           { example: 'addr:192.0.2.10', description: t('admin.ip_addresses.smart_help.examples.addr') },
           { example: 'addr:192.0.2.0/24', description: t('admin.ip_addresses.smart_help.examples.addr_prefix') },
           { example: 'vps:101', description: t('admin.ip_addresses.smart_help.examples.vps') },
@@ -224,7 +226,6 @@ export function IpAddressesFilters({
           { example: 'assigned:true', description: t('admin.ip_addresses.smart_help.examples.assigned') },
         ]}
         topKeys={[
-          { key: 'q', description: t('admin.ip_addresses.smart_help.keys.q'), example: 'q:10.0.0' },
           { key: 'addr', description: t('admin.ip_addresses.smart_help.keys.addr'), example: 'addr:192.0.2.10' },
           { key: 'vps', description: t('admin.ip_addresses.smart_help.keys.vps'), example: 'vps:101' },
           { key: 'user', description: t('admin.ip_addresses.smart_help.keys.user'), example: 'user:42' },
@@ -276,18 +277,6 @@ export function IpAddressesFilters({
           <div className="text-sm text-muted">{t('admin.ip_addresses.advanced.hint')}</div>
 
           <div>
-            <div className="text-sm font-medium">{t('admin.ip_addresses.advanced.q')}</div>
-            <div className="mt-1">
-              <Input
-                value={qText}
-                onChange={(e) => setTextParam('q', e.target.value.trim() ? e.target.value : undefined)}
-                placeholder={t('admin.ip_addresses.advanced.q.placeholder')}
-                testId="admin.ip_addresses.advanced.q"
-              />
-            </div>
-          </div>
-
-          <div>
             <div className="text-sm font-medium">{t('admin.ip_addresses.advanced.addr')}</div>
             <div className="mt-1">
               <Input
@@ -337,8 +326,8 @@ export function IpAddressesFilters({
                   onChange={(value) => {
                     setUserLookup(value);
                     const id = parsePositiveInt(value);
-                    if (id !== undefined) setIntParam('user', id);
-                    else setIntParam('user', undefined);
+                    if (id !== undefined) setResolvedUserFilter(id);
+                    else setResolvedUserFilter(undefined);
                   }}
                   placeholder={t('admin.ip_addresses.advanced.user.placeholder')}
                   testId="admin.ip_addresses.advanced.user"

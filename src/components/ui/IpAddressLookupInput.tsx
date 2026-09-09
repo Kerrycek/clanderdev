@@ -32,18 +32,26 @@ export function IpAddressLookupInput(props: {
   const idLike = useMemo(() => parseLookupIdLike(needle), [needle]);
 
   const q = useQuery({
-    queryKey: ['ip_lookup', { needle, user: props.userId ?? null }],
+    queryKey: ['ip_lookup_pool', { user: props.userId ?? null }],
     queryFn: async () => {
-      if (!needle.trim()) return [] as IpAddress[];
-      if (parseLookupIdLike(needle) !== null) return [] as IpAddress[];
-      const res = await fetchIpAddresses({ q: needle.trim(), limit: 10, user: props.userId });
+      if (props.userId === undefined) return [] as IpAddress[];
+
+      // IpAddress.Index has no full-text `q`. Keep this typeahead useful with
+      // one cached, bounded, user-scoped request.
+      const res = await fetchIpAddresses({ limit: 250, user: props.userId });
       return res.data as IpAddress[];
     },
     enabled: open && needle.trim().length >= 2 && idLike === null && !props.disabled,
     staleTime: 15_000,
   });
 
-  const suggestions = q.data ?? [];
+  const suggestions = useMemo(() => {
+    if (needle.trim().length < 2 || idLike !== null) return [];
+    const normalized = needle.trim().toLowerCase();
+    return (q.data ?? [])
+      .filter((ip) => `${String(ip.addr ?? '')}/${String(ip.prefix ?? '')}`.toLowerCase().includes(normalized))
+      .slice(0, 10);
+  }, [idLike, needle, q.data]);
 
   const onSelect = (ip: IpAddress) => {
     const id = Number(ip.id);

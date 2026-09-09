@@ -4,6 +4,7 @@ import type { Location as InfraLocation } from '../../../../lib/api/infra';
 
 type SetTextParam = (key: string, value: string | undefined) => void;
 type SetIntParam = (key: string, value: number | undefined | null) => void;
+type SetResolvedUserFilter = (value: number | undefined | null) => void;
 type SetBoolParam = (key: string, value: boolean | undefined) => void;
 
 export interface IpAddressesFiltersProps {
@@ -19,11 +20,10 @@ export interface IpAddressesFiltersProps {
   setAdvancedOpen: (open: boolean) => void;
   activeFilterChips: React.ReactNode[];
   smartSuggestions: SmartFilterSuggestion[];
-  applySmartText: (raw: string) => void;
+  applySmartText: (raw: string) => Promise<void>;
   filtersActive: boolean;
   shareUrl: string;
   clearFilters: () => void;
-  qText: string;
   addr: string;
   prefixNum: number | undefined;
   vpsId: number | undefined;
@@ -38,5 +38,6 @@ export interface IpAddressesFiltersProps {
   order: 'asc' | 'desc' | 'interface';
   setTextParam: SetTextParam;
   setIntParam: SetIntParam;
+  setResolvedUserFilter: SetResolvedUserFilter;
   setBoolParamInUrl: SetBoolParam;
 }
